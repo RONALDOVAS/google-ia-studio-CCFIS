@@ -48,14 +48,13 @@ def efetuar_scraping_cgd():
     response = session.post(login_url, data=login_payload)
     response.raise_for_status()
     
-    # 3. Raspagem das páginas mantendo estrutura de tabelas
+    # 3. Raspagem das páginas
     res_matriz = session.get(url_matriz)
     res_filial = session.get(url_filial)
     
     soup_matriz = BeautifulSoup(res_matriz.text, 'html.parser')
     soup_filial = BeautifulSoup(res_filial.text, 'html.parser')
     
-    # Mantém a estrutura HTML/Tabelas para não perder a relação entre linhas e colunas
     dados_brutos = f"""
     --- DADOS ALUNOS MATRIZ ---
     {str(soup_matriz.find('table') or soup_matriz.get_text())}
@@ -92,15 +91,6 @@ def processar_com_gemini(conteudo):
     """
     
     response = gemini_client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=prompt
-    )
-    return response.text
-    Dados Brutos:
-    {conteudo}
-    """
-    
-   response = gemini_client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt
     )
