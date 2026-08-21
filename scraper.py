@@ -4,7 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from google import genai
 
-# Inicializa o cliente oficial da SDK moderna do Gemini
+# Inicializa o cliente oficial com a chave de API
 client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
 
 def efetuar_scraping_cgd():
@@ -18,9 +18,9 @@ def efetuar_scraping_cgd():
     url_filial = os.environ.get("CGD_FILIAL_URL")
     
     if not login_url or not url_matriz or not url_filial:
-        raise ValueError("Verifique se as variáveis CGD_LOGIN_URL, CGD_MATRIZ_URL e CGD_FILIAL_URL estão configuradas.")
+        raise ValueError("Verifique se as variáveis CGD_LOGIN_URL, CGD_MATRIZ_URL e CGD_FILIAL_URL estão configuradas nos Secrets.")
 
-    # 1. Obter página de login e token CSRF
+    # 1. Acessa a página de login para obter o token CSRF
     res_login_page = session.get(login_url)
     soup_login = BeautifulSoup(res_login_page.text, 'html.parser')
     
@@ -41,11 +41,11 @@ def efetuar_scraping_cgd():
     if csrf_token:
         login_payload['_token'] = csrf_token
 
-    # 2. Login
+    # 2. Faz o login
     response = session.post(login_url, data=login_payload)
     response.raise_for_status()
     
-    # 3. Scraping das páginas de alunos
+    # 3. Raspa as páginas de alunos
     res_matriz = session.get(url_matriz)
     res_filial = session.get(url_filial)
     
@@ -72,7 +72,6 @@ def processar_com_gemini(conteudo):
     {conteudo}
     """
     
-    # Execução na SDK moderna
     response = client.models.generate_content(
         model='gemini-2.5-flash',
         contents=prompt
