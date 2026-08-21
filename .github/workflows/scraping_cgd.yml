@@ -44,3 +44,11 @@ jobs:
         with:
           name: relatorio-alunos-cgd
           path: resultado_alunos.txt
+          
+        name: Commit e Push do arquivo JSON
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add dados_alunos.json
+          git commit -m "Auto-update: atualiza dados_alunos.json" || exit 0
+          git push
