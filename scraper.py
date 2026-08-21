@@ -1,3 +1,14 @@
+import json
+
+# Após processar com o Gemini/scraping:
+resultado_dados = {
+    "status": "sucesso",
+    "resultado": resultado
+}
+
+with open("dados_alunos.json", "w", encoding="utf-8") as f:
+    json.dump(resultado_dados, f, ensure_ascii=False, indent=4)
+
 def efetuar_scraping_cgd():
     session = requests.Session()
     
