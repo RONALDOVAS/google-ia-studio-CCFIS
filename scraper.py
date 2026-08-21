@@ -73,7 +73,16 @@ def processar_com_gemini(conteudo):
     1. Na MATRIZ: Considere APENAS alunos ATIVOS vinculados ao "Laboratório 1" ou "Laboratório 2".
     2. Na FILIAL: Considere os alunos ativos conforme a listagem de turmas da filial.
 
-    Retorne a análise em um formato JSON estruturado com contagens e níveis de criticidade (CRÍTICO, MODERADO, NORMAL).
+    IMPORTANTE: Responda ESTRITAMENTE em formato JSON (sem marcadores de código de texto adicional ou tags markdown), contendo a seguinte estrutura exata:
+    {{
+      "total_matriz": número_de_alunos,
+      "total_filial": número_de_alunos,
+      "alunos_criticos": número_de_alunos,
+      "alunos_moderados": número_de_alunos,
+      "detalhes": [
+         {{"nome": "Nome", "unidade": "Matriz/Filial", "laboratorio": "Lab 1", "status": "CRÍTICO/MODERADO/NORMAL"}}
+      ]
+    }}
 
     Dados Brutos:
     {conteudo}
@@ -87,18 +96,32 @@ def processar_com_gemini(conteudo):
 
 def salvar_no_supabase(resultado_ia):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Aviso: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configuradas. Ignorando envio ao banco.")
+        print("Aviso: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configuradas.")
         return
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    # Atualiza ou insere na tabela resumo_cgd
-    supabase.table("resumo_cgd").upsert({
+    # Tenta converter a resposta da IA em JSON
+    try:
+        texto_limpo = resultado_ia.replace("```json", "").replace("```", "").strip()
+        dados_json = json.loads(texto_limpo)
+    except Exception as e:
+        print(f"Erro ao converter JSON da IA: {e}")
+        dados_json = {}
+
+    payload = {
         "id": 1,
         "relatorio": resultado_ia,
+        "total_filial": dados_json.get("total_filial", 0),
+        "total_matriz": dados_json.get("total_matriz", 0),
+        "alunos_criticos": dados_json.get("alunos_criticos", 0),
+        "alunos_moderados": dados_json.get("alunos_moderados", 0),
+        "dados_completos": dados_json,
         "atualizado_em": "now()"
-    }).execute()
-    print("Dados sincronizados no Supabase com sucesso!")
+    }
+
+    supabase.table("resumo_cgd").upsert(payload).execute()
+    print("Dados estruturados gravados no Supabase com sucesso!")
 
 if __name__ == "__main__":
     print("Iniciando scraping do CGD...")
@@ -110,7 +133,6 @@ if __name__ == "__main__":
     print("Enviando dados para o Supabase...")
     salvar_no_supabase(resultado)
     
-    # Salva também a cópia local no JSON
     dados_finais = {
         "status": "sucesso",
         "relatorio": resultado
