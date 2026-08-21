@@ -17,8 +17,21 @@ def efetuar_scraping_cgd():
     cgd_user = os.environ.get("CGD_USER")
     cgd_pass = os.environ.get("CGD_PASS")
 
-    if not all([login_url, url_matriz, url_filial, cgd_user, cgd_pass]):
-        raise ValueError("Variáveis do CGD ausentes nos Secrets.")
+    # Exibe no log quais variáveis foram carregadas
+    print(f"DEBUG - LOGIN_URL presente: {bool(login_url)}")
+    print(f"DEBUG - MATRIZ_URL presente: {bool(url_matriz)}")
+    print(f"DEBUG - FILIAL_URL presente: {bool(url_filial)}")
+    print(f"DEBUG - USER presente: {bool(cgd_user)}")
+    print(f"DEBUG - PASS presente: {bool(cgd_pass)}")
+
+    if not login_url or not cgd_user or not cgd_pass:
+        raise ValueError("Variáveis essenciais do CGD (URL, USER ou PASS) não encontradas nos Secrets.")
+
+    # Fallbacks caso as URLs específicas de Matriz/Filial não estejam definidas separadamente
+    if not url_matriz:
+        url_matriz = login_url
+    if not url_filial:
+        url_filial = login_url
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -26,7 +39,7 @@ def efetuar_scraping_cgd():
 
         # 1. Login no portal
         page.goto(login_url)
-        page.wait_for_selector('input[name="usuario"]')
+        page.wait_for_selector('input[name="usuario"]', timeout=10000)
         page.fill('input[name="usuario"]', cgd_user)
         page.fill('input[name="senha"]', cgd_pass)
         page.click('button[type="submit"]')
@@ -51,7 +64,6 @@ def efetuar_scraping_cgd():
     --- DADOS ALUNOS FILIAL ---
     {texto_filial[:15000]}
     """
-
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
