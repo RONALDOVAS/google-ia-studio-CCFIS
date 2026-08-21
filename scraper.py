@@ -48,30 +48,33 @@ def efetuar_scraping_cgd():
     response = session.post(login_url, data=login_payload)
     response.raise_for_status()
     
-    # 3. Raspagem das páginas
+    # 3. Raspagem das páginas mantendo estrutura de tabelas
     res_matriz = session.get(url_matriz)
     res_filial = session.get(url_filial)
     
     soup_matriz = BeautifulSoup(res_matriz.text, 'html.parser')
     soup_filial = BeautifulSoup(res_filial.text, 'html.parser')
     
+    # Mantém a estrutura HTML/Tabelas para não perder a relação entre linhas e colunas
     dados_brutos = f"""
     --- DADOS ALUNOS MATRIZ ---
-    {soup_matriz.get_text(separator=' ', strip=True)}
+    {str(soup_matriz.find('table') or soup_matriz.get_text())}
     
     --- DADOS ALUNOS FILIAL ---
-    {soup_filial.get_text(separator=' ', strip=True)}
+    {str(soup_filial.find('table') or soup_filial.get_text())}
     """
     return dados_brutos
 
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise os dados extraídos das páginas do sistema CGD.
+    Analise a estrutura HTML/Tabela extraída das páginas do sistema CGD.
 
     REGRAS DE FILTRAGEM OBRIGATÓRIAS:
     1. Na MATRIZ: Considere APENAS alunos ATIVOS vinculados ao "Laboratório 1" ou "Laboratório 2".
     2. Na FILIAL: Considere os alunos ativos conforme a listagem de turmas da filial.
+    3. Alunos críticos: Mais de 90 dias em curso sem conclusão.
+    4. Alunos moderados: Entre 60 e 89 dias em curso.
 
     IMPORTANTE: Responda ESTRITAMENTE em formato JSON (sem marcadores de código de texto adicional ou tags markdown), contendo a seguinte estrutura exata:
     {{
@@ -80,7 +83,7 @@ def processar_com_gemini(conteudo):
       "alunos_criticos": número_de_alunos,
       "alunos_moderados": número_de_alunos,
       "detalhes": [
-         {{"nome": "Nome", "unidade": "Matriz/Filial", "laboratorio": "Lab 1", "status": "CRÍTICO/MODERADO/NORMAL"}}
+         {{"nome": "Nome do Aluno", "unidade": "Matriz/Filial", "laboratorio": "Lab 1/Lab 2", "status": "CRÍTICO/MODERADO/NORMAL", "dias": 90}}
       ]
     }}
 
@@ -89,7 +92,7 @@ def processar_com_gemini(conteudo):
     """
     
     response = gemini_client.models.generate_content(
-        model='gemini-3.6-flash',
+        model='gemini-2.5-flash',
         contents=prompt
     )
     return response.text
@@ -101,7 +104,6 @@ def salvar_no_supabase(resultado_ia):
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    # Tenta converter a resposta da IA em JSON
     try:
         texto_limpo = resultado_ia.replace("```json", "").replace("```", "").strip()
         dados_json = json.loads(texto_limpo)
@@ -116,7 +118,7 @@ def salvar_no_supabase(resultado_ia):
         "total_matriz": dados_json.get("total_matriz", 0),
         "alunos_criticos": dados_json.get("alunos_criticos", 0),
         "alunos_moderados": dados_json.get("alunos_moderados", 0),
-        "dados_completos": dados_json,
+        "dados_completos": dados_json.get("detalhes", []),
         "atualizado_em": "now()"
     }
 
