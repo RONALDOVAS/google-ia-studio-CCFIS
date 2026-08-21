@@ -14,46 +14,67 @@ def efetuar_scraping_cgd():
     login_url = os.environ.get("CGD_LOGIN_URL")
     url_matriz = os.environ.get("CGD_MATRIZ_URL")
     url_filial = os.environ.get("CGD_FILIAL_URL")
-    cgd_user = os.environ.get("CGD_USER")
-    cgd_pass = os.environ.get("CGD_PASS")
+    
+    # Busca credenciais específicas de cada unidade
+    user_matriz = os.environ.get("CGD_USER_MATRIZ")
+    pass_matriz = os.environ.get("CGD_PASS_MATRIZ")
+    
+    user_filial = os.environ.get("CGD_USER_FILIAL")
+    # Busca 'CGD_PASS_FILIAL' ou 'CDG_PASS_FILIAL' (trata o erro de digitação do secret)
+    pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
-    # Exibe no log quais variáveis foram carregadas
-    print(f"DEBUG - LOGIN_URL presente: {bool(login_url)}")
-    print(f"DEBUG - MATRIZ_URL presente: {bool(url_matriz)}")
-    print(f"DEBUG - FILIAL_URL presente: {bool(url_filial)}")
-    print(f"DEBUG - USER presente: {bool(cgd_user)}")
-    print(f"DEBUG - PASS presente: {bool(cgd_pass)}")
+    # Exibe no log de execução o status de carregamento das chaves
+    print(f"DEBUG - LOGIN_URL: {bool(login_url)}")
+    print(f"DEBUG - MATRIZ_URL: {bool(url_matriz)} | USER_MATRIZ: {bool(user_matriz)} | PASS_MATRIZ: {bool(pass_matriz)}")
+    print(f"DEBUG - FILIAL_URL: {bool(url_filial)} | USER_FILIAL: {bool(user_filial)} | PASS_FILIAL: {bool(pass_filial)}")
 
-    if not login_url or not cgd_user or not cgd_pass:
-        raise ValueError("Variáveis essenciais do CGD (URL, USER ou PASS) não encontradas nos Secrets.")
-
-    # Fallbacks caso as URLs específicas de Matriz/Filial não estejam definidas separadamente
-    if not url_matriz:
-        url_matriz = login_url
-    if not url_filial:
-        url_filial = login_url
+    if not login_url or not user_matriz or not pass_matriz:
+        raise ValueError("Credenciais da Matriz não encontradas nos Secrets.")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
 
-        # 1. Login no portal
-        page.goto(login_url)
-        page.wait_for_selector('input[name="usuario"]', timeout=10000)
-        page.fill('input[name="usuario"]', cgd_user)
-        page.fill('input[name="senha"]', cgd_pass)
-        page.click('button[type="submit"]')
-        page.wait_for_load_state("networkidle")
+        # 1. RASPAGEM DA MATRIZ
+        print("Acessando ambiente Matriz...")
+        context_matriz = browser.new_context()
+        page_matriz = context_matriz.new_page()
+        
+        page_matriz.goto(login_url)
+        page_matriz.wait_for_selector('input[name="usuario"]', timeout=10000)
+        page_matriz.fill('input[name="usuario"]', user_matriz)
+        page_matriz.fill('input[name="senha"]', pass_matriz)
+        page_matriz.click('button[type="submit"]')
+        page_matriz.wait_for_load_state("networkidle")
+        
+        if url_matriz:
+            page_matriz.goto(url_matriz)
+            page_matriz.wait_for_load_state("networkidle")
+        
+        texto_matriz = page_matriz.inner_text("body")
+        context_matriz.close()
 
-        # 2. Raspagem Matriz
-        page.goto(url_matriz)
-        page.wait_for_load_state("networkidle")
-        texto_matriz = page.inner_text("body")
-
-        # 3. Raspagem Filial
-        page.goto(url_filial)
-        page.wait_for_load_state("networkidle")
-        texto_filial = page.inner_text("body")
+        # 2. RASPAGEM DA FILIAL (Se as credenciais da filial existirem)
+        texto_filial = ""
+        if user_filial and pass_filial:
+            print("Acessando ambiente Filial...")
+            context_filial = browser.new_context()
+            page_filial = context_filial.new_page()
+            
+            page_filial.goto(login_url)
+            page_filial.wait_for_selector('input[name="usuario"]', timeout=10000)
+            page_filial.fill('input[name="usuario"]', user_filial)
+            page_filial.fill('input[name="senha"]', pass_filial)
+            page_filial.click('button[type="submit"]')
+            page_filial.wait_for_load_state("networkidle")
+            
+            if url_filial:
+                page_filial.goto(url_filial)
+                page_filial.wait_for_load_state("networkidle")
+            
+            texto_filial = page_filial.inner_text("body")
+            context_filial.close()
+        else:
+            print("Aviso: Credenciais da Filial não configuradas. Pulando etapa Filial.")
 
         browser.close()
 
@@ -64,6 +85,7 @@ def efetuar_scraping_cgd():
     --- DADOS ALUNOS FILIAL ---
     {texto_filial[:15000]}
     """
+
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
@@ -91,7 +113,7 @@ def processar_com_gemini(conteudo):
     """
     
     response = gemini_client.models.generate_content(
-        model='gemini-3.6-flash',
+        model='gemini-2.5-flash',
         contents=prompt
     )
     return response.text
