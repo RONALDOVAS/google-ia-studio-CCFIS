@@ -2,9 +2,11 @@ name: Execução Automática Scraping CGD
 
 on:
   schedule:
-    # Roda automaticamente todos os dias às 08:00 UTC (05:00 Horário de Brasília)
     - cron: '0 8 * * *'
-  workflow_dispatch: # Permite executar manualmente no painel do GitHub
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   executar-scraping:
@@ -34,18 +36,7 @@ jobs:
           CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
         run: python scraper.py
 
-      - - name: Salvar Relatório como Artefato
-        uses: actions/upload-artifact@v4
-        with:
-          name: relatorio-alunos-cgd
-          path: |
-            *.json
-            resultado_alunos.txt
-        with:
-          name: relatorio-alunos-cgd
-          path: resultado_alunos.txt
-          
-        name: Commit e Push do arquivo JSON
+      - name: Commit e Push do arquivo JSON
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
