@@ -25,10 +25,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Instalar dependências
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
 
       - name: Instalar Navegador do Playwright
         run: npx playwright install chromium --with-deps
@@ -37,11 +33,13 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CGD_USER: ${{ secrets.CGD_USER }}
-          CGD_PASS: ${{ secrets.CGD_PASS }}
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
           CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
           CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CDG_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scraper.py
@@ -50,6 +48,9 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add dados_alunos.json
+          git commit -m "Auto-update: atualiza dados_alunos.json" || exit 0
+          git push
           git add dados_alunos.json
           git commit -m "Auto-update: atualiza dados_alunos.json" || exit 0
           git push
