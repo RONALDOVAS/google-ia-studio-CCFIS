@@ -1,17 +1,14 @@
-import os
-import requests
-from bs4 import BeautifulSoup
-import google.generativeai as genai
-
-# Configura a chave de API
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-
 def efetuar_scraping_cgd():
     session = requests.Session()
     
-    login_url = os.environ.get("CGD_LOGIN_URL", "https://seucgd.com.br/login")
-    url_matriz = os.environ.get("CGD_MATRIZ_URL", "https://seucgd.com.br/matriz/alunos")
-    url_filial = os.environ.get("CGD_FILIAL_URL", "https://seucgd.com.br/filial/alunos")
+    # Adiciona User-Agent para evitar bloqueios e define URLs padrão caso o secret venha vazio
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    
+    login_url = os.environ.get("CGD_LOGIN_URL") or "https://seucgd.com.br/login"
+    url_matriz = os.environ.get("CGD_MATRIZ_URL") or "https://seucgd.com.br/matriz/alunos"
+    url_filial = os.environ.get("CGD_FILIAL_URL") or "https://seucgd.com.br/filial/alunos"
     
     login_payload = {
         'usuario': os.environ.get("CGD_USER"),
@@ -35,37 +32,3 @@ def efetuar_scraping_cgd():
     {soup_filial.get_text(separator=' ', strip=True)}
     """
     return dados_brutos
-
-def processar_com_gemini(conteudo):
-    prompt = f"""
-    Você é um assistente de gestão escolar do CGD.
-    Analise os dados extraídos das páginas da Matriz e da Filial abaixo.
-    
-    Tarefas:
-    1. Identifique todos os alunos cadastrados na Matriz e na Filial.
-    2. Faça a correspondência/vinculação entre alunos que possuem cadastro na Filial e na Matriz (por CPF, ID ou Nome).
-    3. Retorne uma lista estruturada contendo:
-       - Nome do Aluno
-       - Matrícula/ID
-       - Unidade de Origem
-       - Status de Vinculação entre Matriz e Filial
-    
-    Dados Brutos:
-    {conteudo}
-    """
-    
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    return response.text
-
-if __name__ == "__main__":
-    print("Iniciando scraping do CGD...")
-    dados = efetuar_scraping_cgd()
-    print("Processando dados com o Gemini...")
-    resultado = processar_com_gemini(dados)
-    
-    print("\n--- RESULTADO PROCESSADO ---")
-    print(resultado)
-    
-    with open("resultado_alunos.txt", "w", encoding="utf-8") as f:
-        f.write(resultado)
