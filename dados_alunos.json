@@ -1,4 +1,4 @@
 {
     "status": "sucesso",
-    "relatorio": "```json\n{\n  \"assistente\": \"CFIS/CGD - Gestão Escolar\",\n  \"status_analise\": \"DADOS_INVALIDOS_OU_AUSENTES\",\n  \"matriz\": {\n    \"laboratorio_1_ativos\": 0,\n    \"laboratorio_2_ativos\": 0,\n    \"total_alunos_ativos\": 0,\n    \"criticidade\": \"CRÍTICO\"\n  },\n  \"filial\": {\n    \"total_alunos_ativos\": 0,\n    \"criticidade\": \"CRÍTICO\"\n  },\n  \"diagnostico_geral\": {\n    \"nivel_criticidade_global\": \"CRÍTICO\",\n    \"observacao\": \"Os dados brutos fornecidos não contêm a listagem de alunos, mas sim o texto da tela de login/autenticação do sistema CGD Gestão. É necessário realizar o login no sistema e extrair o conteúdo das tabelas de alunos da Matriz e da Filial para refazer a análise.\"\n  }\n}\n```"
+    "relatorio": "{\n  \"total_matriz\": 0,\n  \"total_filial\": 0,\n  \"alunos_criticos\": 0,\n  \"alunos_moderados\": 0,\n  \"detalhes\": []\n}"
 }
