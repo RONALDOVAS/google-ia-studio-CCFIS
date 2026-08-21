@@ -1,0 +1,4 @@
+{
+    "status": "sucesso",
+    "relatorio": "Olá! Sou o assistente de gestão escolar do CGD.\n\nAnalisando os dados brutos fornecidos para a **Matriz** e a **Filial**, identifiquei um problema:\n\nOs dados extraídos correspondem apenas à **tela de login/acesso ao sistema** (\"*CGD Gestão - Acessar... Informe o seu e-mail e senha abaixo...*\"). Portanto, **não há informações de alunos, turmas ou vinculações** no texto enviado.\n\n---\n\n### **Status da Análise**\n* **Alunos Encontrados (Matriz):** 0\n* **Alunos Encontrados (Filial):** 0\n* **Vinculações:** Impossível mapear no momento.\n\n---\n\n### **Como prosseguir?**\nPor favor, faça o login no sistema **CGD Gestão**, navegue até as páginas de **Listagem de Alunos / Relatórios de Matrícula** da Matriz e da Filial, e extraia/copie os dados novamente. \n\nAssim que você enviar os dados corretos dos alunos, farei a estruturação completa da lista e das vinculações para você!"
+}
