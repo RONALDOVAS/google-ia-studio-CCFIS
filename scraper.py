@@ -29,7 +29,7 @@ def efetuar_scraping_cgd():
     if not login_url or not user_matriz or not pass_matriz:
         raise ValueError("Credenciais da Matriz não encontradas nos Secrets.")
 
-    # Argumentos do Chromium para simular navegação comum e desativar marcações de robô
+    # Argumentos do Chromium para bypass de detecção
     browser_args = [
         "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
@@ -38,13 +38,11 @@ def efetuar_scraping_cgd():
         "--window-size=1920,1080"
     ]
 
-    # User-Agent real do Chrome desktop
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=browser_args)
 
-        # Configura o contexto simulando uma sessão real
         context_options = {
             "user_agent": user_agent,
             "viewport": {"width": 1920, "height": 1080},
@@ -56,26 +54,23 @@ def efetuar_scraping_cgd():
         print("Acessando ambiente Matriz...")
         context_matriz = browser.new_context(**context_options)
         page_matriz = context_matriz.new_page()
-        
-        # Oculta a flag 'navigator.webdriver = true'
         page_matriz.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         try:
             page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-            page_matriz.wait_for_timeout(3000) # Aguarda renderização de proteções dinâmicas
             
-            # Aguarda a presença de inputs na tela
-            page_matriz.wait_for_selector('input', timeout=20000)
+            # Seletores específicos e visíveis para e-mail/usuário e senha
+            selector_user = 'input[name="email"], input[name="usuario"], input[name="username"], input[type="email"]'
+            selector_pass = 'input[name="senha"], input[name="password"], input[type="password"]'
+
+            # Aguarda a visibilidade do campo de usuário
+            page_matriz.wait_for_selector(selector_user, state="visible", timeout=30000)
             
-            # Preenche o usuário
-            inputs_texto = page_matriz.locator('input[type="text"], input[type="email"], input:not([type="hidden"]):not([type="submit"]):not([type="password"])')
-            inputs_texto.first.fill(user_matriz)
+            page_matriz.locator(selector_user).first.fill(user_matriz)
+            page_matriz.locator(selector_pass).first.fill(pass_matriz)
             
-            # Preenche a senha
-            page_matriz.locator('input[type="password"]').first.fill(pass_matriz)
-            
-            # Submete o formulário
-            page_matriz.click('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+            # Clique no botão de submissão do formulário
+            page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
             page_matriz.wait_for_load_state("networkidle")
 
         except Exception as e:
@@ -99,18 +94,17 @@ def efetuar_scraping_cgd():
             print("Acessando ambiente Filial...")
             context_filial = browser.new_context(**context_options)
             page_filial = context_filial.new_page()
-            
             page_filial.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
             try:
                 page_filial.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-                page_filial.wait_for_timeout(3000)
-                page_filial.wait_for_selector('input', timeout=20000)
                 
-                inputs_texto_f = page_filial.locator('input[type="text"], input[type="email"], input:not([type="hidden"]):not([type="submit"]):not([type="password"])')
-                inputs_texto_f.first.fill(user_filial)
-                page_filial.locator('input[type="password"]').first.fill(pass_filial)
-                page_filial.click('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+                page_filial.wait_for_selector(selector_user, state="visible", timeout=30000)
+                
+                page_filial.locator(selector_user).first.fill(user_filial)
+                page_filial.locator(selector_pass).first.fill(pass_filial)
+                
+                page_filial.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
                 page_filial.wait_for_load_state("networkidle")
                 
                 if url_filial and url_filial != login_url:
