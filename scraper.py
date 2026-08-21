@@ -3,9 +3,13 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from google import genai
+from supabase import create_client
 
-# Inicializa o cliente oficial com a chave de API
-client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
+# Configurações de Clientes API
+gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def efetuar_scraping_cgd():
     session = requests.Session()
@@ -18,9 +22,9 @@ def efetuar_scraping_cgd():
     url_filial = os.environ.get("CGD_FILIAL_URL")
     
     if not login_url or not url_matriz or not url_filial:
-        raise ValueError("Verifique se as variáveis CGD_LOGIN_URL, CGD_MATRIZ_URL e CGD_FILIAL_URL estão configuradas nos Secrets.")
+        raise ValueError("Variáveis de URL do CGD não encontradas nos Secrets.")
 
-    # 1. Acessa a página de login para obter o token CSRF
+    # 1. Obtém a página de login e token CSRF
     res_login_page = session.get(login_url)
     soup_login = BeautifulSoup(res_login_page.text, 'html.parser')
     
@@ -37,15 +41,14 @@ def efetuar_scraping_cgd():
         'usuario': os.environ.get("CGD_USER"),
         'senha': os.environ.get("CGD_PASS")
     }
-    
     if csrf_token:
         login_payload['_token'] = csrf_token
 
-    # 2. Faz o login
+    # 2. Executa o Login
     response = session.post(login_url, data=login_payload)
     response.raise_for_status()
     
-    # 3. Raspa as páginas de alunos
+    # 3. Raspagem das páginas
     res_matriz = session.get(url_matriz)
     res_filial = session.get(url_filial)
     
@@ -63,34 +66,56 @@ def efetuar_scraping_cgd():
 
 def processar_com_gemini(conteudo):
     prompt = f"""
-    Você é um assistente de gestão escolar do CGD.
-    Analise os dados extraídos das páginas da Matriz e da Filial abaixo.
-    
-    Retorne a análise em formato de texto estruturado contendo a lista de alunos e vinculações.
-    
+    Você é um assistente de gestão escolar do CFIS/CGD.
+    Analise os dados extraídos das páginas do sistema CGD.
+
+    REGRAS DE FILTRAGEM OBRIGATÓRIAS:
+    1. Na MATRIZ: Considere APENAS alunos ATIVOS vinculados ao "Laboratório 1" ou "Laboratório 2".
+    2. Na FILIAL: Considere os alunos ativos conforme a listagem de turmas da filial.
+
+    Retorne a análise em um formato JSON estruturado com contagens e níveis de criticidade (CRÍTICO, MODERADO, NORMAL).
+
     Dados Brutos:
     {conteudo}
     """
     
-    response = client.models.generate_content(
+    response = gemini_client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt
     )
     return response.text
 
+def salvar_no_supabase(resultado_ia):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Aviso: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configuradas. Ignorando envio ao banco.")
+        return
+
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    # Atualiza ou insere na tabela resumo_cgd
+    supabase.table("resumo_cgd").upsert({
+        "id": 1,
+        "relatorio": resultado_ia,
+        "atualizado_em": "now()"
+    }).execute()
+    print("Dados sincronizados no Supabase com sucesso!")
+
 if __name__ == "__main__":
     print("Iniciando scraping do CGD...")
     dados = efetuar_scraping_cgd()
     
-    print("Processando dados com o Gemini...")
+    print("Processando dados no Gemini...")
     resultado = processar_com_gemini(dados)
     
+    print("Enviando dados para o Supabase...")
+    salvar_no_supabase(resultado)
+    
+    # Salva também a cópia local no JSON
     dados_finais = {
         "status": "sucesso",
         "relatorio": resultado
     }
-    
     with open("dados_alunos.json", "w", encoding="utf-8") as f:
         json.dump(dados_finais, f, ensure_ascii=False, indent=4)
         
-    print("Arquivo dados_alunos.json gerado com sucesso!")
+    print("Processo concluído!")
