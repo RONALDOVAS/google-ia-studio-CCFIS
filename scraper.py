@@ -1,10 +1,10 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-from google import genai
+import google.generativeai as genai
 
-# Inicializa o cliente Gemini usando a chave vinda dos Secrets
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+# Configura a chave de API
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def efetuar_scraping_cgd():
     session = requests.Session()
@@ -18,11 +18,9 @@ def efetuar_scraping_cgd():
         'senha': os.environ.get("CGD_PASS")
     }
     
-    # Realiza o login na plataforma
     response = session.post(login_url, data=login_payload)
     response.raise_for_status()
     
-    # Busca os dados da Matriz e Filial
     res_matriz = session.get(url_matriz)
     res_filial = session.get(url_filial)
     
@@ -56,10 +54,8 @@ def processar_com_gemini(conteudo):
     {conteudo}
     """
     
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt
-    )
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content(prompt)
     return response.text
 
 if __name__ == "__main__":
