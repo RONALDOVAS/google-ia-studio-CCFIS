@@ -20,10 +20,8 @@ def efetuar_scraping_cgd():
     pass_matriz = os.environ.get("CGD_PASS_MATRIZ")
     
     user_filial = os.environ.get("CGD_USER_FILIAL")
-    # Busca 'CGD_PASS_FILIAL' ou 'CDG_PASS_FILIAL' (trata o erro de digitação do secret)
     pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
-    # Exibe no log de execução o status de carregamento das chaves
     print(f"DEBUG - LOGIN_URL: {bool(login_url)}")
     print(f"DEBUG - MATRIZ_URL: {bool(url_matriz)} | USER_MATRIZ: {bool(user_matriz)} | PASS_MATRIZ: {bool(pass_matriz)}")
     print(f"DEBUG - FILIAL_URL: {bool(url_filial)} | USER_FILIAL: {bool(user_filial)} | PASS_FILIAL: {bool(pass_filial)}")
@@ -31,25 +29,49 @@ def efetuar_scraping_cgd():
     if not login_url or not user_matriz or not pass_matriz:
         raise ValueError("Credenciais da Matriz não encontradas nos Secrets.")
 
+    # Argumentos do Chromium para simular navegação comum e desativar marcações de robô
+    browser_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-infobars",
+        "--window-size=1920,1080"
+    ]
+
+    # User-Agent real do Chrome desktop
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=browser_args)
+
+        # Configura o contexto simulando uma sessão real
+        context_options = {
+            "user_agent": user_agent,
+            "viewport": {"width": 1920, "height": 1080},
+            "locale": "pt-BR",
+            "timezone_id": "America/Belem"
+        }
 
         # 1. RASPAGEM DA MATRIZ
         print("Acessando ambiente Matriz...")
-        context_matriz = browser.new_context()
+        context_matriz = browser.new_context(**context_options)
         page_matriz = context_matriz.new_page()
         
+        # Oculta a flag 'navigator.webdriver = true'
+        page_matriz.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
         try:
-            page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+            page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=45000)
+            page_matriz.wait_for_timeout(3000) # Aguarda renderização de proteções dinâmicas
             
-            # Aguarda a presença de qualquer input na tela
-            page_matriz.wait_for_selector('input', timeout=15000)
+            # Aguarda a presença de inputs na tela
+            page_matriz.wait_for_selector('input', timeout=20000)
             
-            # Localiza e preenche o primeiro campo de texto/email disponível para o usuário
+            # Preenche o usuário
             inputs_texto = page_matriz.locator('input[type="text"], input[type="email"], input:not([type="hidden"]):not([type="submit"]):not([type="password"])')
             inputs_texto.first.fill(user_matriz)
             
-            # Localiza e preenche o campo de senha
+            # Preenche a senha
             page_matriz.locator('input[type="password"]').first.fill(pass_matriz)
             
             # Submete o formulário
@@ -71,16 +93,19 @@ def efetuar_scraping_cgd():
         texto_matriz = page_matriz.inner_text("body")
         context_matriz.close()
 
-        # 2. RASPAGEM DA FILIAL (Se as credenciais da filial existirem)
+        # 2. RASPAGEM DA FILIAL
         texto_filial = ""
         if user_filial and pass_filial:
             print("Acessando ambiente Filial...")
-            context_filial = browser.new_context()
+            context_filial = browser.new_context(**context_options)
             page_filial = context_filial.new_page()
             
+            page_filial.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
             try:
-                page_filial.goto(login_url, wait_until="domcontentloaded", timeout=30000)
-                page_filial.wait_for_selector('input', timeout=15000)
+                page_filial.goto(login_url, wait_until="domcontentloaded", timeout=45000)
+                page_filial.wait_for_timeout(3000)
+                page_filial.wait_for_selector('input', timeout=20000)
                 
                 inputs_texto_f = page_filial.locator('input[type="text"], input[type="email"], input:not([type="hidden"]):not([type="submit"]):not([type="password"])')
                 inputs_texto_f.first.fill(user_filial)
