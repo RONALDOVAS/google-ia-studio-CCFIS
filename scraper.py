@@ -34,23 +34,37 @@ def efetuar_scraping_cgd():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
 
-        # Seletores flexíveis para aceitar diferentes estruturas de formulário de login
-        selector_user = 'input[name="usuario"], input[name="username"], input[name="login"], input[type="email"], input[type="text"]'
-        selector_pass = 'input[type="password"]'
-
         # 1. RASPAGEM DA MATRIZ
         print("Acessando ambiente Matriz...")
         context_matriz = browser.new_context()
         page_matriz = context_matriz.new_page()
         
-        page_matriz.goto(login_url, wait_until="networkidle", timeout=30000)
-        
-        page_matriz.wait_for_selector(selector_user, timeout=30000)
-        page_matriz.locator(selector_user).first.fill(user_matriz)
-        page_matriz.locator(selector_pass).first.fill(pass_matriz)
-        page_matriz.click('button[type="submit"], input[type="submit"]')
-        page_matriz.wait_for_load_state("networkidle")
-        
+        try:
+            page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+            
+            # Aguarda a presença de qualquer input na tela
+            page_matriz.wait_for_selector('input', timeout=15000)
+            
+            # Localiza e preenche o primeiro campo de texto/email disponível para o usuário
+            inputs_texto = page_matriz.locator('input[type="text"], input[type="email"], input:not([type="hidden"]):not([type="submit"]):not([type="password"])')
+            inputs_texto.first.fill(user_matriz)
+            
+            # Localiza e preenche o campo de senha
+            page_matriz.locator('input[type="password"]').first.fill(pass_matriz)
+            
+            # Submete o formulário
+            page_matriz.click('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+            page_matriz.wait_for_load_state("networkidle")
+
+        except Exception as e:
+            print(f"\n--- DIAGNÓSTICO DE ERRO NO LOGIN ---")
+            print(f"URL onde a página parou: {page_matriz.url}")
+            print(f"Título da página: {page_matriz.title()}")
+            print("Trecho do código HTML da página no momento do erro:")
+            print(page_matriz.content()[:3000])
+            print("-----------------------------------\n")
+            raise e
+
         if url_matriz and url_matriz != login_url:
             page_matriz.goto(url_matriz, wait_until="networkidle")
         
@@ -64,18 +78,29 @@ def efetuar_scraping_cgd():
             context_filial = browser.new_context()
             page_filial = context_filial.new_page()
             
-            page_filial.goto(login_url, wait_until="networkidle", timeout=30000)
-            page_filial.wait_for_selector(selector_user, timeout=30000)
-            page_filial.locator(selector_user).first.fill(user_filial)
-            page_filial.locator(selector_pass).first.fill(pass_filial)
-            page_filial.click('button[type="submit"], input[type="submit"]')
-            page_filial.wait_for_load_state("networkidle")
-            
-            if url_filial and url_filial != login_url:
-                page_filial.goto(url_filial, wait_until="networkidle")
-            
-            texto_filial = page_filial.inner_text("body")
-            context_filial.close()
+            try:
+                page_filial.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+                page_filial.wait_for_selector('input', timeout=15000)
+                
+                inputs_texto_f = page_filial.locator('input[type="text"], input[type="email"], input:not([type="hidden"]):not([type="submit"]):not([type="password"])')
+                inputs_texto_f.first.fill(user_filial)
+                page_filial.locator('input[type="password"]').first.fill(pass_filial)
+                page_filial.click('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+                page_filial.wait_for_load_state("networkidle")
+                
+                if url_filial and url_filial != login_url:
+                    page_filial.goto(url_filial, wait_until="networkidle")
+                
+                texto_filial = page_filial.inner_text("body")
+                context_filial.close()
+            except Exception as e:
+                print(f"\n--- DIAGNÓSTICO DE ERRO NO LOGIN (FILIAL) ---")
+                print(f"URL onde a página parou: {page_filial.url}")
+                print(f"Título da página: {page_filial.title()}")
+                print("Trecho do código HTML da página no momento do erro:")
+                print(page_filial.content()[:3000])
+                print("-----------------------------------\n")
+                raise e
         else:
             print("Aviso: Credenciais da Filial não configuradas. Pulando etapa Filial.")
 
