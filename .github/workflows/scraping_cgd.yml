@@ -29,13 +29,14 @@ jobs:
       - name: Executar Script de Scraping
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CGD_USER: ${{ secrets.CGD_USER }}
           CGD_PASS: ${{ secrets.CGD_PASS }}
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
           CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
           CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
         run: python scraper.py
-
+        
       - name: Commit e Push do arquivo JSON
         run: |
           git config --global user.name "github-actions[bot]"
