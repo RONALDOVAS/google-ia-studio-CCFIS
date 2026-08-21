@@ -155,9 +155,9 @@ def processar_com_gemini(conteudo):
     {conteudo}
     """
     
-    # Atualizado para gemini-2.5-flash
+    # Atualizado para o modelo gemini-3.6-flash
     response = gemini_client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.6-flash',
         contents=prompt
     )
     return response.text
