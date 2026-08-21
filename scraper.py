@@ -125,19 +125,13 @@ def salvar_no_supabase(resultado_ia):
 
 if __name__ == "__main__":
     print("Iniciando scraping do CGD...")
-    dados = efetuar_scraping_cgd()
-    
-    print("Processando dados no Gemini...")
-    resultado = processar_com_gemini(dados)
-    
-    print("Enviando dados para o Supabase...")
-    salvar_no_supabase(resultado)
-    
-    dados_finais = {
-        "status": "sucesso",
-        "relatorio": resultado
-    }
-    with open("dados_alunos.json", "w", encoding="utf-8") as f:
-        json.dump(dados_finais, f, ensure_ascii=False, indent=4)
-        
-    print("Processo concluído!")
+    try:
+        dados = efetuar_scraping_cgd()
+        print("Processando dados no Gemini...")
+        resultado = processar_com_gemini(dados)
+        print("Enviando dados para o Supabase...")
+        salvar_no_supabase(resultado)
+        print("Processo concluído com sucesso!")
+    except Exception as e:
+        print(f"Erro crítico durante a execução: {e}")
+        raise e
