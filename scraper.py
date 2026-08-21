@@ -1,18 +1,14 @@
+import os
 import json
+import requests
+from bs4 import BeautifulSoup
+import google.generativeai as genai
 
-# Após processar com o Gemini/scraping:
-resultado_dados = {
-    "status": "sucesso",
-    "resultado": resultado
-}
-
-with open("dados_alunos.json", "w", encoding="utf-8") as f:
-    json.dump(resultado_dados, f, ensure_ascii=False, indent=4)
+# Configuração da API do Gemini
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def efetuar_scraping_cgd():
     session = requests.Session()
-    
-    # Adiciona User-Agent para evitar bloqueios e define URLs padrão caso o secret venha vazio
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     })
@@ -43,3 +39,36 @@ def efetuar_scraping_cgd():
     {soup_filial.get_text(separator=' ', strip=True)}
     """
     return dados_brutos
+
+def processar_com_gemini(conteudo):
+    prompt = f"""
+    Você é um assistente de gestão escolar do CGD.
+    Analise os dados extraídos das páginas da Matriz e da Filial abaixo.
+    
+    Retorne a análise em formato de texto estruturado contendo a lista de alunos e vinculações.
+    
+    Dados Brutos:
+    {conteudo}
+    """
+    
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content(prompt)
+    return response.text
+
+if __name__ == "__main__":
+    print("Iniciando scraping do CGD...")
+    dados = efetuar_scraping_cgd()
+    
+    print("Processando dados com o Gemini...")
+    resultado = processar_com_gemini(dados)
+    
+    # Estrutura tratada para salvar em JSON
+    dados_finais = {
+        "status": "sucesso",
+        "relatorio": resultado
+    }
+    
+    with open("dados_alunos.json", "w", encoding="utf-8") as f:
+        json.dump(dados_finais, f, ensure_ascii=False, indent=4)
+        
+    print("Arquivo dados_alunos.json gerado com sucesso!")
