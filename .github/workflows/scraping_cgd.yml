@@ -35,6 +35,8 @@ jobs:
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
           CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
           CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scraper.py
         
       - name: Commit e Push do arquivo JSON
