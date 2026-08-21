@@ -2,10 +2,10 @@ import os
 import json
 import requests
 from bs4 import BeautifulSoup
-import google.generativeai as genai
+from google import genai
 
-# Configuração da API do Gemini
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# Inicializa o cliente oficial da SDK moderna do Gemini
+client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
 
 def efetuar_scraping_cgd():
     session = requests.Session()
@@ -13,15 +13,17 @@ def efetuar_scraping_cgd():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     })
     
-    login_url = os.environ.get("CGD_LOGIN_URL") or "https://seucgd.com.br/login"
-    url_matriz = os.environ.get("CGD_MATRIZ_URL") or "https://seucgd.com.br/matriz/alunos"
-    url_filial = os.environ.get("CGD_FILIAL_URL") or "https://seucgd.com.br/filial/alunos"
+    login_url = os.environ.get("CGD_LOGIN_URL")
+    url_matriz = os.environ.get("CGD_MATRIZ_URL")
+    url_filial = os.environ.get("CGD_FILIAL_URL")
     
-    # 1. Acessa a página de login para obter cookies e token CSRF
+    if not login_url or not url_matriz or not url_filial:
+        raise ValueError("Verifique se as variáveis CGD_LOGIN_URL, CGD_MATRIZ_URL e CGD_FILIAL_URL estão configuradas.")
+
+    # 1. Obter página de login e token CSRF
     res_login_page = session.get(login_url)
     soup_login = BeautifulSoup(res_login_page.text, 'html.parser')
     
-    # Busca o token no formulário (_token) ou nas meta tags
     csrf_token = None
     token_input = soup_login.find('input', {'name': '_token'})
     if token_input:
@@ -39,11 +41,11 @@ def efetuar_scraping_cgd():
     if csrf_token:
         login_payload['_token'] = csrf_token
 
-    # 2. Faz o POST do login
+    # 2. Login
     response = session.post(login_url, data=login_payload)
     response.raise_for_status()
     
-    # 3. Raspa as páginas de alunos
+    # 3. Scraping das páginas de alunos
     res_matriz = session.get(url_matriz)
     res_filial = session.get(url_filial)
     
@@ -70,8 +72,11 @@ def processar_com_gemini(conteudo):
     {conteudo}
     """
     
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
+    # Execução na SDK moderna
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
     return response.text
 
 if __name__ == "__main__":
