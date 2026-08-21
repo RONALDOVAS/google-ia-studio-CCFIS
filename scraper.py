@@ -91,6 +91,15 @@ def processar_com_gemini(conteudo):
     {conteudo}
     """
     
+    response = gemini_client.models.generate_content(
+        model='gemini-3.6-flash',
+        contents=prompt
+    )
+    return response.text
+    Dados Brutos:
+    {conteudo}
+    """
+    
    response = gemini_client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt
