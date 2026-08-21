@@ -86,14 +86,13 @@ def processar_com_gemini(conteudo):
       ]
     }}
 
-    Dados Brutos:
-    {conteudo}
-    """
+    dados_brutos = f"""
+    --- DADOS ALUNOS MATRIZ ---
+    {soup_matriz.get_text(separator=' ', strip=True)[:15000]}
     
-    response = gemini_client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=prompt
-    )
+    --- DADOS ALUNOS FILIAL ---
+    {soup_filial.get_text(separator=' ', strip=True)[:15000]}
+    """
     return response.text
 
 def salvar_no_supabase(resultado_ia):
