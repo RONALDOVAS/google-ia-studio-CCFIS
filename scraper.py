@@ -34,21 +34,25 @@ def efetuar_scraping_cgd():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
 
+        # Seletores flexíveis para aceitar diferentes estruturas de formulário de login
+        selector_user = 'input[name="usuario"], input[name="username"], input[name="login"], input[type="email"], input[type="text"]'
+        selector_pass = 'input[type="password"]'
+
         # 1. RASPAGEM DA MATRIZ
         print("Acessando ambiente Matriz...")
         context_matriz = browser.new_context()
         page_matriz = context_matriz.new_page()
         
-        page_matriz.goto(login_url)
-        page_matriz.wait_for_selector('input[name="usuario"]', timeout=10000)
-        page_matriz.fill('input[name="usuario"]', user_matriz)
-        page_matriz.fill('input[name="senha"]', pass_matriz)
-        page_matriz.click('button[type="submit"]')
+        page_matriz.goto(login_url, wait_until="networkidle", timeout=30000)
+        
+        page_matriz.wait_for_selector(selector_user, timeout=30000)
+        page_matriz.locator(selector_user).first.fill(user_matriz)
+        page_matriz.locator(selector_pass).first.fill(pass_matriz)
+        page_matriz.click('button[type="submit"], input[type="submit"]')
         page_matriz.wait_for_load_state("networkidle")
         
-        if url_matriz:
-            page_matriz.goto(url_matriz)
-            page_matriz.wait_for_load_state("networkidle")
+        if url_matriz and url_matriz != login_url:
+            page_matriz.goto(url_matriz, wait_until="networkidle")
         
         texto_matriz = page_matriz.inner_text("body")
         context_matriz.close()
@@ -60,16 +64,15 @@ def efetuar_scraping_cgd():
             context_filial = browser.new_context()
             page_filial = context_filial.new_page()
             
-            page_filial.goto(login_url)
-            page_filial.wait_for_selector('input[name="usuario"]', timeout=10000)
-            page_filial.fill('input[name="usuario"]', user_filial)
-            page_filial.fill('input[name="senha"]', pass_filial)
-            page_filial.click('button[type="submit"]')
+            page_filial.goto(login_url, wait_until="networkidle", timeout=30000)
+            page_filial.wait_for_selector(selector_user, timeout=30000)
+            page_filial.locator(selector_user).first.fill(user_filial)
+            page_filial.locator(selector_pass).first.fill(pass_filial)
+            page_filial.click('button[type="submit"], input[type="submit"]')
             page_filial.wait_for_load_state("networkidle")
             
-            if url_filial:
-                page_filial.goto(url_filial)
-                page_filial.wait_for_load_state("networkidle")
+            if url_filial and url_filial != login_url:
+                page_filial.goto(url_filial, wait_until="networkidle")
             
             texto_filial = page_filial.inner_text("body")
             context_filial.close()
