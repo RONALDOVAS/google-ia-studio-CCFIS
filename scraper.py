@@ -1,7 +1,6 @@
 import os
 import json
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 from google import genai
 from supabase import create_client
 
@@ -12,62 +11,51 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def efetuar_scraping_cgd():
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    })
-    
     login_url = os.environ.get("CGD_LOGIN_URL")
     url_matriz = os.environ.get("CGD_MATRIZ_URL")
     url_filial = os.environ.get("CGD_FILIAL_URL")
-    
-    if not login_url or not url_matriz or not url_filial:
-        raise ValueError("Variáveis de URL do CGD não encontradas nos Secrets.")
+    cgd_user = os.environ.get("CGD_USER")
+    cgd_pass = os.environ.get("CGD_PASS")
 
-    # 1. Obtém a página de login e token CSRF
-    res_login_page = session.get(login_url)
-    soup_login = BeautifulSoup(res_login_page.text, 'html.parser')
-    
-    csrf_token = None
-    token_input = soup_login.find('input', {'name': '_token'})
-    if token_input:
-        csrf_token = token_input.get('value')
-    else:
-        meta_token = soup_login.find('meta', {'name': 'csrf-token'})
-        if meta_token:
-            csrf_token = meta_token.get('content')
+    if not all([login_url, url_matriz, url_filial, cgd_user, cgd_pass]):
+        raise ValueError("Variáveis do CGD ausentes nos Secrets.")
 
-    login_payload = {
-        'usuario': os.environ.get("CGD_USER"),
-        'senha': os.environ.get("CGD_PASS")
-    }
-    if csrf_token:
-        login_payload['_token'] = csrf_token
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
 
-    # 2. Executa o Login
-    response = session.post(login_url, data=login_payload)
-    response.raise_for_status()
-    
-    # 3. Raspagem das páginas
-    res_matriz = session.get(url_matriz)
-    res_filial = session.get(url_filial)
-    
-    soup_matriz = BeautifulSoup(res_matriz.text, 'html.parser')
-    soup_filial = BeautifulSoup(res_filial.text, 'html.parser')
-    
-    dados_brutos = f"""
+        # 1. Login no portal
+        page.goto(login_url)
+        page.wait_for_selector('input[name="usuario"]')
+        page.fill('input[name="usuario"]', cgd_user)
+        page.fill('input[name="senha"]', cgd_pass)
+        page.click('button[type="submit"]')
+        page.wait_for_load_state("networkidle")
+
+        # 2. Raspagem Matriz
+        page.goto(url_matriz)
+        page.wait_for_load_state("networkidle")
+        texto_matriz = page.inner_text("body")
+
+        # 3. Raspagem Filial
+        page.goto(url_filial)
+        page.wait_for_load_state("networkidle")
+        texto_filial = page.inner_text("body")
+
+        browser.close()
+
+    return f"""
     --- DADOS ALUNOS MATRIZ ---
-    {str(soup_matriz.find('table') or soup_matriz.get_text())}
-    
+    {texto_matriz[:15000]}
+
     --- DADOS ALUNOS FILIAL ---
-    {str(soup_filial.find('table') or soup_filial.get_text())}
+    {texto_filial[:15000]}
     """
-    return dados_brutos
 
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise a estrutura HTML/Tabela extraída das páginas do sistema CGD.
+    Analise os dados extraídos das páginas do sistema CGD.
 
     REGRAS DE FILTRAGEM OBRIGATÓRIAS:
     1. Na MATRIZ: Considere APENAS alunos ATIVOS vinculados ao "Laboratório 1" ou "Laboratório 2".
@@ -75,7 +63,7 @@ def processar_com_gemini(conteudo):
     3. Alunos críticos: Mais de 90 dias em curso sem conclusão.
     4. Alunos moderados: Entre 60 e 89 dias em curso.
 
-    IMPORTANTE: Responda ESTRITAMENTE em formato JSON (sem marcadores de código de texto adicional ou tags markdown), contendo a seguinte estrutura exata:
+    IMPORTANTE: Responda ESTRITAMENTE em formato JSON (sem marcadores adicionais), com a estrutura exata:
     {{
       "total_matriz": número_de_alunos,
       "total_filial": número_de_alunos,
@@ -86,18 +74,19 @@ def processar_com_gemini(conteudo):
       ]
     }}
 
-    dados_brutos = f"""
-    --- DADOS ALUNOS MATRIZ ---
-    {soup_matriz.get_text(separator=' ', strip=True)[:15000]}
-    
-    --- DADOS ALUNOS FILIAL ---
-    {soup_filial.get_text(separator=' ', strip=True)[:15000]}
+    Dados Brutos:
+    {conteudo}
     """
+    
+    response = gemini_client.models.generate_content(
+        model='gemini-3.6-flash',
+        contents=prompt
+    )
     return response.text
 
 def salvar_no_supabase(resultado_ia):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Aviso: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configuradas.")
+        print("Aviso: Variáveis do Supabase não configuradas.")
         return
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -121,10 +110,10 @@ def salvar_no_supabase(resultado_ia):
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print("Dados estruturados gravados no Supabase com sucesso!")
+    print("Dados gravados no Supabase com sucesso!")
 
 if __name__ == "__main__":
-    print("Iniciando scraping do CGD...")
+    print("Iniciando scraping do CGD com Playwright...")
     try:
         dados = efetuar_scraping_cgd()
         print("Processando dados no Gemini...")
