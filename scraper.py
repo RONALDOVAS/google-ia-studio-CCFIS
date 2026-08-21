@@ -59,17 +59,14 @@ def efetuar_scraping_cgd():
         try:
             page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=45000)
             
-            # Seletores específicos e visíveis para e-mail/usuário e senha
             selector_user = 'input[name="email"], input[name="usuario"], input[name="username"], input[type="email"]'
             selector_pass = 'input[name="senha"], input[name="password"], input[type="password"]'
 
-            # Aguarda a visibilidade do campo de usuário
             page_matriz.wait_for_selector(selector_user, state="visible", timeout=30000)
             
             page_matriz.locator(selector_user).first.fill(user_matriz)
             page_matriz.locator(selector_pass).first.fill(pass_matriz)
             
-            # Clique no botão de submissão do formulário
             page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
             page_matriz.wait_for_load_state("networkidle")
 
@@ -98,7 +95,6 @@ def efetuar_scraping_cgd():
             
             try:
                 page_filial.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-                
                 page_filial.wait_for_selector(selector_user, state="visible", timeout=30000)
                 
                 page_filial.locator(selector_user).first.fill(user_filial)
@@ -159,6 +155,7 @@ def processar_com_gemini(conteudo):
     {conteudo}
     """
     
+    # Atualizado para gemini-2.5-flash
     response = gemini_client.models.generate_content(
         model='gemini-2.5-flash',
         contents=prompt
