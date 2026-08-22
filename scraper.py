@@ -11,6 +11,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def extrair_pagina_alunos(page, url_alvo):
+    # Navega diretamente para a URL de alunos se estiver definida
     if url_alvo and url_alvo.strip() and url_alvo != page.url:
         page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
     else:
@@ -24,9 +25,15 @@ def extrair_pagina_alunos(page, url_alvo):
             except Exception:
                 pass
 
-    page.wait_for_timeout(4000)
+    # Aguarda explicitamente a tabela ou a lista de alunos carregar no DOM
+    try:
+        page.wait_for_selector('table, .dataTables_wrapper, .table-responsive, div[class*="aluno"]', state="visible", timeout=20000)
+    except Exception as e:
+        print(f"Aviso ao aguardar tabela de alunos: {e}")
 
-    # Tenta expandir a exibição da tabela para carregar todos os registros
+    page.wait_for_timeout(5000)
+
+    # Tenta alterar a paginação para exibir todos os alunos na mesma lista
     try:
         dropdowns = page.locator("select").all()
         for sel in dropdowns:
@@ -39,13 +46,16 @@ def extrair_pagina_alunos(page, url_alvo):
                         page.wait_for_timeout(3000)
                         break
     except Exception as e:
-        print(f"Aviso na paginação: {e}")
+        print(f"Aviso na alteração da paginação: {e}")
 
-    # Rola até o final para acionar carregamento lazy
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     page.wait_for_timeout(2000)
 
-    return page.inner_text("body")
+    texto = page.inner_text("body")
+    print(f"--- Prévia do Texto Extraído ({len(texto)} chars) ---")
+    print(texto[:500])
+    print("-----------------------------------------------------")
+    return texto
 
 def efetuar_login_e_extrair(browser, url_login, usuario, senha, url_alvo):
     context = browser.new_context(
@@ -55,18 +65,15 @@ def efetuar_login_e_extrair(browser, url_login, usuario, senha, url_alvo):
     page = context.new_page()
 
     try:
-        # Usa domcontentloaded para evitar travamento em chamadas externas assíncronas
         page.goto(url_login, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
 
-        # Localização flexível dos campos de entrada
         user_input = page.locator('input[type="text"], input[type="email"], input[name*="user"], input[name*="login"], input[name*="email"]').first
         pass_input = page.locator('input[type="password"], input[name*="senha"], input[name*="pass"]').first
 
         user_input.fill(usuario)
         pass_input.fill(senha)
 
-        # Envia o formulário
         submit_btn = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")').first
         if submit_btn.is_visible():
             submit_btn.click()
@@ -74,10 +81,9 @@ def efetuar_login_e_extrair(browser, url_login, usuario, senha, url_alvo):
             pass_input.press("Enter")
 
         page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
 
-        texto_extraido = extrair_pagina_alunos(page, url_alvo)
-        return texto_extraido
+        return extrair_pagina_alunos(page, url_alvo)
     finally:
         context.close()
 
@@ -107,13 +113,11 @@ def efetuar_scraping_cgd():
 
         print("Processando Matriz...")
         texto_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, url_matriz)
-        print(f"Matriz extraída: {len(texto_matriz)} caracteres.")
 
         texto_filial = ""
         if user_filial and pass_filial:
             print("Processando Filial...")
             texto_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, url_filial)
-            print(f"Filial extraída: {len(texto_filial)} caracteres.")
 
         browser.close()
 
