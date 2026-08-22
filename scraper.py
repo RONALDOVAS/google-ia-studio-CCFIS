@@ -10,6 +10,48 @@ gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.envi
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
+def extrair_dados_pagina(page, url_alvo):
+    # Navega para a página do relatório/alunos se fornecida
+    if url_alvo and page.url != url_alvo:
+        page.goto(url_alvo, wait_until="networkidle")
+    else:
+        btn_alunos = page.locator('a:has-text("Alunos")').first
+        if btn_alunos.is_visible():
+            btn_alunos.click()
+            page.wait_for_load_state("networkidle")
+
+    page.wait_for_timeout(3000)
+
+    # Tenta expandir a quantidade de registros por página na tabela (DataTables/Paginador comum)
+    try:
+        select_length = page.locator('select[name*="length"], select[name*="size"], .dataTables_length select').first
+        if select_length.is_visible():
+            select_length.select_option(value="-1") # Tenta selecionar 'Todos'
+        elif page.locator('select').count() > 0:
+            options = page.locator('select').first.locator('option').all_inner_texts()
+            max_opt = [opt for opt in options if any(x in opt for x in ['100', '500', 'Todos', 'All'])]
+            if max_opt:
+                page.locator('select').first.select_option(label=max_opt[0])
+    except Exception as e:
+        print(f"Aviso ao alterar paginação: {e}")
+
+    # Tenta clicar em botões de Filtrar / Pesquisar se existirem
+    try:
+        btn_buscar = page.locator('button:has-text("Buscar"), button:has-text("Filtrar"), input[value="Buscar"]').first
+        if btn_buscar.is_visible():
+            btn_buscar.click()
+            page.wait_for_load_state("networkidle")
+    except Exception as e:
+        print(f"Aviso ao clicar em buscar: {e}")
+
+    page.wait_for_timeout(5000)
+    
+    # Rola a página para carregar eventual lazy-loading
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(2000)
+
+    return page.inner_text("body")
+
 def efetuar_scraping_cgd():
     login_url = os.environ.get("CGD_LOGIN_URL")
     url_matriz = os.environ.get("CGD_MATRIZ_URL")
@@ -63,19 +105,8 @@ def efetuar_scraping_cgd():
             page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
             page_matriz.wait_for_load_state("networkidle")
 
-            # Navegação no menu lateral utilizando seletor específico
-            btn_alunos = page_matriz.locator('a:has-text("Alunos")').first
-            if btn_alunos.is_visible():
-                btn_alunos.click()
-                page_matriz.wait_for_load_state("networkidle")
-            elif url_matriz and url_matriz != login_url:
-                page_matriz.goto(url_matriz, wait_until="networkidle")
-
-            page_matriz.wait_for_timeout(6000)
-            texto_matriz = page_matriz.inner_text("body")
-            
-            print(f"--- PREVIEW TEXTO BRUTO MATRIZ ({len(texto_matriz)} chars) ---")
-            print(texto_matriz[:1000])
+            texto_matriz = extrair_dados_pagina(page_matriz, url_matriz)
+            print(f"--- TAMANHO DADOS MATRIZ: {len(texto_matriz)} chars ---")
 
         except Exception as e:
             print(f"Erro no scraping da Matriz: {e}")
@@ -100,18 +131,8 @@ def efetuar_scraping_cgd():
                 page_filial.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
                 page_filial.wait_for_load_state("networkidle")
 
-                btn_alunos_filial = page_filial.locator('a:has-text("Alunos")').first
-                if btn_alunos_filial.is_visible():
-                    btn_alunos_filial.click()
-                    page_filial.wait_for_load_state("networkidle")
-                elif url_filial and url_filial != login_url:
-                    page_filial.goto(url_filial, wait_until="networkidle")
-                
-                page_filial.wait_for_timeout(6000)
-                texto_filial = page_filial.inner_text("body")
-
-                print(f"--- PREVIEW TEXTO BRUTO FILIAL ({len(texto_filial)} chars) ---")
-                print(texto_filial[:1000])
+                texto_filial = extrair_dados_pagina(page_filial, url_filial)
+                print(f"--- TAMANHO DADOS FILIAL: {len(texto_filial)} chars ---")
 
             except Exception as e:
                 print(f"Erro no scraping da Filial: {e}")
@@ -123,19 +144,19 @@ def efetuar_scraping_cgd():
 
     return f"""
     --- DADOS ALUNOS MATRIZ ---
-    {texto_matriz[:20000]}
+    {texto_matriz[:50000]}
 
     --- DADOS ALUNOS FILIAL ---
-    {texto_filial[:20000]}
+    {texto_filial[:50000]}
     """
 
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise o texto bruto extraído do sistema escolar abaixo.
+    Analise com atenção TODO o texto bruto extraído do sistema escolar abaixo.
 
     REGRAS DE FILTRAGEM E CONTAGEM:
-    1. Identifique os alunos presentes e seus respectivos tempos de curso/status.
+    1. Conte TODOS os alunos individuais listados na seção MATRIZ e na seção FILIAL.
     2. Na MATRIZ: Conte apenas alunos ativos (foco em Laboratório 1 e 2).
     3. Na FILIAL: Conte alunos ativos listados.
     4. Alunos CRÍTICOS: Alunos com mais de 90 dias em curso.
@@ -148,7 +169,7 @@ def processar_com_gemini(conteudo):
       "alunos_criticos": 0,
       "alunos_moderados": 0,
       "detalhes": [
-         {{"nome": "Nome", "unidade": "Matriz/Filial", "laboratorio": "Lab", "status": "CRÍTICO/MODERADO/NORMAL", "dias": 0}}
+         {{"nome": "Nome do Aluno", "unidade": "Matriz/Filial", "laboratorio": "Lab", "status": "CRÍTICO/MODERADO/NORMAL", "dias": 0}}
       ]
     }}
 
