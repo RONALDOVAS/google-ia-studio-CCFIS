@@ -11,18 +11,24 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def extrair_pagina_alunos(page, url_alvo):
-    # Se houver uma sub-URL direta, acessa ela
+    # Navega para a URL alvo de alunos se fornecida
     if url_alvo and url_alvo.strip() and url_alvo != page.url:
         page.goto(url_alvo, wait_until="networkidle", timeout=45000)
     else:
-        btn_alunos = page.locator('a:has-text("Alunos")').first
-        if btn_alunos.is_visible():
-            btn_alunos.click()
-            page.wait_for_load_state("networkidle")
+        # Tenta clicar no menu Alunos caso esteja na Dashboard
+        for selector in ['a:has-text("Alunos")', 'a:has-text("Relatórios")', 'a[href*="aluno"]']:
+            try:
+                loc = page.locator(selector).first
+                if loc.is_visible():
+                    loc.click()
+                    page.wait_for_load_state("networkidle")
+                    break
+            except Exception:
+                pass
 
     page.wait_for_timeout(4000)
 
-    # Tenta alterar a paginação da tabela para mostrar o máximo de registros
+    # Altera a paginação do DataTables/Select para exibir todos os registros na mesma página
     try:
         dropdowns = page.locator("select").all()
         for sel in dropdowns:
@@ -38,11 +44,52 @@ def extrair_pagina_alunos(page, url_alvo):
     except Exception as e:
         print(f"Aviso ao tentar mudar paginação: {e}")
 
-    # Rola até o fim para carregar dados dinâmicos
+    # Rola até o fim para garantir renderização de lazy loading
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     page.wait_for_timeout(2000)
 
     return page.inner_text("body")
+
+def preencher_e_logar(page, usuario, senha):
+    # Aguarda qualquer input aparecer na tela
+    page.wait_for_selector('input', state="visible", timeout=30000)
+    
+    # Busca dinamicamente os campos de texto e senha
+    inputs = page.locator('input').all()
+    user_field = None
+    pass_field = None
+
+    for inp in inputs:
+        if inp.is_visible():
+            tipo = inp.get_attribute("type") or ""
+            nome = inp.get_attribute("name") or ""
+            
+            if tipo == "password" or "senha" in nome.lower() or "pass" in nome.lower():
+                pass_field = inp
+            elif tipo in ["text", "email"] or any(k in nome.lower() for k in ["user", "login", "email", "usuario"]):
+                if not user_field:
+                    user_field = inp
+
+    if not user_field or not pass_field:
+        # Fallback para primeiro e segundo input visíveis
+        visiveis = [i for i in inputs if i.is_visible()]
+        if len(visiveis) >= 2:
+            user_field, pass_field = visiveis[0], visiveis[1]
+
+    if user_field and pass_field:
+        user_field.fill(usuario)
+        pass_field.fill(senha)
+        
+        # Tenta botão de submit
+        submit = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")').first
+        if submit.is_visible():
+            submit.click()
+        else:
+            pass_field.press("Enter")
+        
+        page.wait_for_load_state("networkidle")
+    else:
+        raise Exception("Não foi possível mapear os campos de login na página.")
 
 def efetuar_scraping_cgd():
     login_url = os.environ.get("CGD_LOGIN_URL")
@@ -56,12 +103,12 @@ def efetuar_scraping_cgd():
     pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
     if not login_url or not user_matriz or not pass_matriz:
-        raise ValueError("Credenciais ou URL de login não configuradas nos Secrets.")
+        raise ValueError("Credenciais de login ausentes nos Secrets.")
 
     browser_args = [
-        "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
         "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
         "--window-size=1920,1080"
     ]
 
@@ -69,60 +116,30 @@ def efetuar_scraping_cgd():
         browser = p.chromium.launch(headless=True, args=browser_args)
 
         # 1. MATRIZ
-        print("Acessando Matriz...")
+        print("Iniciando Matriz...")
         ctx_matriz = browser.new_context(viewport={"width": 1920, "height": 1080})
         page_m = ctx_matriz.new_page()
 
         try:
-            page_m.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-            
-            # Aguarda explicitamente os campos de login estarem visíveis
-            page_m.wait_for_selector('input[type="password"], input[name="senha"]', state="visible", timeout=30000)
-            
-            input_user = page_m.locator('input[name="email"], input[name="usuario"], input[type="email"], input[type="text"]').first
-            input_pass = page_m.locator('input[name="senha"], input[name="password"], input[type="password"]').first
-
-            input_user.fill(user_matriz)
-            input_pass.fill(pass_matriz)
-            
-            page_m.click('button[type="submit"], input[type="submit"]')
-            page_m.wait_for_load_state("networkidle")
-
+            page_m.goto(login_url, wait_until="networkidle", timeout=45000)
+            preencher_e_logar(page_m, user_matriz, pass_matriz)
             texto_matriz = extrair_pagina_alunos(page_m, url_matriz)
-            print(f"Matriz extraída: {len(texto_matriz)} caracteres.")
-
-        except Exception as e:
-            print(f"Erro na Matriz: {e}")
-            raise e
+            print(f"Matriz extraída com sucesso: {len(texto_matriz)} caracteres.")
         finally:
             ctx_matriz.close()
 
         # 2. FILIAL
         texto_filial = ""
         if user_filial and pass_filial:
-            print("Acessando Filial...")
+            print("Iniciando Filial...")
             ctx_filial = browser.new_context(viewport={"width": 1920, "height": 1080})
             page_f = ctx_filial.new_page()
 
             try:
-                page_f.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-                page_f.wait_for_selector('input[type="password"], input[name="senha"]', state="visible", timeout=30000)
-                
-                input_user_f = page_f.locator('input[name="email"], input[name="usuario"], input[type="email"], input[type="text"]').first
-                input_pass_f = page_f.locator('input[name="senha"], input[name="password"], input[type="password"]').first
-
-                input_user_f.fill(user_filial)
-                input_pass_f.fill(pass_filial)
-
-                page_f.click('button[type="submit"], input[type="submit"]')
-                page_f.wait_for_load_state("networkidle")
-
+                page_f.goto(login_url, wait_until="networkidle", timeout=45000)
+                preencher_e_logar(page_f, user_filial, pass_filial)
                 texto_filial = extrair_pagina_alunos(page_f, url_filial)
-                print(f"Filial extraída: {len(texto_filial)} caracteres.")
-
-            except Exception as e:
-                print(f"Erro na Filial: {e}")
-                raise e
+                print(f"Filial extraída com sucesso: {len(texto_filial)} caracteres.")
             finally:
                 ctx_filial.close()
 
@@ -143,7 +160,7 @@ def processar_com_gemini(conteudo):
 
     REGRAS DE PROCESSAMENTO:
     1. Identifique a quantidade TOTAL real de alunos listados na MATRIZ e na FILIAL.
-    2. Na MATRIZ: Conte apenas alunos ativos (Laboratório 1 e 2).
+    2. Na MATRIZ: Conte apenas alunos ativos.
     3. Na FILIAL: Conte alunos ativos.
     4. Alunos CRÍTICOS: Alunos com mais de 90 dias em curso.
     5. Alunos MODERADOS: Alunos entre 60 e 89 dias em curso.
@@ -198,13 +215,13 @@ def salvar_no_supabase(resultado_ia):
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print("Sucesso! Registro atualizado no Supabase.")
+    print("Atualização concluída no Supabase!")
 
 if __name__ == "__main__":
-    print("Iniciando execução...")
+    print("Iniciando scraping...")
     dados = efetuar_scraping_cgd()
-    print("Processando via Gemini...")
+    print("Enviando ao Gemini...")
     resultado = processar_com_gemini(dados)
-    print("Atualizando banco de dados...")
+    print("Atualizando banco Supabase...")
     salvar_no_supabase(resultado)
-    print("Concluído!")
+    print("Sucesso!")
