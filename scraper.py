@@ -21,10 +21,6 @@ def efetuar_scraping_cgd():
     user_filial = os.environ.get("CGD_USER_FILIAL")
     pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
-    print(f"DEBUG - LOGIN_URL: {bool(login_url)}")
-    print(f"DEBUG - MATRIZ_URL: {bool(url_matriz)} | USER_MATRIZ: {bool(user_matriz)} | PASS_MATRIZ: {bool(pass_matriz)}")
-    print(f"DEBUG - FILIAL_URL: {bool(url_filial)} | USER_FILIAL: {bool(user_filial)} | PASS_FILIAL: {bool(pass_filial)}")
-
     if not login_url or not user_matriz or not pass_matriz:
         raise ValueError("Credenciais da Matriz não encontradas nos Secrets.")
 
@@ -61,16 +57,19 @@ def efetuar_scraping_cgd():
             selector_pass = 'input[name="senha"], input[name="password"], input[type="password"]'
 
             page_matriz.wait_for_selector(selector_user, state="visible", timeout=30000)
-            
             page_matriz.locator(selector_user).first.fill(user_matriz)
             page_matriz.locator(selector_pass).first.fill(pass_matriz)
             
             page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
             page_matriz.wait_for_load_state("networkidle")
 
-            if url_matriz and url_matriz != login_url:
+            # Em vez de goto direto, clica na seção Alunos/Relatórios caso exista no menu
+            if page_matriz.locator('text="Alunos"').is_visible():
+                page_matriz.click('text="Alunos"')
+                page_matriz.wait_for_load_state("networkidle")
+            elif url_matriz and url_matriz != login_url:
                 page_matriz.goto(url_matriz, wait_until="networkidle")
-            
+
             page_matriz.wait_for_timeout(6000)
             texto_matriz = page_matriz.inner_text("body")
             
@@ -94,14 +93,16 @@ def efetuar_scraping_cgd():
             try:
                 page_filial.goto(login_url, wait_until="domcontentloaded", timeout=45000)
                 page_filial.wait_for_selector(selector_user, state="visible", timeout=30000)
-                
                 page_filial.locator(selector_user).first.fill(user_filial)
                 page_filial.locator(selector_pass).first.fill(pass_filial)
                 
                 page_filial.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
                 page_filial.wait_for_load_state("networkidle")
-                
-                if url_filial and url_filial != login_url:
+
+                if page_filial.locator('text="Alunos"').is_visible():
+                    page_filial.click('text="Alunos"')
+                    page_filial.wait_for_load_state("networkidle")
+                elif url_filial and url_filial != login_url:
                     page_filial.goto(url_filial, wait_until="networkidle")
                 
                 page_filial.wait_for_timeout(6000)
