@@ -15,7 +15,6 @@ def efetuar_scraping_cgd():
     url_matriz = os.environ.get("CGD_MATRIZ_URL")
     url_filial = os.environ.get("CGD_FILIAL_URL")
     
-    # Busca credenciais específicas de cada unidade
     user_matriz = os.environ.get("CGD_USER_MATRIZ")
     pass_matriz = os.environ.get("CGD_PASS_MATRIZ")
     
@@ -29,7 +28,6 @@ def efetuar_scraping_cgd():
     if not login_url or not user_matriz or not pass_matriz:
         raise ValueError("Credenciais da Matriz não encontradas nos Secrets.")
 
-    # Argumentos do Chromium para bypass de detecção
     browser_args = [
         "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
@@ -70,20 +68,20 @@ def efetuar_scraping_cgd():
             page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
             page_matriz.wait_for_load_state("networkidle")
 
-        except Exception as e:
-            print(f"\n--- DIAGNÓSTICO DE ERRO NO LOGIN ---")
-            print(f"URL onde a página parou: {page_matriz.url}")
-            print(f"Título da página: {page_matriz.title()}")
-            print("Trecho do código HTML da página no momento do erro:")
-            print(page_matriz.content()[:3000])
-            print("-----------------------------------\n")
-            raise e
+            if url_matriz and url_matriz != login_url:
+                page_matriz.goto(url_matriz, wait_until="networkidle")
+            
+            page_matriz.wait_for_timeout(6000)
+            texto_matriz = page_matriz.inner_text("body")
+            
+            print(f"--- PREVIEW TEXTO BRUTO MATRIZ ({len(texto_matriz)} chars) ---")
+            print(texto_matriz[:1000])
 
-        if url_matriz and url_matriz != login_url:
-            page_matriz.goto(url_matriz, wait_until="networkidle")
-        
-        texto_matriz = page_matriz.inner_text("body")
-        context_matriz.close()
+        except Exception as e:
+            print(f"Erro no scraping da Matriz: {e}")
+            raise e
+        finally:
+            context_matriz.close()
 
         # 2. RASPAGEM DA FILIAL
         texto_filial = ""
@@ -106,56 +104,55 @@ def efetuar_scraping_cgd():
                 if url_filial and url_filial != login_url:
                     page_filial.goto(url_filial, wait_until="networkidle")
                 
+                page_filial.wait_for_timeout(6000)
                 texto_filial = page_filial.inner_text("body")
-                context_filial.close()
+
+                print(f"--- PREVIEW TEXTO BRUTO FILIAL ({len(texto_filial)} chars) ---")
+                print(texto_filial[:1000])
+
             except Exception as e:
-                print(f"\n--- DIAGNÓSTICO DE ERRO NO LOGIN (FILIAL) ---")
-                print(f"URL onde a página parou: {page_filial.url}")
-                print(f"Título da página: {page_filial.title()}")
-                print("Trecho do código HTML da página no momento do erro:")
-                print(page_filial.content()[:3000])
-                print("-----------------------------------\n")
+                print(f"Erro no scraping da Filial: {e}")
                 raise e
-        else:
-            print("Aviso: Credenciais da Filial não configuradas. Pulando etapa Filial.")
+            finally:
+                context_filial.close()
 
         browser.close()
 
     return f"""
     --- DADOS ALUNOS MATRIZ ---
-    {texto_matriz[:15000]}
+    {texto_matriz[:20000]}
 
     --- DADOS ALUNOS FILIAL ---
-    {texto_filial[:15000]}
+    {texto_filial[:20000]}
     """
 
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise os dados extraídos das páginas do sistema CGD.
+    Analise o texto bruto extraído do sistema escolar abaixo.
 
-    REGRAS DE FILTRAGEM OBRIGATÓRIAS:
-    1. Na MATRIZ: Considere APENAS alunos ATIVOS vinculados ao "Laboratório 1" ou "Laboratório 2".
-    2. Na FILIAL: Considere os alunos ativos conforme a listagem de turmas da filial.
-    3. Alunos críticos: Mais de 90 dias em curso sem conclusão.
-    4. Alunos moderados: Entre 60 e 89 dias em curso.
+    REGRAS DE FILTRAGEM E CONTAGEM:
+    1. Identifique os alunos presentes e seus respectivos tempos de curso/status.
+    2. Na MATRIZ: Conte apenas alunos ativos (foco em Laboratório 1 e 2).
+    3. Na FILIAL: Conte alunos ativos listados.
+    4. Alunos CRÍTICOS: Alunos com mais de 90 dias em curso.
+    5. Alunos MODERADOS: Alunos entre 60 e 89 dias em curso.
 
-    IMPORTANTE: Responda ESTRITAMENTE em formato JSON (sem marcadores adicionais), com a estrutura exata:
+    IMPORTANTE: Retorne APENAS um JSON válido, sem texto explicativo adicional:
     {{
-      "total_matriz": número_de_alunos,
-      "total_filial": número_de_alunos,
-      "alunos_criticos": número_de_alunos,
-      "alunos_moderados": número_de_alunos,
+      "total_matriz": 0,
+      "total_filial": 0,
+      "alunos_criticos": 0,
+      "alunos_moderados": 0,
       "detalhes": [
-         {{"nome": "Nome do Aluno", "unidade": "Matriz/Filial", "laboratorio": "Lab 1/Lab 2", "status": "CRÍTICO/MODERADO/NORMAL", "dias": 90}}
+         {{"nome": "Nome", "unidade": "Matriz/Filial", "laboratorio": "Lab", "status": "CRÍTICO/MODERADO/NORMAL", "dias": 0}}
       ]
     }}
 
-    Dados Brutos:
+    Dados Brutos Extraídos:
     {conteudo}
     """
     
-    # Atualizado para o modelo gemini-3.6-flash
     response = gemini_client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt
