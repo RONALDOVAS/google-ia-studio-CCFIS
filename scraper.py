@@ -5,13 +5,14 @@ from playwright.sync_api import sync_playwright
 from google import genai
 from supabase import create_client
 
+# Inicialização do cliente Gemini
 gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
 
+# Configuração do Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def navegar_e_extrair_alunos(page):
-    # Clica no menu "Alunos" do painel lateral
     print("Navegando via menu lateral 'Alunos'...")
     menu_alunos = page.locator('a:has-text("Alunos"), span:has-text("Alunos")').first
     
@@ -22,13 +23,11 @@ def navegar_e_extrair_alunos(page):
     else:
         print("Menu 'Alunos' não encontrado de forma visível.")
 
-    # Aguarda a tabela ou lista carregar
     try:
         page.wait_for_selector('table, .dataTables_wrapper, .table-responsive', state="visible", timeout=20000)
     except Exception as e:
         print(f"Aviso ao esperar tabela: {e}")
 
-    # Tenta alterar a paginação do DataTables/Select para exibir todos os registros
     try:
         dropdowns = page.locator("select").all()
         for sel in dropdowns:
@@ -46,8 +45,7 @@ def navegar_e_extrair_alunos(page):
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     page.wait_for_timeout(2000)
 
-    texto = page.inner_text("body")
-    return texto
+    return page.inner_text("body")
 
 def efetuar_login_e_extrair(browser, url_login, usuario, senha, nome_unidade):
     context = browser.new_context(
@@ -76,7 +74,6 @@ def efetuar_login_e_extrair(browser, url_login, usuario, senha, nome_unidade):
         page.wait_for_load_state("domcontentloaded")
         page.wait_for_timeout(4000)
 
-        # Navega navegando pela interface em vez de usar URL direta
         texto = navegar_e_extrair_alunos(page)
         print(f"[{nome_unidade}] Sucesso: {len(texto)} caracteres extraídos.")
         return texto
@@ -91,7 +88,6 @@ def efetuar_scraping_cgd():
     login_url = os.environ.get("CGD_LOGIN_URL")
     user_matriz = os.environ.get("CGD_USER_MATRIZ")
     pass_matriz = os.environ.get("CGD_PASS_MATRIZ")
-    
     user_filial = os.environ.get("CGD_USER_FILIAL")
     pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
@@ -102,7 +98,6 @@ def efetuar_scraping_cgd():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"])
 
         texto_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, "Matriz")
-        
         texto_filial = ""
         if user_filial and pass_filial:
             texto_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, "Filial")
@@ -122,12 +117,15 @@ def processar_com_gemini(conteudo):
     Você é um assistente de gestão escolar do CFIS/CGD.
     Analise o texto bruto extraído abaixo das páginas de alunos.
 
-    REGRAS DE PROCESSAMENTO:
-    1. Identifique a quantidade TOTAL real de alunos listados na MATRIZ e na FILIAL.
-    2. Na MATRIZ: Conte apenas alunos ativos.
-    3. Na FILIAL: Conte alunos ativos.
-    4. Alunos CRÍTICOS: Alunos com mais de 90 dias em curso.
-    5. Alunos MODERADOS: Alunos entre 60 e 89 dias em curso.
+    REGRAS DE PROCESSAMENTO E CRITICIDADE:
+    1. Identifique a quantidade TOTAL real de alunos ativos na MATRIZ e na FILIAL.
+    2. Para cada aluno listado, extraia a data de início/matrícula ou último acesso e calcule a quantidade de dias em curso em relação à data atual (Agosto de 2026).
+    3. Classifique a CRITICIDADE de cada aluno pelas regras:
+       - CRÍTICO: dias > 90
+       - MODERADO: dias entre 60 e 89
+       - ATENÇÃO: dias entre 30 e 59
+       - NORMAL: dias < 30
+    4. Calcule o total geral de 'alunos_criticos' e 'alunos_moderados'.
 
     Responda EXCLUSIVAMENTE um JSON sem sintaxe markdown:
     {{
@@ -136,7 +134,15 @@ def processar_com_gemini(conteudo):
       "alunos_criticos": 0,
       "alunos_moderados": 0,
       "detalhes": [
-         {{"nome": "Nome do Aluno", "unidade": "Matriz/Filial", "laboratorio": "Lab", "status": "CRÍTICO/MODERADO/NORMAL", "dias": 0}}
+         {{
+           "contrato": "0000",
+           "nome": "Nome do Aluno",
+           "unidade": "Matriz ou Filial",
+           "curso": "Nome do Curso",
+           "status": "CRÍTICO/MODERADO/ATENÇÃO/NORMAL",
+           "dias": 0,
+           "faltas": 0
+         }}
       ]
     }}
 
