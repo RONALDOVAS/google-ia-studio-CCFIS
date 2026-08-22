@@ -5,47 +5,38 @@ from playwright.sync_api import sync_playwright
 from google import genai
 from supabase import create_client
 
-# Inicialização do cliente Gemini
 gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
 
-# Configuração do Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-def navegar_e_extrair_alunos(page):
-    print("Navegando via menu lateral 'Alunos'...")
-    menu_alunos = page.locator('a:has-text("Alunos"), span:has-text("Alunos")').first
-    
-    if menu_alunos.is_visible():
-        menu_alunos.click()
-        page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(4000)
-    else:
-        print("Menu 'Alunos' não encontrado de forma visível.")
-
+def extrair_linhas_tabela(page, nome_unidade):
+    """Extrai diretamente as linhas das tabelas do DOM para não truncar dados."""
+    print(f"[{nome_unidade}] Aguardando carregamento da tabela...")
     try:
-        page.wait_for_selector('table, .dataTables_wrapper, .table-responsive', state="visible", timeout=20000)
+        page.wait_for_selector('table tbody tr', state="visible", timeout=15000)
     except Exception as e:
-        print(f"Aviso ao esperar tabela: {e}")
+        print(f"[{nome_unidade}] Tabela não carregou a tempo: {e}")
+        return []
 
+    # Tenta selecionar 'Todos' ou o maior valor no Select de paginação
     try:
-        dropdowns = page.locator("select").all()
-        for sel in dropdowns:
+        selects = page.locator('select[name*="length"], select[name*="table"]').all()
+        for sel in selects:
             if sel.is_visible():
                 options = sel.locator("option").all_inner_texts()
-                for target in ["100", "500", "Todos", "All"]:
-                    matched = [o for o in options if target.lower() in o.lower()]
-                    if matched:
-                        sel.select_option(label=matched[0])
+                for opt in ["All", "Todos", "500", "100"]:
+                    if any(opt.lower() in o.lower() for o in options):
+                        sel.select_option(label=[o for o in options if opt.lower() in o.lower()][0])
                         page.wait_for_timeout(3000)
                         break
     except Exception as e:
-        print(f"Aviso na alteração da paginação: {e}")
+        print(f"[{nome_unidade}] Erro ao mudar paginação: {e}")
 
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    page.wait_for_timeout(2000)
-
-    return page.inner_text("body")
+    # Extrai o texto limpo de cada linha da tabela
+    rows = page.locator('table tbody tr').all_inner_texts()
+    print(f"[{nome_unidade}] Total de registros brutos capturados na página: {len(rows)}")
+    return rows
 
 def efetuar_login_e_extrair(browser, url_login, usuario, senha, nome_unidade):
     context = browser.new_context(
@@ -55,32 +46,35 @@ def efetuar_login_e_extrair(browser, url_login, usuario, senha, nome_unidade):
     page = context.new_page()
 
     try:
-        print(f"[{nome_unidade}] Efetuando login em {url_login}...")
+        print(f"[{nome_unidade}] Efetuando login...")
         page.goto(url_login, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(2000)
 
-        user_input = page.locator('#login-email, input[name="email"], input[type="email"]').first
-        pass_input = page.locator('input[name="password"], input[type="password"]').first
-
-        user_input.fill(usuario)
-        pass_input.fill(senha)
+        page.locator('#login-email, input[name="email"], input[type="email"]').first.fill(usuario)
+        page.locator('input[name="password"], input[type="password"]').first.fill(senha)
 
         submit_btn = page.locator('button[type="submit"], input[type="submit"]').first
         if submit_btn.is_visible():
             submit_btn.click()
         else:
-            pass_input.press("Enter")
+            page.keyboard.press("Enter")
 
         page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(3000)
 
-        texto = navegar_e_extrair_alunos(page)
-        print(f"[{nome_unidade}] Sucesso: {len(texto)} caracteres extraídos.")
-        return texto
+        # Clica no menu 'Alunos'
+        menu_alunos = page.locator('a:has-text("Alunos"), span:has-text("Alunos")').first
+        if menu_alunos.is_visible():
+            menu_alunos.click()
+            page.wait_for_load_state("domcontentloaded")
+            page.wait_for_timeout(3000)
+
+        linhas = extrair_linhas_tabela(page, nome_unidade)
+        return linhas
 
     except Exception as e:
-        print(f"[{nome_unidade}] Erro durante execução: {e}")
-        return ""
+        print(f"[{nome_unidade}] Erro na execução: {e}")
+        return []
     finally:
         context.close()
 
@@ -91,63 +85,62 @@ def efetuar_scraping_cgd():
     user_filial = os.environ.get("CGD_USER_FILIAL")
     pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
-    if not login_url or not user_matriz or not pass_matriz:
-        raise ValueError("Credenciais de login ausentes nos Secrets.")
-
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"])
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
 
-        texto_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, "Matriz")
-        texto_filial = ""
+        linhas_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, "Matriz")
+        linhas_filial = []
         if user_filial and pass_filial:
-            texto_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, "Filial")
+            linhas_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, "Filial")
 
         browser.close()
 
-    return f"""
-    === DADOS MATRIZ ===
-    {texto_matriz[:80000]}
+    return {
+        "matriz": linhas_matriz,
+        "filial": linhas_filial
+    }
 
-    === DADOS FILIAL ===
-    {texto_filial[:80000]}
-    """
-
-def processar_com_gemini(conteudo):
+def processar_com_gemini(dados_brutos):
     prompt = f"""
-    Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise o texto bruto extraído abaixo das páginas de alunos.
+    Você é o assistente de dados do sistema escolar CFIS/CGD.
+    Abaixo estão as linhas extraídas diretamente da tabela de alunos.
 
-    REGRAS DE PROCESSAMENTO E CRITICIDADE:
-    1. Identifique a quantidade TOTAL real de alunos ativos na MATRIZ e na FILIAL.
-    2. Para cada aluno listado, extraia a data de início/matrícula ou último acesso e calcule a quantidade de dias em curso em relação à data atual (Agosto de 2026).
-    3. Classifique a CRITICIDADE de cada aluno pelas regras:
+    Sua tarefa é estruturar TODOS os alunos fornecidos no JSON de saída sem omitir nenhum nome.
+
+    REGRAS:
+    1. Trate cada linha enviada como um aluno.
+    2. Identifique o Nome, Contrato/Matrícula, Curso e Dias de Curso/Último Acesso.
+    3. Classifique o status de criticidade:
        - CRÍTICO: dias > 90
        - MODERADO: dias entre 60 e 89
        - ATENÇÃO: dias entre 30 e 59
        - NORMAL: dias < 30
-    4. Calcule o total geral de 'alunos_criticos' e 'alunos_moderados'.
+    4. Atribua 'unidade': 'Matriz' para os alunos da Matriz e 'unidade': 'Filial' para os da Filial.
 
-    Responda EXCLUSIVAMENTE um JSON sem sintaxe markdown:
+    Responda EXCLUSIVAMENTE um JSON neste formato sem sintaxe markdown:
     {{
-      "total_matriz": 0,
-      "total_filial": 0,
+      "total_matriz": {len(dados_brutos['matriz'])},
+      "total_filial": {len(dados_brutos['filial'])},
       "alunos_criticos": 0,
       "alunos_moderados": 0,
       "detalhes": [
          {{
-           "contrato": "0000",
-           "nome": "Nome do Aluno",
+           "contrato": "000",
+           "nome": "NOME DO ALUNO",
            "unidade": "Matriz ou Filial",
            "curso": "Nome do Curso",
-           "status": "CRÍTICO/MODERADO/ATENÇÃO/NORMAL",
+           "status": "NORMAL/CRÍTICO/MODERADO/ATENÇÃO",
            "dias": 0,
            "faltas": 0
          }}
       ]
     }}
 
-    CONTEÚDO PARA ANÁLISE:
-    {conteudo}
+    LINHAS DA MATRIZ:
+    {json.dumps(dados_brutos['matriz'][:300], ensure_ascii=False)}
+
+    LINHAS DA FILIAL:
+    {json.dumps(dados_brutos['filial'][:300], ensure_ascii=False)}
     """
     
     response = gemini_client.models.generate_content(
@@ -158,40 +151,41 @@ def processar_com_gemini(conteudo):
 
 def salvar_no_supabase(resultado_ia):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Aviso: Supabase não configurado.")
+        print("Supabase não configurado.")
         return
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
     try:
         match = re.search(r'\{.*\}', resultado_ia, re.DOTALL)
-        if match:
-            dados_json = json.loads(match.group(0))
-        else:
-            dados_json = json.loads(resultado_ia)
+        dados_json = json.loads(match.group(0)) if match else json.loads(resultado_ia)
     except Exception as e:
-        print(f"Erro no parsing do JSON: {e}")
+        print(f"Erro no parse JSON: {e}")
         dados_json = {}
+
+    detalhes = dados_json.get("detalhes", [])
+    criticos = sum(1 for a in detalhes if a.get("status") == "CRÍTICO")
+    moderados = sum(1 for a in detalhes if a.get("status") == "MODERADO")
 
     payload = {
         "id": 1,
         "relatorio": resultado_ia,
         "total_filial": dados_json.get("total_filial", 0),
         "total_matriz": dados_json.get("total_matriz", 0),
-        "alunos_criticos": dados_json.get("alunos_criticos", 0),
-        "alunos_moderados": dados_json.get("alunos_moderados", 0),
-        "dados_completos": dados_json.get("detalhes", []),
+        "alunos_criticos": criticos,
+        "alunos_moderados": moderados,
+        "dados_completos": detalhes,
         "atualizado_em": "now()"
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print("Atualização concluída no Supabase com sucesso.")
+    print("Sucesso: Supabase atualizado com dados reais e separados!")
 
 if __name__ == "__main__":
-    print("Iniciando scraping...")
+    print("Iniciando extração direta de tabelas...")
     dados = efetuar_scraping_cgd()
-    print("Processando com Gemini...")
+    print("Processando linhas com Gemini...")
     resultado = processar_com_gemini(dados)
-    print("Atualizando banco de dados...")
+    print("Gravando no banco de dados...")
     salvar_no_supabase(resultado)
-    print("Finalizado!")
+    print("Concluído!")
