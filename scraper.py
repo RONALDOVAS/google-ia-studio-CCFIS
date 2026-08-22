@@ -2,41 +2,71 @@ import os
 import json
 import re
 from playwright.sync_api import sync_playwright
-from google import genai
 from supabase import create_client
-
-gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-def extrair_linhas_tabela(page, nome_unidade):
-    """Extrai diretamente as linhas das tabelas do DOM para não truncar dados."""
-    print(f"[{nome_unidade}] Aguardando carregamento da tabela...")
+def extrair_alunos_da_tabela(page, nome_unidade):
+    """Lê diretamente o DOM/HTML da tabela e transforma cada linha em objeto JSON real."""
+    print(f"[{nome_unidade}] Aguardando carregamento da tabela de alunos...")
     try:
-        page.wait_for_selector('table tbody tr', state="visible", timeout=15000)
+        page.wait_for_selector('table tbody tr', state="visible", timeout=20000)
     except Exception as e:
-        print(f"[{nome_unidade}] Tabela não carregou a tempo: {e}")
+        print(f"[{nome_unidade}] Tabela não encontrada ou vazia: {e}")
         return []
 
-    # Tenta selecionar 'Todos' ou o maior valor no Select de paginação
+    # Tenta selecionar a exibição máxima no Select (ex: 'Todos' ou '500')
     try:
         selects = page.locator('select[name*="length"], select[name*="table"]').all()
         for sel in selects:
             if sel.is_visible():
                 options = sel.locator("option").all_inner_texts()
-                for opt in ["All", "Todos", "500", "100"]:
-                    if any(opt.lower() in o.lower() for o in options):
-                        sel.select_option(label=[o for o in options if opt.lower() in o.lower()][0])
-                        page.wait_for_timeout(3000)
+                for target in ["todos", "all", "500", "100"]:
+                    matched = [o for o in options if target in o.lower()]
+                    if matched:
+                        sel.select_option(label=matched[0])
+                        page.wait_for_timeout(4000)
                         break
     except Exception as e:
-        print(f"[{nome_unidade}] Erro ao mudar paginação: {e}")
+        print(f"[{nome_unidade}] Aviso na paginação: {e}")
 
-    # Extrai o texto limpo de cada linha da tabela
-    rows = page.locator('table tbody tr').all_inner_texts()
-    print(f"[{nome_unidade}] Total de registros brutos capturados na página: {len(rows)}")
-    return rows
+    # Extração direta dos nós do HTML via JavaScript do navegador
+    alunos = page.evaluate("""(unidade) => {
+        const rows = Array.from(document.querySelectorAll('table tbody tr'));
+        return rows.map(row => {
+            const cols = Array.from(row.querySelectorAll('td')).map(td => td.innerText.trim());
+            if (cols.length < 2) return null;
+
+            // Mapeamento baseado nas colunas padrão do CGD
+            const contrato = cols[0] || '';
+            const nome = cols[1] || 'Aluno sem nome';
+            const curso = cols[2] || '';
+            const acessoOuDias = cols[3] || '';
+            
+            // Tenta extrair número de dias se presente, caso contrário define padrão 0
+            const matchDias = acessoOuDias.match(/(\\d+)\\s*dias?/i);
+            const dias = matchDias ? parseInt(matchDias[1]) : 0;
+
+            let status = 'NORMAL';
+            if (dias > 90) status = 'CRÍTICO';
+            else if (dias >= 60) status = 'MODERADO';
+            else if (dias >= 30) status = 'ATENÇÃO';
+
+            return {
+                contrato: contrato,
+                nome: nome,
+                unidade: unidade,
+                curso: curso,
+                status: status,
+                dias: dias,
+                faltas: 0
+            };
+        }).filter(a => a !== null);
+    }""", nome_unidade)
+
+    print(f"[{nome_unidade}] Sucesso: {len(alunos)} alunos reais extraídos diretamente!")
+    return alunos
 
 def efetuar_login_e_extrair(browser, url_login, usuario, senha, nome_unidade):
     context = browser.new_context(
@@ -60,20 +90,20 @@ def efetuar_login_e_extrair(browser, url_login, usuario, senha, nome_unidade):
             page.keyboard.press("Enter")
 
         page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(4000)
 
-        # Clica no menu 'Alunos'
+        # Clica no menu Alunos
         menu_alunos = page.locator('a:has-text("Alunos"), span:has-text("Alunos")').first
         if menu_alunos.is_visible():
             menu_alunos.click()
             page.wait_for_load_state("domcontentloaded")
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(4000)
 
-        linhas = extrair_linhas_tabela(page, nome_unidade)
-        return linhas
+        alunos = extrair_alunos_da_tabela(page, nome_unidade)
+        return alunos
 
     except Exception as e:
-        print(f"[{nome_unidade}] Erro na execução: {e}")
+        print(f"[{nome_unidade}] Erro durante execução: {e}")
         return []
     finally:
         context.close()
@@ -88,90 +118,36 @@ def efetuar_scraping_cgd():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
 
-        linhas_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, "Matriz")
-        linhas_filial = []
+        alunos_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, "Matriz")
+        alunos_filial = []
         if user_filial and pass_filial:
-            linhas_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, "Filial")
+            alunos_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, "Filial")
 
         browser.close()
 
+    todos_alunos = alunos_matriz + alunos_filial
     return {
-        "matriz": linhas_matriz,
-        "filial": linhas_filial
+        "total_matriz": len(alunos_matriz),
+        "total_filial": len(alunos_filial),
+        "detalhes": todos_alunos
     }
 
-def processar_com_gemini(dados_brutos):
-    prompt = f"""
-    Você é o assistente de dados do sistema escolar CFIS/CGD.
-    Abaixo estão as linhas extraídas diretamente da tabela de alunos.
-
-    Sua tarefa é estruturar TODOS os alunos fornecidos no JSON de saída sem omitir nenhum nome.
-
-    REGRAS:
-    1. Trate cada linha enviada como um aluno.
-    2. Identifique o Nome, Contrato/Matrícula, Curso e Dias de Curso/Último Acesso.
-    3. Classifique o status de criticidade:
-       - CRÍTICO: dias > 90
-       - MODERADO: dias entre 60 e 89
-       - ATENÇÃO: dias entre 30 e 59
-       - NORMAL: dias < 30
-    4. Atribua 'unidade': 'Matriz' para os alunos da Matriz e 'unidade': 'Filial' para os da Filial.
-
-    Responda EXCLUSIVAMENTE um JSON neste formato sem sintaxe markdown:
-    {{
-      "total_matriz": {len(dados_brutos['matriz'])},
-      "total_filial": {len(dados_brutos['filial'])},
-      "alunos_criticos": 0,
-      "alunos_moderados": 0,
-      "detalhes": [
-         {{
-           "contrato": "000",
-           "nome": "NOME DO ALUNO",
-           "unidade": "Matriz ou Filial",
-           "curso": "Nome do Curso",
-           "status": "NORMAL/CRÍTICO/MODERADO/ATENÇÃO",
-           "dias": 0,
-           "faltas": 0
-         }}
-      ]
-    }}
-
-    LINHAS DA MATRIZ:
-    {json.dumps(dados_brutos['matriz'][:300], ensure_ascii=False)}
-
-    LINHAS DA FILIAL:
-    {json.dumps(dados_brutos['filial'][:300], ensure_ascii=False)}
-    """
-    
-    response = gemini_client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=prompt
-    )
-    return response.text
-
-def salvar_no_supabase(resultado_ia):
+def salvar_no_supabase(dados):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Supabase não configurado.")
+        print("Aviso: Supabase não configurado.")
         return
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    try:
-        match = re.search(r'\{.*\}', resultado_ia, re.DOTALL)
-        dados_json = json.loads(match.group(0)) if match else json.loads(resultado_ia)
-    except Exception as e:
-        print(f"Erro no parse JSON: {e}")
-        dados_json = {}
-
-    detalhes = dados_json.get("detalhes", [])
+    detalhes = dados.get("detalhes", [])
     criticos = sum(1 for a in detalhes if a.get("status") == "CRÍTICO")
     moderados = sum(1 for a in detalhes if a.get("status") == "MODERADO")
 
     payload = {
         "id": 1,
-        "relatorio": resultado_ia,
-        "total_filial": dados_json.get("total_filial", 0),
-        "total_matriz": dados_json.get("total_matriz", 0),
+        "relatorio": json.dumps(dados, ensure_ascii=False),
+        "total_filial": dados.get("total_filial", 0),
+        "total_matriz": dados.get("total_matriz", 0),
         "alunos_criticos": criticos,
         "alunos_moderados": moderados,
         "dados_completos": detalhes,
@@ -179,13 +155,12 @@ def salvar_no_supabase(resultado_ia):
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print("Sucesso: Supabase atualizado com dados reais e separados!")
+    print("Sucesso: Supabase atualizado com dados 100% extraídos!")
 
 if __name__ == "__main__":
-    print("Iniciando extração direta de tabelas...")
+    print("Iniciando extração total direta do DOM...")
     dados = efetuar_scraping_cgd()
-    print("Processando linhas com Gemini...")
-    resultado = processar_com_gemini(dados)
-    print("Gravando no banco de dados...")
-    salvar_no_supabase(resultado)
-    print("Concluído!")
+    print(f"Total capturado: {len(dados['detalhes'])} alunos.")
+    print("Gravando no Supabase...")
+    salvar_no_supabase(dados)
+    print("Finalizado!")
