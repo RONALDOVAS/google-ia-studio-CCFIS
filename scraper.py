@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from playwright.sync_api import sync_playwright
 from google import genai
 from supabase import create_client
@@ -11,7 +12,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def extrair_dados_pagina(page, url_alvo):
-    # Navega para a página do relatório/alunos se fornecida
+    # Navega para a página alvo se fornecida, senão clica no menu Alunos
     if url_alvo and page.url != url_alvo:
         page.goto(url_alvo, wait_until="networkidle")
     else:
@@ -20,33 +21,23 @@ def extrair_dados_pagina(page, url_alvo):
             btn_alunos.click()
             page.wait_for_load_state("networkidle")
 
+    page.wait_for_timeout(4000)
+
+    # Tenta selecionar '100' ou 'Todos' se houver seletores de tamanho sem disparar erros
+    try:
+        selects = page.locator("select").all()
+        for sel in selects:
+            if sel.is_visible():
+                options = sel.locator("option").all_inner_texts()
+                for opt in ["100", "500", "Todos", "All"]:
+                    if opt in options:
+                        sel.select_option(label=opt)
+                        page.wait_for_load_state("networkidle")
+                        break
+    except Exception as e:
+        print(f"Nota na seleção de paginação: {e}")
+
     page.wait_for_timeout(3000)
-
-    # Tenta expandir a quantidade de registros por página na tabela (DataTables/Paginador comum)
-    try:
-        select_length = page.locator('select[name*="length"], select[name*="size"], .dataTables_length select').first
-        if select_length.is_visible():
-            select_length.select_option(value="-1") # Tenta selecionar 'Todos'
-        elif page.locator('select').count() > 0:
-            options = page.locator('select').first.locator('option').all_inner_texts()
-            max_opt = [opt for opt in options if any(x in opt for x in ['100', '500', 'Todos', 'All'])]
-            if max_opt:
-                page.locator('select').first.select_option(label=max_opt[0])
-    except Exception as e:
-        print(f"Aviso ao alterar paginação: {e}")
-
-    # Tenta clicar em botões de Filtrar / Pesquisar se existirem
-    try:
-        btn_buscar = page.locator('button:has-text("Buscar"), button:has-text("Filtrar"), input[value="Buscar"]').first
-        if btn_buscar.is_visible():
-            btn_buscar.click()
-            page.wait_for_load_state("networkidle")
-    except Exception as e:
-        print(f"Aviso ao clicar em buscar: {e}")
-
-    page.wait_for_timeout(5000)
-    
-    # Rola a página para carregar eventual lazy-loading
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     page.wait_for_timeout(2000)
 
@@ -86,7 +77,7 @@ def efetuar_scraping_cgd():
             "timezone_id": "America/Belem"
         }
 
-        # 1. RASPAGEM DA MATRIZ
+        # 1. MATRIZ
         print("Acessando ambiente Matriz...")
         context_matriz = browser.new_context(**context_options)
         page_matriz = context_matriz.new_page()
@@ -94,7 +85,6 @@ def efetuar_scraping_cgd():
 
         try:
             page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-            
             selector_user = 'input[name="email"], input[name="usuario"], input[name="username"], input[type="email"]'
             selector_pass = 'input[name="senha"], input[name="password"], input[type="password"]'
 
@@ -106,7 +96,7 @@ def efetuar_scraping_cgd():
             page_matriz.wait_for_load_state("networkidle")
 
             texto_matriz = extrair_dados_pagina(page_matriz, url_matriz)
-            print(f"--- TAMANHO DADOS MATRIZ: {len(texto_matriz)} chars ---")
+            print(f"--- MATRIZ CAPTURADA: {len(texto_matriz)} chars ---")
 
         except Exception as e:
             print(f"Erro no scraping da Matriz: {e}")
@@ -114,7 +104,7 @@ def efetuar_scraping_cgd():
         finally:
             context_matriz.close()
 
-        # 2. RASPAGEM DA FILIAL
+        # 2. FILIAL
         texto_filial = ""
         if user_filial and pass_filial:
             print("Acessando ambiente Filial...")
@@ -132,7 +122,7 @@ def efetuar_scraping_cgd():
                 page_filial.wait_for_load_state("networkidle")
 
                 texto_filial = extrair_dados_pagina(page_filial, url_filial)
-                print(f"--- TAMANHO DADOS FILIAL: {len(texto_filial)} chars ---")
+                print(f"--- FILIAL CAPTURADA: {len(texto_filial)} chars ---")
 
             except Exception as e:
                 print(f"Erro no scraping da Filial: {e}")
@@ -144,25 +134,25 @@ def efetuar_scraping_cgd():
 
     return f"""
     --- DADOS ALUNOS MATRIZ ---
-    {texto_matriz[:50000]}
+    {texto_matriz[:60000]}
 
     --- DADOS ALUNOS FILIAL ---
-    {texto_filial[:50000]}
+    {texto_filial[:60000]}
     """
 
 def processar_com_gemini(conteudo):
     prompt = f"""
     Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise com atenção TODO o texto bruto extraído do sistema escolar abaixo.
+    Analise o texto bruto extraído do sistema escolar abaixo.
 
     REGRAS DE FILTRAGEM E CONTAGEM:
-    1. Conte TODOS os alunos individuais listados na seção MATRIZ e na seção FILIAL.
+    1. Identifique os alunos listados na seção MATRIZ e na seção FILIAL.
     2. Na MATRIZ: Conte apenas alunos ativos (foco em Laboratório 1 e 2).
     3. Na FILIAL: Conte alunos ativos listados.
     4. Alunos CRÍTICOS: Alunos com mais de 90 dias em curso.
     5. Alunos MODERADOS: Alunos entre 60 e 89 dias em curso.
 
-    IMPORTANTE: Retorne APENAS um JSON válido, sem texto explicativo adicional:
+    IMPORTANTE: Retorne ESTRITAMENTE E APENAS o JSON no formato abaixo, sem marcadores markdown como ```json:
     {{
       "total_matriz": 0,
       "total_filial": 0,
@@ -190,9 +180,14 @@ def salvar_no_supabase(resultado_ia):
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
+    # Tratamento rigoroso para extrair JSON da resposta
     try:
-        texto_limpo = resultado_ia.replace("```json", "").replace("```", "").strip()
-        dados_json = json.loads(texto_limpo)
+        match = re.search(r'\{.*\}', resultado_ia, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            dados_json = json.loads(json_str)
+        else:
+            dados_json = json.loads(resultado_ia)
     except Exception as e:
         print(f"Erro ao converter JSON da IA: {e}")
         dados_json = {}
