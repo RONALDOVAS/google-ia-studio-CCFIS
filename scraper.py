@@ -63,12 +63,10 @@ def efetuar_scraping_cgd():
             page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
             page_matriz.wait_for_load_state("networkidle")
 
-            # Navegação direcionada aos elementos do menu CGD
-            if page_matriz.locator("#relatorioAlunosSB").is_visible():
-                page_matriz.locator("#relatorioAlunosSB").click()
-                page_matriz.wait_for_load_state("networkidle")
-            elif page_matriz.locator('span.title:has-text("Alunos")').is_visible():
-                page_matriz.locator('span.title:has-text("Alunos")').first.click()
+            # Navegação no menu lateral utilizando seletor específico
+            btn_alunos = page_matriz.locator('a:has-text("Alunos")').first
+            if btn_alunos.is_visible():
+                btn_alunos.click()
                 page_matriz.wait_for_load_state("networkidle")
             elif url_matriz and url_matriz != login_url:
                 page_matriz.goto(url_matriz, wait_until="networkidle")
@@ -102,11 +100,9 @@ def efetuar_scraping_cgd():
                 page_filial.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
                 page_filial.wait_for_load_state("networkidle")
 
-                if page_filial.locator("#relatorioAlunosSB").is_visible():
-                    page_filial.locator("#relatorioAlunosSB").click()
-                    page_filial.wait_for_load_state("networkidle")
-                elif page_filial.locator('span.title:has-text("Alunos")').is_visible():
-                    page_filial.locator('span.title:has-text("Alunos")').first.click()
+                btn_alunos_filial = page_filial.locator('a:has-text("Alunos")').first
+                if btn_alunos_filial.is_visible():
+                    btn_alunos_filial.click()
                     page_filial.wait_for_load_state("networkidle")
                 elif url_filial and url_filial != login_url:
                     page_filial.goto(url_filial, wait_until="networkidle")
