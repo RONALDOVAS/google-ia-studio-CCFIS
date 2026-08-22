@@ -11,24 +11,22 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def extrair_pagina_alunos(page, url_alvo):
-    # Navega para a URL alvo de alunos se fornecida
     if url_alvo and url_alvo.strip() and url_alvo != page.url:
-        page.goto(url_alvo, wait_until="networkidle", timeout=45000)
+        page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
     else:
-        # Tenta clicar no menu Alunos caso esteja na Dashboard
         for selector in ['a:has-text("Alunos")', 'a:has-text("Relatórios")', 'a[href*="aluno"]']:
             try:
                 loc = page.locator(selector).first
                 if loc.is_visible():
                     loc.click()
-                    page.wait_for_load_state("networkidle")
+                    page.wait_for_load_state("domcontentloaded")
                     break
             except Exception:
                 pass
 
     page.wait_for_timeout(4000)
 
-    # Altera a paginação do DataTables/Select para exibir todos os registros na mesma página
+    # Tenta expandir a exibição da tabela para carregar todos os registros
     try:
         dropdowns = page.locator("select").all()
         for sel in dropdowns:
@@ -38,58 +36,50 @@ def extrair_pagina_alunos(page, url_alvo):
                     matched = [o for o in options if target.lower() in o.lower()]
                     if matched:
                         sel.select_option(label=matched[0])
-                        page.wait_for_load_state("networkidle")
                         page.wait_for_timeout(3000)
                         break
     except Exception as e:
-        print(f"Aviso ao tentar mudar paginação: {e}")
+        print(f"Aviso na paginação: {e}")
 
-    # Rola até o fim para garantir renderização de lazy loading
+    # Rola até o final para acionar carregamento lazy
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     page.wait_for_timeout(2000)
 
     return page.inner_text("body")
 
-def preencher_e_logar(page, usuario, senha):
-    # Aguarda qualquer input aparecer na tela
-    page.wait_for_selector('input', state="visible", timeout=30000)
-    
-    # Busca dinamicamente os campos de texto e senha
-    inputs = page.locator('input').all()
-    user_field = None
-    pass_field = None
+def efetuar_login_e_extrair(browser, url_login, usuario, senha, url_alvo):
+    context = browser.new_context(
+        viewport={"width": 1920, "height": 1080},
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+    page = context.new_page()
 
-    for inp in inputs:
-        if inp.is_visible():
-            tipo = inp.get_attribute("type") or ""
-            nome = inp.get_attribute("name") or ""
-            
-            if tipo == "password" or "senha" in nome.lower() or "pass" in nome.lower():
-                pass_field = inp
-            elif tipo in ["text", "email"] or any(k in nome.lower() for k in ["user", "login", "email", "usuario"]):
-                if not user_field:
-                    user_field = inp
+    try:
+        # Usa domcontentloaded para evitar travamento em chamadas externas assíncronas
+        page.goto(url_login, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
 
-    if not user_field or not pass_field:
-        # Fallback para primeiro e segundo input visíveis
-        visiveis = [i for i in inputs if i.is_visible()]
-        if len(visiveis) >= 2:
-            user_field, pass_field = visiveis[0], visiveis[1]
+        # Localização flexível dos campos de entrada
+        user_input = page.locator('input[type="text"], input[type="email"], input[name*="user"], input[name*="login"], input[name*="email"]').first
+        pass_input = page.locator('input[type="password"], input[name*="senha"], input[name*="pass"]').first
 
-    if user_field and pass_field:
-        user_field.fill(usuario)
-        pass_field.fill(senha)
-        
-        # Tenta botão de submit
-        submit = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")').first
-        if submit.is_visible():
-            submit.click()
+        user_input.fill(usuario)
+        pass_input.fill(senha)
+
+        # Envia o formulário
+        submit_btn = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")').first
+        if submit_btn.is_visible():
+            submit_btn.click()
         else:
-            pass_field.press("Enter")
-        
-        page.wait_for_load_state("networkidle")
-    else:
-        raise Exception("Não foi possível mapear os campos de login na página.")
+            pass_input.press("Enter")
+
+        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_timeout(3000)
+
+        texto_extraido = extrair_pagina_alunos(page, url_alvo)
+        return texto_extraido
+    finally:
+        context.close()
 
 def efetuar_scraping_cgd():
     login_url = os.environ.get("CGD_LOGIN_URL")
@@ -109,39 +99,21 @@ def efetuar_scraping_cgd():
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--window-size=1920,1080"
+        "--disable-gpu"
     ]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=browser_args)
 
-        # 1. MATRIZ
-        print("Iniciando Matriz...")
-        ctx_matriz = browser.new_context(viewport={"width": 1920, "height": 1080})
-        page_m = ctx_matriz.new_page()
+        print("Processando Matriz...")
+        texto_matriz = efetuar_login_e_extrair(browser, login_url, user_matriz, pass_matriz, url_matriz)
+        print(f"Matriz extraída: {len(texto_matriz)} caracteres.")
 
-        try:
-            page_m.goto(login_url, wait_until="networkidle", timeout=45000)
-            preencher_e_logar(page_m, user_matriz, pass_matriz)
-            texto_matriz = extrair_pagina_alunos(page_m, url_matriz)
-            print(f"Matriz extraída com sucesso: {len(texto_matriz)} caracteres.")
-        finally:
-            ctx_matriz.close()
-
-        # 2. FILIAL
         texto_filial = ""
         if user_filial and pass_filial:
-            print("Iniciando Filial...")
-            ctx_filial = browser.new_context(viewport={"width": 1920, "height": 1080})
-            page_f = ctx_filial.new_page()
-
-            try:
-                page_f.goto(login_url, wait_until="networkidle", timeout=45000)
-                preencher_e_logar(page_f, user_filial, pass_filial)
-                texto_filial = extrair_pagina_alunos(page_f, url_filial)
-                print(f"Filial extraída com sucesso: {len(texto_filial)} caracteres.")
-            finally:
-                ctx_filial.close()
+            print("Processando Filial...")
+            texto_filial = efetuar_login_e_extrair(browser, login_url, user_filial, pass_filial, url_filial)
+            print(f"Filial extraída: {len(texto_filial)} caracteres.")
 
         browser.close()
 
@@ -215,13 +187,13 @@ def salvar_no_supabase(resultado_ia):
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print("Atualização concluída no Supabase!")
+    print("Sucesso! Registro atualizado no Supabase.")
 
 if __name__ == "__main__":
-    print("Iniciando scraping...")
+    print("Iniciando execução...")
     dados = efetuar_scraping_cgd()
-    print("Enviando ao Gemini...")
+    print("Processando com Gemini...")
     resultado = processar_com_gemini(dados)
-    print("Atualizando banco Supabase...")
+    print("Atualizando Supabase...")
     salvar_no_supabase(resultado)
-    print("Sucesso!")
+    print("Concluído!")
