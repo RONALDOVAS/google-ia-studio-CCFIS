@@ -5,42 +5,39 @@ from playwright.sync_api import sync_playwright
 from google import genai
 from supabase import create_client
 
-# Configurações de Clientes API
 gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-def extrair_dados_pagina(page, url_alvo):
-    # Navega para a página alvo se fornecida, senão clica no menu Alunos
-    if url_alvo and page.url != url_alvo:
-        page.goto(url_alvo, wait_until="networkidle")
+def extrair_dados_unidade(page, target_url):
+    # Se houver uma URL direta do relatório/tabela, navega até ela
+    if target_url and target_url.strip():
+        print(f"Navegando diretamente para a URL: {target_url}")
+        page.goto(target_url, wait_until="networkidle", timeout=60000)
     else:
-        btn_alunos = page.locator('a:has-text("Alunos")').first
-        if btn_alunos.is_visible():
-            btn_alunos.click()
-            page.wait_for_load_state("networkidle")
+        # Tentativa de clique em links comuns de menu caso não haja URL direta
+        print("Buscando menu de alunos...")
+        for selector in ['a:has-text("Alunos")', 'a:has-text("Relatórios")', 'a[href*="aluno"]']:
+            try:
+                if page.locator(selector).first.is_visible():
+                    page.locator(selector).first.click()
+                    page.wait_for_load_state("networkidle")
+                    break
+            except Exception:
+                pass
 
-    page.wait_for_timeout(4000)
+    page.wait_for_timeout(5000)
 
-    # Tenta selecionar '100' ou 'Todos' se houver seletores de tamanho sem disparar erros
-    try:
-        selects = page.locator("select").all()
-        for sel in selects:
-            if sel.is_visible():
-                options = sel.locator("option").all_inner_texts()
-                for opt in ["100", "500", "Todos", "All"]:
-                    if opt in options:
-                        sel.select_option(label=opt)
-                        page.wait_for_load_state("networkidle")
-                        break
-    except Exception as e:
-        print(f"Nota na seleção de paginação: {e}")
-
-    page.wait_for_timeout(3000)
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    page.wait_for_timeout(2000)
-
+    # Captura todas as tabelas encontradas na página
+    tables_html = page.locator("table").all_inner_texts()
+    if tables_html:
+        print(f"Encontradas {len(tables_html)} tabela(s) na página.")
+        conteudo_tabelas = "\n--- TABELA ---\n".join(tables_html)
+        return conteudo_tabelas
+    
+    # Se não achar tags <table>, pega todo o texto útil da página
+    print("Nenhuma tag <table> explícita encontrada. Extraindo texto do body...")
     return page.inner_text("body")
 
 def efetuar_scraping_cgd():
@@ -55,104 +52,68 @@ def efetuar_scraping_cgd():
     pass_filial = os.environ.get("CGD_PASS_FILIAL") or os.environ.get("CDG_PASS_FILIAL")
 
     if not login_url or not user_matriz or not pass_matriz:
-        raise ValueError("Credenciais da Matriz não encontradas nos Secrets.")
+        raise ValueError("Credenciais ou URL de login ausentes nos Secrets.")
 
-    browser_args = [
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-infobars",
-        "--window-size=1920,1080"
-    ]
-
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    browser_args = ["--no-sandbox", "--disable-setuid-sandbox", "--window-size=1920,1080"]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=browser_args)
+        
+        # 1. SCRAPING MATRIZ
+        print("--- INICIANDO MATRIZ ---")
+        context_matriz = browser.new_context(viewport={"width": 1920, "height": 1080})
+        page_m = context_matriz.new_page()
+        
+        page_m.goto(login_url, wait_until="domcontentloaded", timeout=45000)
+        
+        # Login
+        page_m.fill('input[name="email"], input[name="usuario"], input[type="text"], input[type="email"]', user_matriz)
+        page_m.fill('input[name="senha"], input[name="password"], input[type="password"]', pass_matriz)
+        page_m.click('button[type="submit"], input[type="submit"]')
+        page_m.wait_for_load_state("networkidle")
+        
+        texto_matriz = extrair_dados_unidade(page_m, url_matriz)
+        print(f"Tamanho do conteúdo extraído da Matriz: {len(texto_matriz)} caracteres")
+        context_matriz.close()
 
-        context_options = {
-            "user_agent": user_agent,
-            "viewport": {"width": 1920, "height": 1080},
-            "locale": "pt-BR",
-            "timezone_id": "America/Belem"
-        }
-
-        # 1. MATRIZ
-        print("Acessando ambiente Matriz...")
-        context_matriz = browser.new_context(**context_options)
-        page_matriz = context_matriz.new_page()
-        page_matriz.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
-        try:
-            page_matriz.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-            selector_user = 'input[name="email"], input[name="usuario"], input[name="username"], input[type="email"]'
-            selector_pass = 'input[name="senha"], input[name="password"], input[type="password"]'
-
-            page_matriz.wait_for_selector(selector_user, state="visible", timeout=30000)
-            page_matriz.locator(selector_user).first.fill(user_matriz)
-            page_matriz.locator(selector_pass).first.fill(pass_matriz)
-            
-            page_matriz.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
-            page_matriz.wait_for_load_state("networkidle")
-
-            texto_matriz = extrair_dados_pagina(page_matriz, url_matriz)
-            print(f"--- MATRIZ CAPTURADA: {len(texto_matriz)} chars ---")
-
-        except Exception as e:
-            print(f"Erro no scraping da Matriz: {e}")
-            raise e
-        finally:
-            context_matriz.close()
-
-        # 2. FILIAL
+        # 2. SCRAPING FILIAL
         texto_filial = ""
         if user_filial and pass_filial:
-            print("Acessando ambiente Filial...")
-            context_filial = browser.new_context(**context_options)
-            page_filial = context_filial.new_page()
-            page_filial.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            print("--- INICIANDO FILIAL ---")
+            context_filial = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page_f = context_filial.new_page()
             
-            try:
-                page_filial.goto(login_url, wait_until="domcontentloaded", timeout=45000)
-                page_filial.wait_for_selector(selector_user, state="visible", timeout=30000)
-                page_filial.locator(selector_user).first.fill(user_filial)
-                page_filial.locator(selector_pass).first.fill(pass_filial)
-                
-                page_filial.click('form#login-form button[type="submit"], form#login-form input[type="submit"], button[type="submit"]')
-                page_filial.wait_for_load_state("networkidle")
-
-                texto_filial = extrair_dados_pagina(page_filial, url_filial)
-                print(f"--- FILIAL CAPTURADA: {len(texto_filial)} chars ---")
-
-            except Exception as e:
-                print(f"Erro no scraping da Filial: {e}")
-                raise e
-            finally:
-                context_filial.close()
+            page_f.goto(login_url, wait_until="domcontentloaded", timeout=45000)
+            page_f.fill('input[name="email"], input[name="usuario"], input[type="text"], input[type="email"]', user_filial)
+            page_f.fill('input[name="senha"], input[name="password"], input[type="password"]', pass_filial)
+            page_f.click('button[type="submit"], input[type="submit"]')
+            page_f.wait_for_load_state("networkidle")
+            
+            texto_filial = extrair_dados_unidade(page_f, url_filial)
+            print(f"Tamanho do conteúdo extraído da Filial: {len(texto_filial)} caracteres")
+            context_filial.close()
 
         browser.close()
 
     return f"""
-    --- DADOS ALUNOS MATRIZ ---
-    {texto_matriz[:60000]}
+    === DADOS UNIDADE MATRIZ ===
+    {texto_matriz[:80000]}
 
-    --- DADOS ALUNOS FILIAL ---
-    {texto_filial[:60000]}
+    === DADOS UNIDADE FILIAL ===
+    {texto_filial[:80000]}
     """
 
 def processar_com_gemini(conteudo):
     prompt = f"""
-    Você é um assistente de gestão escolar do CFIS/CGD.
-    Analise o texto bruto extraído do sistema escolar abaixo.
+    Você é um analisador de dados escolares.
+    Analise a listagem abaixo obtida das unidades Matriz e Filial.
 
-    REGRAS DE FILTRAGEM E CONTAGEM:
-    1. Identifique os alunos listados na seção MATRIZ e na seção FILIAL.
-    2. Na MATRIZ: Conte apenas alunos ativos (foco em Laboratório 1 e 2).
-    3. Na FILIAL: Conte alunos ativos listados.
-    4. Alunos CRÍTICOS: Alunos com mais de 90 dias em curso.
-    5. Alunos MODERADOS: Alunos entre 60 e 89 dias em curso.
+    INSTRUÇÕES:
+    1. Conte e liste todos os alunos reais presentes no texto.
+    2. Calcule os totais para Matriz e Filial.
+    3. Identifique alunos CRÍTICOS (>90 dias em curso) e MODERADOS (60 a 89 dias).
 
-    IMPORTANTE: Retorne ESTRITAMENTE E APENAS o JSON no formato abaixo, sem marcadores markdown como ```json:
+    Responda APENAS com o JSON no seguinte formato (sem formatação extra em markdown):
     {{
       "total_matriz": 0,
       "total_filial": 0,
@@ -163,7 +124,7 @@ def processar_com_gemini(conteudo):
       ]
     }}
 
-    Dados Brutos Extraídos:
+    CONTEÚDO PARA ANÁLISE:
     {conteudo}
     """
     
@@ -175,21 +136,19 @@ def processar_com_gemini(conteudo):
 
 def salvar_no_supabase(resultado_ia):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Aviso: Variáveis do Supabase não configuradas.")
+        print("Aviso: Supabase não configurado.")
         return
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    # Tratamento rigoroso para extrair JSON da resposta
     try:
         match = re.search(r'\{.*\}', resultado_ia, re.DOTALL)
         if match:
-            json_str = match.group(0)
-            dados_json = json.loads(json_str)
+            dados_json = json.loads(match.group(0))
         else:
             dados_json = json.loads(resultado_ia)
     except Exception as e:
-        print(f"Erro ao converter JSON da IA: {e}")
+        print(f"Erro ao processar JSON da IA: {e}")
         dados_json = {}
 
     payload = {
@@ -204,17 +163,13 @@ def salvar_no_supabase(resultado_ia):
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print("Dados gravados no Supabase com sucesso!")
+    print("Gravação no Supabase finalizada com sucesso!")
 
 if __name__ == "__main__":
-    print("Iniciando scraping do CGD com Playwright...")
-    try:
-        dados = efetuar_scraping_cgd()
-        print("Processando dados no Gemini...")
-        resultado = processar_com_gemini(dados)
-        print("Enviando dados para o Supabase...")
-        salvar_no_supabase(resultado)
-        print("Processo concluído com sucesso!")
-    except Exception as e:
-        print(f"Erro crítico durante a execução: {e}")
-        raise e
+    print("Executando automação de extração do CGD...")
+    dados = efetuar_scraping_cgd()
+    print("Enviando dados para o Gemini...")
+    resultado = processar_com_gemini(dados)
+    print("Atualizando banco de dados no Supabase...")
+    salvar_no_supabase(resultado)
+    print("Concluído!")
