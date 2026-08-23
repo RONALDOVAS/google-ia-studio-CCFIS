@@ -24,29 +24,27 @@ def classificar_aluno(dias_sem_frequencia, faltas=0):
 
 def extrair_dados_tabela(page, nome_unidade):
     try:
-        page.wait_for_selector("table", timeout=25000)
+        # Aguarda no máximo 12 segundos pela tabela
+        page.wait_for_selector("table", timeout=12000)
     except Exception:
-        print(f"Tabela não encontrada após navegação em {nome_unidade}. URL: {page.url}")
+        print(f"Tabela não localizada em {nome_unidade}. URL atual: {page.url}")
         return []
 
-    # Ajusta paginação para exibir o máximo de alunos por página
+    # Tenta expandir o Datatables para exibir mais registros
     try:
         select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
         if select_elem:
-            for opcao in ['1000', '500', '100']:
-                try:
-                    page.select_option('select[name*="length"], select[name*="table_length"]', opcao)
-                    page.wait_for_timeout(2500)
-                    break
-                except Exception:
-                    continue
+            page.select_option('select[name*="length"], select[name*="table_length"]', '500')
+            page.wait_for_timeout(2000)
     except Exception:
         pass
 
     alunos_coletados = []
     chaves_processadas = set()
+    pagina_atual = 1
+    MAX_PAGINAS = 50  # Trava de segurança contra loop infinito
 
-    while True:
+    while pagina_atual <= MAX_PAGINAS:
         rows = page.query_selector_all("table tbody tr")
         novos_nesta_pagina = 0
 
@@ -57,7 +55,7 @@ def extrair_dados_tabela(page, nome_unidade):
 
             linha_texto = row.inner_text().lower()
 
-            # Filtros obrigatórios: Informática + Alunos Ativos
+            # Filtros: Apenas Informática + Ativos
             if "informática" not in linha_texto and "informatica" not in linha_texto:
                 continue
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
@@ -94,17 +92,25 @@ def extrair_dados_tabela(page, nome_unidade):
             }
             alunos_coletados.append(aluno)
 
+        print(f"Página {pagina_atual}: {novos_nesta_pagina} novos alunos capturados.")
+
+        # Se não encontrou nenhum novo aluno nesta página, encerra
+        if novos_nesta_pagina == 0 and pagina_atual > 1:
+            break
+
+        # Tenta avançar para a próxima página
         next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
         if next_btn and next_btn.is_visible():
             try:
                 next_btn.click()
-                page.wait_for_timeout(1500)
+                pagina_atual += 1
+                page.wait_for_timeout(1200)
             except Exception:
                 break
         else:
             break
 
-    print(f"Sucesso: {len(alunos_coletados)} alunos filtrados em {nome_unidade}.")
+    print(f"Total filtrado em {nome_unidade}: {len(alunos_coletados)} alunos.")
     return alunos_coletados
 
 def extrair_alunos_completos():
@@ -134,58 +140,32 @@ def extrair_alunos_completos():
         usuario = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
-        print(f"1. Entrando na página de login: {login_url}")
-        page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+        print(f"1. Acessando login: {login_url}")
+        page.goto(login_url, wait_until="domcontentloaded", timeout=20000)
 
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
 
         try:
-            page.wait_for_selector(seletor_user, timeout=10000, state="visible")
+            page.wait_for_selector(seletor_user, timeout=8000, state="visible")
             page.locator(seletor_user).first.fill(usuario)
             page.locator(seletor_pass).first.fill(senha)
-            page.wait_for_timeout(500)
-
-            print("Enviando login...")
-            btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
             
+            btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
             if btn_login.is_visible():
                 btn_login.click()
             else:
                 page.locator(seletor_pass).first.press("Enter")
 
-            page.wait_for_timeout(5000)
-            page.wait_for_load_state("networkidle")
-            print(f"Login concluído. URL atual: {page.url}")
+            page.wait_for_timeout(4000)
+            print(f"Login finalizado. Posição atual: {page.url}")
         except Exception as err:
-            print(f"Aviso no login: {err}")
+            print(f"Erro no fluxo de login: {err}")
 
-        # Tenta clicar no menu de relatório do sistema primeiro (interação humana)
-        print("Buscando link do relatório no menu do painel...")
-        relatorio_clicado = False
-        selectors_menu = [
-            'a:has-text("Alunos")',
-            'a:has-text("Relatório")',
-            'a:has-text("Matriz")',
-            f'a[href*="{matriz_url.replace("https://app.cgd.com.br", "")}"]'
-        ]
-
-        for sel in selectors_menu:
-            try:
-                elem = page.locator(sel).first
-                if elem.is_visible():
-                    elem.click()
-                    page.wait_for_timeout(4000)
-                    relatorio_clicado = True
-                    print(f"Clique efetuado via menu ({sel}). URL: {page.url}")
-                    break
-            except Exception:
-                continue
-
-        # Fallback de navegação se o clique no menu não ocorreu
-        if not relatorio_clicado and matriz_url:
-            print(f"Acessando relatório via requisição direta: {matriz_url}")
-            page.goto(matriz_url, wait_until="networkidle", timeout=30000)
+        # Navega para a URL da Matriz após estabelecer a sessão
+        if matriz_url:
+            print(f"Navegando para o relatório: {matriz_url}")
+            page.goto(matriz_url, wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(3000)
 
         alunos = extrair_dados_tabela(page, "Matriz")
@@ -219,7 +199,7 @@ def atualizar_supabase():
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"Sucesso! {total_registros} alunos salvos no Supabase.")
+    print(f"Sucesso! {total_registros} alunos gravados no Supabase.")
 
 if __name__ == "__main__":
     atualizar_supabase()
