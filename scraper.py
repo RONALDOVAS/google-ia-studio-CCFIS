@@ -29,7 +29,6 @@ def extrair_alunos_da_tabela(page, nome_unidade):
         print(f"Tabela de alunos não localizada em {nome_unidade}. URL: {page.url}")
         return []
 
-    # Ajusta o tamanho da paginação se existir o seletor DataTables
     try:
         select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
         if select_elem:
@@ -54,11 +53,11 @@ def extrair_alunos_da_tabela(page, nome_unidade):
 
             linha_texto = row.inner_text().lower()
 
-            # 1. Filtro de exclusão por Status
+            # Descarte de inativos
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
                 continue
 
-            # 2. SUA SACADA: Filtro de exclusão de Formação Profissional
+            # Descarte de Formação Profissional
             if "formação profissional" in linha_texto or "formacao profissional" in linha_texto or "profissionalizante" in linha_texto:
                 continue
 
@@ -112,7 +111,13 @@ def extrair_alunos_da_tabela(page, nome_unidade):
     print(f"Total extraído em {nome_unidade}: {len(alunos_coletados)} alunos.")
     return alunos_coletados
 
-def processar_unidade(context, nome_unidade, usuario, senha, alunos_url):
+def processar_unidade(browser, nome_unidade, usuario, senha, alunos_url):
+    # Cria um contexto 100% limpo sem cookies compartilhados
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        viewport={"width": 1366, "height": 768},
+        locale="pt-BR"
+    )
     page = context.new_page()
     if STEALTH_ATIVO:
         stealth_sync(page)
@@ -126,7 +131,7 @@ def processar_unidade(context, nome_unidade, usuario, senha, alunos_url):
     seletor_pass = 'input[type="password"]'
 
     try:
-        page.wait_for_selector(seletor_user, timeout=8000, state="visible")
+        page.wait_for_selector(seletor_user, timeout=10000, state="visible")
         page.locator(seletor_user).first.fill(usuario)
         page.locator(seletor_pass).first.fill(senha)
         page.wait_for_timeout(300)
@@ -146,7 +151,14 @@ def processar_unidade(context, nome_unidade, usuario, senha, alunos_url):
     page.wait_for_timeout(2500)
 
     alunos = extrair_alunos_da_tabela(page, nome_unidade)
-    page.close()
+    
+    # Executa o logout e fecha o contexto do navegador
+    try:
+        page.goto("https://app.cgd.com.br/logout", timeout=5000)
+    except Exception:
+        pass
+    context.close()
+    
     return alunos
 
 def extrair_todos_alunos():
@@ -160,12 +172,6 @@ def extrair_todos_alunos():
                 "--disable-dev-shm-usage"
             ]
         )
-        
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768},
-            locale="pt-BR"
-        )
 
         user_matriz = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         pass_matriz = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
@@ -175,8 +181,9 @@ def extrair_todos_alunos():
         pass_filial = (os.environ.get("CGD_PASS_FILIAL") or pass_matriz).strip()
         url_filial = "https://app.cgd.com.br/alunos"
 
-        alunos_matriz = processar_unidade(context, "Matriz", user_matriz, pass_matriz, url_matriz)
-        alunos_filial = processar_unidade(context, "Filial", user_filial, pass_filial, url_filial)
+        # Execução com contextos isolados
+        alunos_matriz = processar_unidade(browser, "Matriz", user_matriz, pass_matriz, url_matriz)
+        alunos_filial = processar_unidade(browser, "Filial", user_filial, pass_filial, url_filial)
 
         browser.close()
         return alunos_matriz + alunos_filial
