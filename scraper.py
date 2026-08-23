@@ -29,7 +29,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
         print(f"Tabela de alunos não localizada em {nome_unidade}. URL: {page.url}")
         return []
 
-    # Tenta expandir o limite de linhas do DataTables
+    # Ajusta o tamanho da paginação se existir o seletor DataTables
     try:
         select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
         if select_elem:
@@ -54,13 +54,17 @@ def extrair_alunos_da_tabela(page, nome_unidade):
 
             linha_texto = row.inner_text().lower()
 
-            # Descarta inativos/cancelados
+            # 1. Filtro de exclusão por Status
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
+                continue
+
+            # 2. SUA SACADA: Filtro de exclusão de Formação Profissional
+            if "formação profissional" in linha_texto or "formacao profissional" in linha_texto or "profissionalizante" in linha_texto:
                 continue
 
             col_0 = cols[0].inner_text().strip()
             col_1 = cols[1].inner_text().strip()
-            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else "Informática"
+            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else "Geral / Informática"
 
             chave_unica = f"{nome_unidade}_{col_0}_{col_1}"
             if chave_unica in chaves_processadas:
@@ -69,7 +73,6 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             chaves_processadas.add(chave_unica)
             novos_nesta_pagina += 1
 
-            # Mapeamento de faltas/dias sem frequencia se existirem nas colunas
             col_dias = cols[3].inner_text().strip() if len(cols) >= 4 else "0"
             col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
 
@@ -90,7 +93,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             }
             alunos_coletados.append(aluno)
 
-        print(f"Página {pagina_atual} ({nome_unidade}): {novos_nesta_pagina} alunos capturados.")
+        print(f"Página {pagina_atual} ({nome_unidade}): {novos_nesta_pagina} alunos válidos capturados.")
 
         if novos_nesta_pagina == 0 and pagina_atual > 1:
             break
@@ -115,7 +118,7 @@ def processar_unidade(context, nome_unidade, usuario, senha, alunos_url):
         stealth_sync(page)
 
     login_url = "https://app.cgd.com.br"
-    print(f"\n--- Iniciando coleta para: {nome_unidade} ---")
+    print(f"\n--- Processando {nome_unidade} ---")
     
     page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
 
@@ -138,7 +141,7 @@ def processar_unidade(context, nome_unidade, usuario, senha, alunos_url):
     except Exception as err:
         print(f"Aviso no login ({nome_unidade}): {err}")
 
-    print(f"Acessando listagem de alunos da {nome_unidade}: {alunos_url}")
+    print(f"Navegando para lista de alunos ({nome_unidade}): {alunos_url}")
     page.goto(alunos_url, wait_until="domcontentloaded", timeout=25000)
     page.wait_for_timeout(2500)
 
@@ -164,32 +167,19 @@ def extrair_todos_alunos():
             locale="pt-BR"
         )
 
-        # Configurações da Matriz
         user_matriz = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         pass_matriz = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
-        url_matriz = (os.environ.get("CGD_MATRIZ_URL") or "https://app.cgd.com.br/alunos").strip()
-        
-        if "relatorios" in url_matriz:
-            url_matriz = "https://app.cgd.com.br/alunos"
+        url_matriz = "https://app.cgd.com.br/alunos"
 
-        # Configurações da Filial
         user_filial = (os.environ.get("CGD_USER_FILIAL") or user_matriz).strip()
         pass_filial = (os.environ.get("CGD_PASS_FILIAL") or pass_matriz).strip()
-        url_filial = (os.environ.get("CGD_FILIAL_URL") or url_matriz).strip()
+        url_filial = "https://app.cgd.com.br/alunos"
 
-        if "relatorios" in url_filial:
-            url_filial = "https://app.cgd.com.br/alunos"
-
-        # Coleta Matriz
         alunos_matriz = processar_unidade(context, "Matriz", user_matriz, pass_matriz, url_matriz)
-
-        # Coleta Filial
         alunos_filial = processar_unidade(context, "Filial", user_filial, pass_filial, url_filial)
 
         browser.close()
-        
-        todos_alunos = alunos_matriz + alunos_filial
-        return todos_alunos
+        return alunos_matriz + alunos_filial
 
 def atualizar_supabase():
     alunos = extrair_todos_alunos()
@@ -218,7 +208,7 @@ def atualizar_supabase():
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"\nSucesso absoluto! {total_registros} alunos gravados no Supabase (Matriz: {total_matriz} | Filial: {total_filial}).")
+    print(f"\nSucesso! {total_registros} alunos gravados no Supabase (Matriz: {total_matriz} | Filial: {total_filial}).")
 
 if __name__ == "__main__":
     atualizar_supabase()
