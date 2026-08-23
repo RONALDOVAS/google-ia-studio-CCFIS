@@ -24,7 +24,7 @@ def extrair_alunos_completos():
         usuario = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER")
         senha = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS")
 
-        # Verifica se há um formulário de login visível
+        # Localiza os campos de entrada de login
         input_usuario = page.query_selector('input[type="text"], input[type="email"], input[name*="user"], input[name*="login"], input[id*="user"]')
         input_senha = page.query_selector('input[type="password"]')
 
@@ -32,10 +32,18 @@ def extrair_alunos_completos():
             print("Formulário de login detectado. Realizando autenticação...")
             input_usuario.fill(usuario)
             input_senha.fill(senha)
-            
-            # Submete o formulário via tecla ENTER (evita falhas de botões invisíveis)
-            input_senha.press("Enter")
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(1000)
+
+            # Localiza e clica no botão de submit explicitamente
+            btn_submit = page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+            if btn_submit:
+                btn_submit.click()
+            else:
+                input_senha.press("Enter")
+
+            # Aguarda a navegação pós-login
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(4000)
         else:
             print("Nenhum formulário de login explícito encontrado. Prosseguindo...")
 
