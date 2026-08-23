@@ -4,7 +4,6 @@ import time
 from playwright.sync_api import sync_playwright
 from supabase import create_client, Client
 
-# Configurações do Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -12,61 +11,52 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def extrair_alunos_completos():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # Contexto simulando navegador real de computador para evitar bloqueios
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 720}
+            viewport={"width": 1366, "height": 768}
         )
         page = context.new_page()
 
-        # Resgate das credenciais e URLs das variáveis de ambiente
-        login_url = os.environ.get("CGD_LOGIN_URL") or os.environ.get("CGD_MATRIZ_URL") or "https://app.cgd.com.br/login"
+        login_url = os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br"
         usuario = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER")
         senha = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS")
 
         print(f"Acessando URL de Login: {login_url}")
-        page.goto(login_url, wait_until="networkidle", timeout=30000)
+        page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000)
 
-        # 1. AUTENTICAÇÃO NO PORTAL CGD
+        # 1. TENTATIVA DE LOGIN FLEXÍVEL (Procura por múltiplos seletores comuns)
+        seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[id*="user"], input[id*="login"], input[type="text"]'
+        seletor_pass = 'input[type="password"]'
+
         try:
-            # Aguarda o campo de usuário ou email carregar
-            page.wait_for_selector('input[type="text"], input[type="email"], input[name*="user"], input[name*="login"]', timeout=10000)
+            # Aguarda qualquer input visível
+            page.wait_for_selector(seletor_user, timeout=10000, state="visible")
             
-            # Preenche os campos
-            inputs = page.query_selector_all('input')
-            for inp in inputs:
-                inp_type = inp.get_attribute('type') or ''
-                inp_name = inp.get_attribute('name') or ''
-                
-                if inp_type in ['text', 'email'] or 'user' in inp_name or 'login' in inp_name:
-                    inp.fill(usuario)
-                elif inp_type == 'password':
-                    inp.fill(senha)
+            # Preenche Usuário e Senha nos primeiros campos visíveis encontrados
+            page.locator(seletor_user).first.fill(usuario)
+            page.locator(seletor_pass).first.fill(senha)
+            page.wait_for_timeout(500)
 
-            print("Credenciais preenchidas. Efetuando o login...")
-            
-            # Clica no botão de submissão
-            btn = page.query_selector('button[type="submit"], input[type="submit"], button')
-            if btn:
-                btn.click()
+            # Clica no botão de envio
+            btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), .btn-primary').first
+            if btn_login.is_visible():
+                btn_login.click()
             else:
                 page.keyboard.press("Enter")
 
-            # Aguarda o redirecionamento e criação do cookie de sessão
-            page.wait_for_load_state("networkidle")
             page.wait_for_timeout(5000)
-            
-        except Exception as e:
-            print(f"Aviso na etapa de login: {e}")
+        except Exception as err:
+            print(f"Erro na tentativa de preenchimento automatizado: {err}")
 
-        # 2. NAVEGAÇÃO PARA A TELA DE RELATÓRIO/DADOS
+        # 2. NAVEGAÇÃO PARA A PÁGINA DO RELATÓRIO
         relatorio_url = os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url
         if page.url != relatorio_url:
             print(f"Navegando para a página de alunos: {relatorio_url}")
-            page.goto(relatorio_url, wait_until="networkidle", timeout=30000)
+            page.goto(relatorio_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(3000)
 
-        # 3. VERIFICAÇÃO DA TABELA
+        # 3. EXTRAÇÃO DA TABELA
         try:
             page.wait_for_selector("table", timeout=15000)
             print("Tabela capturada com sucesso!")
@@ -76,21 +66,21 @@ def extrair_alunos_completos():
             browser.close()
             return []
 
-        # 4. EXIBIR TODOS OS REGISTROS (Sem paginação)
+        # 4. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
-        todos_exibidos_de_uma_vez = False
+        todos_exibidos = False
         
         if select_length:
             for val in ['-1', '10000', '1000', '500']:
                 try:
                     page.select_option('select[name*="length"], select[name*="table_length"]', val)
                     page.wait_for_timeout(2000)
-                    todos_exibidos_de_uma_vez = True
+                    todos_exibidos = True
                     break
                 except:
                     continue
 
-        # 5. EXTRAÇÃO DOS ALUNOS
+        # 5. COLETA DE REGISTROS
         todos_alunos = []
         contratos_processados = set()
 
@@ -112,10 +102,7 @@ def extrair_alunos_completos():
                     novos_nesta_pagina += 1
 
                     turma_unidade = cols[2].inner_text().strip()
-                    
-                    unidade_detectada = "Filial"
-                    if "matriz" in turma_unidade.lower() or "central" in turma_unidade.lower():
-                        unidade_detectada = "Matriz"
+                    unidade_detectada = "Matriz" if ("matriz" in turma_unidade.lower() or "central" in turma_unidade.lower()) else "Filial"
 
                     aluno = {
                         "contrato": nome_aluno,       
@@ -128,7 +115,7 @@ def extrair_alunos_completos():
                     }
                     todos_alunos.append(aluno)
 
-            if todos_exibidos_de_uma_vez or novos_nesta_pagina == 0:
+            if todos_exibidos or novos_nesta_pagina == 0:
                 break
 
             next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
@@ -162,8 +149,8 @@ def atualizar_supabase():
         "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
     }
 
-    response = supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"Sucesso! Atualizado registro no Supabase com {total_registros} alunos (Matriz: {total_matriz}, Filial: {total_filial}).")
+    supabase.table("resumo_cgd").upsert(payload).execute()
+    print(f"Sucesso! Registros atualizados no Supabase: {total_registros} alunos.")
 
 if __name__ == "__main__":
     atualizar_supabase()
