@@ -14,15 +14,19 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def classificar_aluno(dias_sem_frequencia, faltas=0):
-    if dias_sem_frequencia >= 90 or faltas >= 10:
-        return "Crítico", "Aulão"
-    elif 60 <= dias_sem_frequencia < 90 or 5 <= faltas < 10:
-        return "Moderado", "Atividade prática"
-    elif 30 <= dias_sem_frequencia < 60 or 2 <= faltas < 5:
-        return "Atenção", "Acompanhamento"
+def classificar_aluno(dias_sem_frequencia, faltas, reposicoes=0):
+    # Cada reposição anula uma falta
+    faltas_efetivas = max(0, faltas - reposicoes)
+
+    # Regra de Bloqueio: 3 faltas efetivas ou 90 dias de inatividade
+    if faltas_efetivas >= 3 or dias_sem_frequencia >= 90:
+        return "Crítico", "BLOQUEADO"
+    elif faltas_efetivas == 2 or (60 <= dias_sem_frequencia < 90):
+        return "Moderado", "ATENÇÃO"
+    elif faltas_efetivas == 1 or (30 <= dias_sem_frequencia < 60):
+        return "Atenção", "OBSERVAÇÃO"
     else:
-        return "Normal", "Normal"
+        return "Normal", "REGULAR"
 
 def extrair_alunos_da_tabela(page, nome_unidade):
     try:
@@ -63,9 +67,9 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             if "formação profissional" in linha_texto or "formacao profissional" in linha_texto or "profissionalizante" in linha_texto:
                 continue
 
-            col_0 = cols[0].inner_text().strip()
-            col_1 = cols[1].inner_text().strip()
-            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else "Geral / Informática"
+            col_0 = cols[0].inner_text().strip()  # Contrato
+            col_1 = cols[1].inner_text().strip()  # Nome
+            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else ""  # Curso Real / Pacote
 
             chave_unica = f"{nome_unidade}_{col_0}_{col_1}"
             if chave_unica in chaves_processadas:
@@ -76,12 +80,24 @@ def extrair_alunos_da_tabela(page, nome_unidade):
 
             col_dias = cols[3].inner_text().strip() if len(cols) >= 4 else "0"
             col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
+            col_reposicoes = cols[5].inner_text().strip() if len(cols) >= 6 else "0"
+            col_disciplina = cols[6].inner_text().strip() if len(cols) >= 7 else ""
+            col_ultimo_acesso = cols[7].inner_text().strip() if len(cols) >= 8 else ""
 
             dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
             faltas = int(col_faltas) if col_faltas.isdigit() else 0
+            reposicoes = int(col_reposicoes) if col_reposicoes.isdigit() else 0
 
-            # Classificação por 4 Níveis e Tratativa
-            criticidade, tratativa = classificar_aluno(dias_sem_freq, faltas)
+            # Aplicação da classificação com cálculo de reposição
+            criticidade, status_bloqueio = classificar_aluno(dias_sem_freq, faltas, reposicoes)
+
+            # Formatação do texto do último acesso baseado nos dias reais
+            if col_ultimo_acesso:
+                texto_ultimo_acesso = col_ultimo_acesso
+            elif dias_sem_freq == 0:
+                texto_ultimo_acesso = "Sem registros de ausência"
+            else:
+                texto_ultimo_acesso = f"Há {dias_sem_freq} dia(s)"
 
             aluno = {
                 "contrato": col_0,
@@ -90,12 +106,13 @@ def extrair_alunos_da_tabela(page, nome_unidade):
                 "unidade": nome_unidade,
                 "dias": dias_sem_freq,
                 "faltas": faltas,
-                "criticidade": criticidade,      # Crítico, Moderado, Atenção, Normal
-                "tratativa": tratativa,          # Aulão, Atividade prática, Acompanhamento, Normal
-                "status_tratativa": "Pendente" if criticidade != "Normal" else "Normal", # Pendente, Em andamento, Concluído, Normal
-                "ultimo_acesso": f"{dias_sem_freq} dias atrás" if dias_sem_freq > 0 else "Hoje",
-                "disciplina_andamento": "Informática / Módulo Ativo",
-                "ritmo_aluno": "Atenção" if dias_sem_freq > 30 else "Regular",
+                "reposicoes": reposicoes,
+                "faltas_efetivas": max(0, faltas - reposicoes),
+                "criticidade": criticidade,
+                "status": status_bloqueio,
+                "status_tratativa": "Pendente" if criticidade != "Normal" else "Normal",
+                "ultimo_acesso": texto_ultimo_acesso,
+                "disciplina_andamento": col_disciplina,
                 "link_cgd": f"https://app.cgd.com.br/contratos/{col_0}"
             }
             alunos_coletados.append(aluno)
@@ -209,7 +226,6 @@ def atualizar_supabase():
     alunos_criticos = len([a for a in alunos if a.get("criticidade") == "Crítico"])
     alunos_moderados = len([a for a in alunos if a.get("criticidade") == "Moderado"])
 
-    # Mantém apenas as colunas padrão existentes na tabela resumo_cgd
     payload = {
         "id": 1,
         "total_filial": total_filial,
