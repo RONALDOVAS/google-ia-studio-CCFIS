@@ -12,59 +12,71 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def extrair_alunos_completos():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        # Contexto simulando navegador real de computador para evitar bloqueios
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720}
+        )
         page = context.new_page()
 
-        # 1. Tentar acessar a URL principal
-        login_url = os.environ.get("CGD_LOGIN_URL") or os.environ.get("CGD_MATRIZ_URL")
-        print(f"Acessando URL: {login_url}")
-        page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(3000)
-
+        # Resgate das credenciais e URLs das variáveis de ambiente
+        login_url = os.environ.get("CGD_LOGIN_URL") or os.environ.get("CGD_MATRIZ_URL") or "https://app.cgd.com.br/login"
         usuario = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER")
         senha = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS")
 
-        # Localiza os campos de entrada de login
-        input_usuario = page.query_selector('input[type="text"], input[type="email"], input[name*="user"], input[name*="login"], input[id*="user"]')
-        input_senha = page.query_selector('input[type="password"]')
+        print(f"Acessando URL de Login: {login_url}")
+        page.goto(login_url, wait_until="networkidle", timeout=30000)
 
-        if input_usuario and input_senha:
-            print("Formulário de login detectado. Realizando autenticação...")
-            input_usuario.fill(usuario)
-            input_senha.fill(senha)
-            page.wait_for_timeout(1000)
+        # 1. AUTENTICAÇÃO NO PORTAL CGD
+        try:
+            # Aguarda o campo de usuário ou email carregar
+            page.wait_for_selector('input[type="text"], input[type="email"], input[name*="user"], input[name*="login"]', timeout=10000)
+            
+            # Preenche os campos
+            inputs = page.query_selector_all('input')
+            for inp in inputs:
+                inp_type = inp.get_attribute('type') or ''
+                inp_name = inp.get_attribute('name') or ''
+                
+                if inp_type in ['text', 'email'] or 'user' in inp_name or 'login' in inp_name:
+                    inp.fill(usuario)
+                elif inp_type == 'password':
+                    inp.fill(senha)
 
-            # Localiza e clica no botão de submit explicitamente
-            btn_submit = page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
-            if btn_submit:
-                btn_submit.click()
+            print("Credenciais preenchidas. Efetuando o login...")
+            
+            # Clica no botão de submissão
+            btn = page.query_selector('button[type="submit"], input[type="submit"], button')
+            if btn:
+                btn.click()
             else:
-                input_senha.press("Enter")
+                page.keyboard.press("Enter")
 
-            # Aguarda a navegação pós-login
+            # Aguarda o redirecionamento e criação do cookie de sessão
             page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(4000)
-        else:
-            print("Nenhum formulário de login explícito encontrado. Prosseguindo...")
+            page.wait_for_timeout(5000)
+            
+        except Exception as e:
+            print(f"Aviso na etapa de login: {e}")
 
-        # 2. Navegar para a página do relatório de alunos
-        relatorio_url = os.environ.get("URL_ALUNOS_MATRIZ") or login_url
+        # 2. NAVEGAÇÃO PARA A TELA DE RELATÓRIO/DADOS
+        relatorio_url = os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url
         if page.url != relatorio_url:
-            print(f"Navegando para a página de dados: {relatorio_url}")
-            page.goto(relatorio_url, wait_until="domcontentloaded", timeout=30000)
+            print(f"Navegando para a página de alunos: {relatorio_url}")
+            page.goto(relatorio_url, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(3000)
 
-        # Aguarda a tabela carregar na tela
+        # 3. VERIFICAÇÃO DA TABELA
         try:
             page.wait_for_selector("table", timeout=15000)
-            print("Tabela encontrada com sucesso!")
-        except Exception as e:
-            print(f"Erro ao localizar a tabela. URL atual: {page.url}")
-            print(f"Conteúdo do Título da Página: {page.title()}")
+            print("Tabela capturada com sucesso!")
+        except Exception:
+            print(f"Falha de acesso. URL atual: {page.url}")
+            print(f"Título da Página: {page.title()}")
             browser.close()
             return []
 
-        # 3. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS
+        # 4. EXIBIR TODOS OS REGISTROS (Sem paginação)
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
         todos_exibidos_de_uma_vez = False
         
@@ -78,7 +90,7 @@ def extrair_alunos_completos():
                 except:
                     continue
 
-        # 4. Extração de registros com verificação contra duplicados
+        # 5. EXTRAÇÃO DOS ALUNOS
         todos_alunos = []
         contratos_processados = set()
 
