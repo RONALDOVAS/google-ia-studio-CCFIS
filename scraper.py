@@ -22,21 +22,21 @@ def classificar_aluno(dias_sem_frequencia, faltas=0):
     else:
         return "LEVE", "REGULAR"
 
-def extrair_alunos_da_tabela(page, nome_unidade):
+def extrair_dados_tabela(page, nome_unidade):
     try:
-        page.wait_for_selector("table", timeout=20000)
+        page.wait_for_selector("table", timeout=25000)
     except Exception:
-        print(f"Erro: Tabela não localizada em {nome_unidade}. URL atual: {page.url}")
+        print(f"Tabela não encontrada após navegação em {nome_unidade}. URL: {page.url}")
         return []
 
-    # Tenta expandir o Datatables se existir
+    # Ajusta paginação para exibir o máximo de alunos por página
     try:
         select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
         if select_elem:
             for opcao in ['1000', '500', '100']:
                 try:
                     page.select_option('select[name*="length"], select[name*="table_length"]', opcao)
-                    page.wait_for_timeout(2000)
+                    page.wait_for_timeout(2500)
                     break
                 except Exception:
                     continue
@@ -57,7 +57,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
 
             linha_texto = row.inner_text().lower()
 
-            # Filtros rígidos: Apenas Informática e Ativos
+            # Filtros obrigatórios: Informática + Alunos Ativos
             if "informática" not in linha_texto and "informatica" not in linha_texto:
                 continue
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
@@ -104,7 +104,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
         else:
             break
 
-    print(f"Total coletado em {nome_unidade} (Informática + Ativos): {len(alunos_coletados)}")
+    print(f"Sucesso: {len(alunos_coletados)} alunos filtrados em {nome_unidade}.")
     return alunos_coletados
 
 def extrair_alunos_completos():
@@ -131,13 +131,11 @@ def extrair_alunos_completos():
 
         login_url = (os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br").strip()
         matriz_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or "").strip()
-        filial_url = (os.environ.get("CGD_FILIAL_URL") or "").strip()
-
         usuario = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
-        print(f"1. Acessando tela de login: {login_url}")
-        page.goto(login_url, wait_until="networkidle", timeout=30000)
+        print(f"1. Entrando na página de login: {login_url}")
+        page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
@@ -148,48 +146,58 @@ def extrair_alunos_completos():
             page.locator(seletor_pass).first.fill(senha)
             page.wait_for_timeout(500)
 
-            print("Enviando formulário e aguardando sessão...")
+            print("Enviando login...")
             btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
             
-            with page.expect_navigation(wait_until="networkidle", timeout=30000):
-                if btn_login.is_visible():
-                    btn_login.click()
-                else:
-                    page.locator(seletor_pass).first.press("Enter")
+            if btn_login.is_visible():
+                btn_login.click()
+            else:
+                page.locator(seletor_pass).first.press("Enter")
 
-            page.wait_for_timeout(3000)
-            print(f"Login validado com sucesso! Página atual: {page.url}")
+            page.wait_for_timeout(5000)
+            page.wait_for_load_state("networkidle")
+            print(f"Login concluído. URL atual: {page.url}")
         except Exception as err:
-            print(f"Aviso no fluxo de login: {err}")
+            print(f"Aviso no login: {err}")
 
-        # Processa Matriz
-        alunos_matriz = []
-        if matriz_url:
-            print(f"Navegando internamente para o relatório Matriz: {matriz_url}")
-            page.evaluate(f"window.location.href = '{matriz_url}'")
-            page.wait_for_load_state("networkidle")
+        # Tenta clicar no menu de relatório do sistema primeiro (interação humana)
+        print("Buscando link do relatório no menu do painel...")
+        relatorio_clicado = False
+        selectors_menu = [
+            'a:has-text("Alunos")',
+            'a:has-text("Relatório")',
+            'a:has-text("Matriz")',
+            f'a[href*="{matriz_url.replace("https://app.cgd.com.br", "")}"]'
+        ]
+
+        for sel in selectors_menu:
+            try:
+                elem = page.locator(sel).first
+                if elem.is_visible():
+                    elem.click()
+                    page.wait_for_timeout(4000)
+                    relatorio_clicado = True
+                    print(f"Clique efetuado via menu ({sel}). URL: {page.url}")
+                    break
+            except Exception:
+                continue
+
+        # Fallback de navegação se o clique no menu não ocorreu
+        if not relatorio_clicado and matriz_url:
+            print(f"Acessando relatório via requisição direta: {matriz_url}")
+            page.goto(matriz_url, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(3000)
-            alunos_matriz = extrair_alunos_da_tabela(page, "Matriz")
 
-        # Processa Filial (se houver URL específica)
-        alunos_filial = []
-        if filial_url and filial_url != matriz_url:
-            print(f"Navegando internamente para o relatório Filial: {filial_url}")
-            page.evaluate(f"window.location.href = '{filial_url}'")
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(3000)
-            alunos_filial = extrair_alunos_da_tabela(page, "Filial")
-
-        todos_alunos = alunos_matriz + alunos_filial
+        alunos = extrair_dados_tabela(page, "Matriz")
         browser.close()
-        return todos_alunos
+        return alunos
 
 def atualizar_supabase():
     alunos = extrair_alunos_completos()
     total_registros = len(alunos)
 
     if total_registros == 0:
-        print("Aviso: Nenhum aluno de Informática Ativo foi localizado.")
+        print("Aviso: Nenhum aluno capturado pelo scraper.")
         return
 
     with open("dados_alunos.json", "w", encoding="utf-8") as f:
@@ -211,7 +219,7 @@ def atualizar_supabase():
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"Sucesso! {total_registros} alunos gravados no Supabase (Matriz: {total_matriz}, Filial: {total_filial}).")
+    print(f"Sucesso! {total_registros} alunos salvos no Supabase.")
 
 if __name__ == "__main__":
     atualizar_supabase()
