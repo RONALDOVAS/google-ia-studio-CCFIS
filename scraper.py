@@ -16,17 +16,34 @@ def extrair_alunos_completos():
 
         # 1. Login no Portal CGD
         login_url = os.environ.get("CGD_LOGIN_URL") or os.environ.get("CGD_MATRIZ_URL")
-        page.goto(login_url)
+        page.goto(login_url, wait_until="networkidle")
 
-        page.fill('input[name="username"]', os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER"))
-        page.fill('input[name="password"]', os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS"))
-        page.click('button[type="submit"]')
+        usuario = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER")
+        senha = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS")
+
+        # Seletores flexíveis para o campo de Usuário/Login
+        seletor_usuario = 'input[name="username"], input[name="login"], input[name="usuario"], input[name="email"], input[type="text"], #username, #login'
+        seletor_senha = 'input[name="password"], input[name="senha"], input[type="password"], #password'
+
+        page.wait_for_selector(seletor_usuario, timeout=20000)
+        page.fill(seletor_usuario, usuario)
+        page.fill(seletor_senha, senha)
+
+        # Clica no botão de login
+        btn_submit = page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+        if btn_submit:
+            btn_submit.click()
+        else:
+            page.press(seletor_senha, "Enter")
+
         page.wait_for_load_state("networkidle")
 
         # 2. Navegar para o relatório de alunos
         relatorio_url = os.environ.get("URL_ALUNOS_MATRIZ") or login_url
-        page.goto(relatorio_url)
-        page.wait_for_selector("table", timeout=15000)
+        if relatorio_url != page.url:
+            page.goto(relatorio_url, wait_until="networkidle")
+            
+        page.wait_for_selector("table", timeout=20000)
 
         # 3. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
