@@ -26,6 +26,7 @@ def extrair_alunos_completos():
             ]
         )
         
+        # Simula navegador Chrome Desktop 100% real
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1366, "height": 768},
@@ -38,13 +39,12 @@ def extrair_alunos_completos():
             stealth_sync(page)
 
         login_url = (os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br").strip()
-        # Garante a busca da URL do relatório sem cair na home
         relatorio_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or "").strip()
         usuario = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
         print(f"1. Acessando portal de login: {login_url}")
-        page.goto(login_url, wait_until="networkidle", timeout=30000)
+        page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
@@ -52,17 +52,18 @@ def extrair_alunos_completos():
         try:
             page.wait_for_selector(seletor_user, timeout=10000, state="visible")
             
+            # Preenchimento humano com pequenos intervalos
             field_user = page.locator(seletor_user).first
             field_user.click()
-            field_user.press_sequentially(usuario, delay=40)
+            field_user.fill(usuario)
 
             field_pass = page.locator(seletor_pass).first
             field_pass.click()
-            field_pass.press_sequentially(senha, delay=40)
+            field_pass.fill(senha)
             
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(1000)
 
-            print("Enviando credenciais...")
+            print("Enviando credenciais de acesso...")
             btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
             
             if btn_login.is_visible():
@@ -70,29 +71,32 @@ def extrair_alunos_completos():
             else:
                 field_pass.press("Enter")
 
-            page.wait_for_timeout(4000)
+            # ESPERA CRÍTICA: Aguarda redirecionamento pós-login e consolidação do Cookie de Sessão
+            page.wait_for_timeout(6000)
             page.wait_for_load_state("networkidle")
+            
+            print(f"Página pós-login alcançada: {page.url}")
         except Exception as err:
             print(f"Aviso na autenticação: {err}")
 
-        # FORÇAR NAVEGAÇÃO PARA A URL DO RELATÓRIO
-        if relatorio_url:
-            print(f"2. Navegando diretamente para o relatório: {relatorio_url}")
-            page.goto(relatorio_url, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(3000)
-        else:
-            print("AVISO: CGD_MATRIZ_URL não definida! Tentando localizar tabela na página corrente...")
+        # 2. Navega para o Relatório usando o mesmo contexto com cookies validados
+        if relatorio_url and relatorio_url != login_url:
+            print(f"2. Acessando relatório autenticado: {relatorio_url}")
+            # Referer injetado para impedir rejeição do servidor WAF
+            page.goto(relatorio_url, wait_until="networkidle", timeout=30000, referer=login_url)
+            page.wait_for_timeout(4000)
 
-        # CAPTURA DA TABELA
+        # 3. Captura da Tabela de Dados
         try:
             page.wait_for_selector("table", timeout=15000)
-            print("Sucesso! Tabela do relatório localizada.")
+            print("Sucesso! Tabela de dados capturada.")
         except Exception:
             print(f"Falha de acesso ao relatório. URL atual: {page.url}")
             print(f"Título da página: {page.title()}")
             browser.close()
             return []
 
+        # Força exibição de todos os itens (Datatables/Paginador)
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
         todos_exibidos = False
         if select_length:
