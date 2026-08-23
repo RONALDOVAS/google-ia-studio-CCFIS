@@ -22,27 +22,26 @@ def classificar_aluno(dias_sem_frequencia, faltas=0):
     else:
         return "LEVE", "REGULAR"
 
-def extrair_dados_tabela(page, nome_unidade):
+def extrair_alunos_da_tabela(page, nome_unidade):
     try:
-        # Aguarda no máximo 12 segundos pela tabela
-        page.wait_for_selector("table", timeout=12000)
+        page.wait_for_selector("table", timeout=20000)
     except Exception:
-        print(f"Tabela não localizada em {nome_unidade}. URL atual: {page.url}")
+        print(f"Tabela de alunos não localizada em {nome_unidade}. URL atual: {page.url}")
         return []
 
-    # Tenta expandir o Datatables para exibir mais registros
+    # Tenta expandir a exibição da tabela para mais registros por página
     try:
         select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
         if select_elem:
             page.select_option('select[name*="length"], select[name*="table_length"]', '500')
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(2500)
     except Exception:
         pass
 
     alunos_coletados = []
     chaves_processadas = set()
     pagina_atual = 1
-    MAX_PAGINAS = 50  # Trava de segurança contra loop infinito
+    MAX_PAGINAS = 50
 
     while pagina_atual <= MAX_PAGINAS:
         rows = page.query_selector_all("table tbody tr")
@@ -55,7 +54,7 @@ def extrair_dados_tabela(page, nome_unidade):
 
             linha_texto = row.inner_text().lower()
 
-            # Filtros: Apenas Informática + Ativos
+            # Regras de negócio: Somente curso de Informática e Alunos Ativos
             if "informática" not in linha_texto and "informatica" not in linha_texto:
                 continue
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
@@ -72,7 +71,7 @@ def extrair_dados_tabela(page, nome_unidade):
             chaves_processadas.add(chave_unica)
             novos_nesta_pagina += 1
 
-            col_dias = cols[3].inner_text().strip()
+            col_dias = cols[3].inner_text().strip() if len(cols) >= 4 else "0"
             col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
 
             dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
@@ -92,25 +91,24 @@ def extrair_dados_tabela(page, nome_unidade):
             }
             alunos_coletados.append(aluno)
 
-        print(f"Página {pagina_atual}: {novos_nesta_pagina} novos alunos capturados.")
+        print(f"Página {pagina_atual} ({nome_unidade}): {novos_nesta_pagina} alunos de informática capturados.")
 
-        # Se não encontrou nenhum novo aluno nesta página, encerra
         if novos_nesta_pagina == 0 and pagina_atual > 1:
             break
 
-        # Tenta avançar para a próxima página
+        # Navegação para a próxima página da tabela
         next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
         if next_btn and next_btn.is_visible():
             try:
                 next_btn.click()
                 pagina_atual += 1
-                page.wait_for_timeout(1200)
+                page.wait_for_timeout(1500)
             except Exception:
                 break
         else:
             break
 
-    print(f"Total filtrado em {nome_unidade}: {len(alunos_coletados)} alunos.")
+    print(f"Total de alunos extraídos em {nome_unidade}: {len(alunos_coletados)}")
     return alunos_coletados
 
 def extrair_alunos_completos():
@@ -136,21 +134,24 @@ def extrair_alunos_completos():
             stealth_sync(page)
 
         login_url = (os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br").strip()
-        matriz_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or "").strip()
+        # Define como padrão a URL direta da lista de Alunos
+        alunos_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or "https://app.cgd.com.br/alunos").strip()
+
         usuario = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
-        print(f"1. Acessando login: {login_url}")
-        page.goto(login_url, wait_until="domcontentloaded", timeout=20000)
+        print(f"1. Efetuando login em: {login_url}")
+        page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
 
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
 
         try:
-            page.wait_for_selector(seletor_user, timeout=8000, state="visible")
+            page.wait_for_selector(seletor_user, timeout=10000, state="visible")
             page.locator(seletor_user).first.fill(usuario)
             page.locator(seletor_pass).first.fill(senha)
-            
+            page.wait_for_timeout(500)
+
             btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
             if btn_login.is_visible():
                 btn_login.click()
@@ -158,17 +159,17 @@ def extrair_alunos_completos():
                 page.locator(seletor_pass).first.press("Enter")
 
             page.wait_for_timeout(4000)
-            print(f"Login finalizado. Posição atual: {page.url}")
+            page.wait_for_load_state("networkidle")
+            print(f"Login efetuado com sucesso. URL logada: {page.url}")
         except Exception as err:
-            print(f"Erro no fluxo de login: {err}")
+            print(f"Aviso no fluxo de login: {err}")
 
-        # Navega para a URL da Matriz após estabelecer a sessão
-        if matriz_url:
-            print(f"Navegando para o relatório: {matriz_url}")
-            page.goto(matriz_url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(3000)
+        # Acessa a página acessível de Alunos
+        print(f"Navegando para a lista geral de alunos: {alunos_url}")
+        page.goto(alunos_url, wait_until="domcontentloaded", timeout=25000)
+        page.wait_for_timeout(3000)
 
-        alunos = extrair_dados_tabela(page, "Matriz")
+        alunos = extrair_alunos_da_tabela(page, "Matriz")
         browser.close()
         return alunos
 
