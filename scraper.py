@@ -33,13 +33,9 @@ def extrair_alunos_completos():
             input_usuario.fill(usuario)
             input_senha.fill(senha)
             
-            btn_submit = page.query_selector('button[type="submit"], input[type="submit"], button')
-            if btn_submit:
-                btn_submit.click()
-            else:
-                input_senha.press("Enter")
-            
-            page.wait_for_timeout(4000)
+            # Submete o formulário via tecla ENTER (evita falhas de botões invisíveis)
+            input_senha.press("Enter")
+            page.wait_for_timeout(5000)
         else:
             print("Nenhum formulário de login explícito encontrado. Prosseguindo...")
 
@@ -53,6 +49,7 @@ def extrair_alunos_completos():
         # Aguarda a tabela carregar na tela
         try:
             page.wait_for_selector("table", timeout=15000)
+            print("Tabela encontrada com sucesso!")
         except Exception as e:
             print(f"Erro ao localizar a tabela. URL atual: {page.url}")
             print(f"Conteúdo do Título da Página: {page.title()}")
