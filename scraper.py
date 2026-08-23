@@ -208,9 +208,8 @@ def atualizar_supabase():
     total_filial = len([a for a in alunos if a.get("unidade") == "Filial"])
     alunos_criticos = len([a for a in alunos if a.get("criticidade") == "Crítico"])
     alunos_moderados = len([a for a in alunos if a.get("criticidade") == "Moderado"])
-    alunos_atencao = len([a for a in alunos if a.get("criticidade") == "Atenção"])
-    alunos_normal = len([a for a in alunos if a.get("criticidade") == "Normal"])
 
+    # Mantém apenas as colunas padrão existentes na tabela resumo_cgd
     payload = {
         "id": 1,
         "total_filial": total_filial,
@@ -218,8 +217,6 @@ def atualizar_supabase():
         "dados_completos": alunos,
         "alunos_criticos": alunos_criticos,
         "alunos_moderados": alunos_moderados,
-        "alunos_atencao": alunos_atencao,
-        "alunos_normal": alunos_normal,
         "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
     }
 
