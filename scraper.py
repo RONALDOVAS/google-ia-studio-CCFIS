@@ -15,18 +15,16 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVIC
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def classificar_aluno(dias_sem_frequencia, faltas, reposicoes=0):
-    # Cada reposição anula uma falta
     faltas_efetivas = max(0, faltas - reposicoes)
 
-    # Regra de Bloqueio: 3 faltas efetivas ou 90 dias de inatividade
     if faltas_efetivas >= 3 or dias_sem_frequencia >= 90:
-        return "Crítico", "BLOQUEADO"
+        return "Crítico", "Aulão de Recuperação"
     elif faltas_efetivas == 2 or (60 <= dias_sem_frequencia < 90):
-        return "Moderado", "ATENÇÃO"
+        return "Moderado", "Atividade Prática Reforço"
     elif faltas_efetivas == 1 or (30 <= dias_sem_frequencia < 60):
-        return "Atenção", "OBSERVAÇÃO"
+        return "Atenção", "Acompanhamento Individual"
     else:
-        return "Normal", "REGULAR"
+        return "Normal", "Sem Tratativa Necessária"
 
 def extrair_alunos_da_tabela(page, nome_unidade):
     try:
@@ -46,7 +44,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
     alunos_coletados = []
     chaves_processadas = set()
     pagina_atual = 1
-    MAX_PAGINAS = 30
+    MAX_PAGINAS = 50
 
     while pagina_atual <= MAX_PAGINAS:
         rows = page.query_selector_all("table tbody tr")
@@ -59,17 +57,13 @@ def extrair_alunos_da_tabela(page, nome_unidade):
 
             linha_texto = row.inner_text().lower()
 
-            # Descarte de inativos
+            # Filtros de descarte de alunos inativos
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
                 continue
 
-            # Descarte de Formação Profissional
-            if "formação profissional" in linha_texto or "formacao profissional" in linha_texto or "profissionalizante" in linha_texto:
-                continue
-
-            col_0 = cols[0].inner_text().strip()  # Contrato
+            col_0 = cols[0].inner_text().strip()  # ID / Código / Contrato
             col_1 = cols[1].inner_text().strip()  # Nome
-            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else ""  # Curso Real / Pacote
+            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else "Curso Geral"
 
             chave_unica = f"{nome_unidade}_{col_0}_{col_1}"
             if chave_unica in chaves_processadas:
@@ -81,23 +75,27 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             col_dias = cols[3].inner_text().strip() if len(cols) >= 4 else "0"
             col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
             col_reposicoes = cols[5].inner_text().strip() if len(cols) >= 6 else "0"
-            col_disciplina = cols[6].inner_text().strip() if len(cols) >= 7 else ""
-            col_ultimo_acesso = cols[7].inner_text().strip() if len(cols) >= 8 else ""
+            col_disciplina = cols[6].inner_text().strip() if len(cols) >= 7 else "Módulo Geral"
+            col_pendentes = cols[7].inner_text().strip() if len(cols) >= 8 else "Consultar no Portal"
 
             dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
             faltas = int(col_faltas) if col_faltas.isdigit() else 0
             reposicoes = int(col_reposicoes) if col_reposicoes.isdigit() else 0
+            faltas_efetivas = max(0, faltas - reposicoes)
 
-            # Aplicação da classificação com cálculo de reposição
-            criticidade, status_bloqueio = classificar_aluno(dias_sem_freq, faltas, reposicoes)
+            # Classificação & Tratativa Recomendada
+            criticidade, tratativa_recomendada = classificar_aluno(dias_sem_freq, faltas, reposicoes)
 
-            # Formatação do texto do último acesso baseado nos dias reais
-            if col_ultimo_acesso:
-                texto_ultimo_acesso = col_ultimo_acesso
-            elif dias_sem_freq == 0:
-                texto_ultimo_acesso = "Sem registros de ausência"
+            # Ritmo base (Lento, Regular, Acelerado)
+            if faltas_efetivas >= 2 or dias_sem_freq > 30:
+                ritmo_sugerido = "Lento"
+            elif faltas_efetivas == 1:
+                ritmo_sugerido = "Regular"
             else:
-                texto_ultimo_acesso = f"Há {dias_sem_freq} dia(s)"
+                ritmo_sugerido = "Acelerado"
+
+            # URL exata para busca/direcionamento de contrato/aluno no CGD
+            link_cgd_aluno = f"https://app.cgd.com.br/alunos?busca={col_0}"
 
             aluno = {
                 "contrato": col_0,
@@ -107,13 +105,15 @@ def extrair_alunos_da_tabela(page, nome_unidade):
                 "dias": dias_sem_freq,
                 "faltas": faltas,
                 "reposicoes": reposicoes,
-                "faltas_efetivas": max(0, faltas - reposicoes),
+                "faltas_efetivas": faltas_efetivas,
                 "criticidade": criticidade,
-                "status": status_bloqueio,
+                "tratativa": tratativa_recomendada,
                 "status_tratativa": "Pendente" if criticidade != "Normal" else "Normal",
-                "ultimo_acesso": texto_ultimo_acesso,
+                "ultimo_acesso": f"Há {dias_sem_freq} dia(s)" if dias_sem_freq > 0 else "Hoje",
                 "disciplina_andamento": col_disciplina,
-                "link_cgd": f"https://app.cgd.com.br/contratos/{col_0}"
+                "disciplinas_pendentes": col_pendentes,
+                "ritmo": ritmo_sugerido,
+                "link_cgd": link_cgd_aluno
             }
             alunos_coletados.append(aluno)
 
