@@ -16,11 +16,13 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def classificar_aluno(dias_sem_frequencia, faltas=0):
     if dias_sem_frequencia >= 90 or faltas >= 10:
-        return "CRITICO", "BLOQUEADO"
+        return "Crítico", "Aulão"
     elif 60 <= dias_sem_frequencia < 90 or 5 <= faltas < 10:
-        return "MODERADO", "ATENCAO"
+        return "Moderado", "Atividade prática"
+    elif 30 <= dias_sem_frequencia < 60 or 2 <= faltas < 5:
+        return "Atenção", "Acompanhamento"
     else:
-        return "LEVE", "REGULAR"
+        return "Normal", "Normal"
 
 def extrair_alunos_da_tabela(page, nome_unidade):
     try:
@@ -78,7 +80,8 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
             faltas = int(col_faltas) if col_faltas.isdigit() else 0
 
-            criticidade, status_bloqueio = classificar_aluno(dias_sem_freq, faltas)
+            # Classificação por 4 Níveis e Tratativa
+            criticidade, tratativa = classificar_aluno(dias_sem_freq, faltas)
 
             aluno = {
                 "contrato": col_0,
@@ -87,8 +90,13 @@ def extrair_alunos_da_tabela(page, nome_unidade):
                 "unidade": nome_unidade,
                 "dias": dias_sem_freq,
                 "faltas": faltas,
-                "criticidade": criticidade,
-                "status": status_bloqueio
+                "criticidade": criticidade,      # Crítico, Moderado, Atenção, Normal
+                "tratativa": tratativa,          # Aulão, Atividade prática, Acompanhamento, Normal
+                "status_tratativa": "Pendente" if criticidade != "Normal" else "Normal", # Pendente, Em andamento, Concluído, Normal
+                "ultimo_acesso": f"{dias_sem_freq} dias atrás" if dias_sem_freq > 0 else "Hoje",
+                "disciplina_andamento": "Informática / Módulo Ativo",
+                "ritmo_aluno": "Atenção" if dias_sem_freq > 30 else "Regular",
+                "link_cgd": f"https://app.cgd.com.br/contratos/{col_0}"
             }
             alunos_coletados.append(aluno)
 
@@ -112,7 +120,6 @@ def extrair_alunos_da_tabela(page, nome_unidade):
     return alunos_coletados
 
 def processar_unidade(browser, nome_unidade, usuario, senha, alunos_url):
-    # Cria um contexto 100% limpo sem cookies compartilhados
     context = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         viewport={"width": 1366, "height": 768},
@@ -152,7 +159,6 @@ def processar_unidade(browser, nome_unidade, usuario, senha, alunos_url):
 
     alunos = extrair_alunos_da_tabela(page, nome_unidade)
     
-    # Executa o logout e fecha o contexto do navegador
     try:
         page.goto("https://app.cgd.com.br/logout", timeout=5000)
     except Exception:
@@ -181,7 +187,6 @@ def extrair_todos_alunos():
         pass_filial = (os.environ.get("CGD_PASS_FILIAL") or pass_matriz).strip()
         url_filial = "https://app.cgd.com.br/alunos"
 
-        # Execução com contextos isolados
         alunos_matriz = processar_unidade(browser, "Matriz", user_matriz, pass_matriz, url_matriz)
         alunos_filial = processar_unidade(browser, "Filial", user_filial, pass_filial, url_filial)
 
@@ -201,8 +206,10 @@ def atualizar_supabase():
 
     total_matriz = len([a for a in alunos if a.get("unidade") == "Matriz"])
     total_filial = len([a for a in alunos if a.get("unidade") == "Filial"])
-    alunos_criticos = len([a for a in alunos if a.get("criticidade") == "CRITICO"])
-    alunos_moderados = len([a for a in alunos if a.get("criticidade") == "MODERADO"])
+    alunos_criticos = len([a for a in alunos if a.get("criticidade") == "Crítico"])
+    alunos_moderados = len([a for a in alunos if a.get("criticidade") == "Moderado"])
+    alunos_atencao = len([a for a in alunos if a.get("criticidade") == "Atenção"])
+    alunos_normal = len([a for a in alunos if a.get("criticidade") == "Normal"])
 
     payload = {
         "id": 1,
@@ -211,6 +218,8 @@ def atualizar_supabase():
         "dados_completos": alunos,
         "alunos_criticos": alunos_criticos,
         "alunos_moderados": alunos_moderados,
+        "alunos_atencao": alunos_atencao,
+        "alunos_normal": alunos_normal,
         "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
     }
 
