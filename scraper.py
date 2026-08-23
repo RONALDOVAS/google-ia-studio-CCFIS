@@ -23,39 +23,67 @@ def extrair_alunos_completos():
 
         # 2. Navegar para a página do relatório de alunos
         page.goto("https://seu-portal-cgd.com/relatorios/alunos") # Ajuste a URL do relatório
-        page.wait_for_selector("table")
+        page.wait_for_selector("table", timeout=15000)
 
-        # 3. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS (Mudar de 10 para 'Todos' / -1)
-        select_length = page.query_selector('select[name*="length"]')
-        if select_length:
-            try:
-                page.select_option('select[name*="length"]', '-1')
-            except:
-                try:
-                    page.select_option('select[name*="length"]', '10000')
-                except:
-                    pass
-            page.wait_for_timeout(3000)
-
-        # 4. Extração com Varredura de Paginação (Garante 100% dos registros)
-        todos_alunos = []
+        # 3. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS (Tentar seletores de 500 / 10000 / Todos)
+        select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
+        todos_exibidos_de_uma_vez = False
         
+        if select_length:
+            for val in ['-1', '10000', '1000', '500']:
+                try:
+                    page.select_option('select[name*="length"], select[name*="table_length"]', val)
+                    page.wait_for_timeout(2000)
+                    todos_exibidos_de_uma_vez = True
+                    break
+                except:
+                    continue
+
+        # 4. Extração de registros com verificação contra duplicados
+        todos_alunos = []
+        contratos_processados = set()
+
         while True:
-            # Captura todas as linhas visíveis da tabela
             rows = page.query_selector_all("table tbody tr")
+            novos_nesta_pagina = 0
+
             for row in rows:
                 cols = row.query_selector_all("td")
                 if len(cols) >= 4:
+                    contrato_cod = cols[0].inner_text().strip()
+                    nome_aluno = cols[1].inner_text().strip()
+                    
+                    # Evita duplicatas caso a paginação repita itens
+                    chave_unica = f"{contrato_cod}_{nome_aluno}"
+                    if chave_unica in contratos_processados:
+                        continue
+                    
+                    contratos_processados.add(chave_unica)
+                    novos_nesta_pagina += 1
+
+                    turma_unidade = cols[2].inner_text().strip()
+                    
+                    # Detecta a unidade (Matriz ou Filial)
+                    unidade_detectada = "Filial"
+                    if "matriz" in turma_unidade.lower() or "central" in turma_unidade.lower():
+                        unidade_detectada = "Matriz"
+
                     aluno = {
-                        "contrato": cols[0].inner_text().strip(),
-                        "aluno": cols[1].inner_text().strip(),
-                        "turma": cols[2].inner_text().strip(),
+                        "contrato": nome_aluno,       # Nome completo do Aluno
+                        "nome": contrato_cod,          # Matrícula/Código do Contrato
+                        "curso": turma_unidade,        # Nome do Curso/Turma
+                        "unidade": unidade_detectada,  # Matriz ou Filial
+                        "status": "NORMAL",
                         "dias": int(cols[3].inner_text().strip()) if cols[3].inner_text().strip().isdigit() else 0,
-                        "ultimo_acesso": cols[4].inner_text().strip() if len(cols) > 4 else ""
+                        "faltas": 0
                     }
                     todos_alunos.append(aluno)
 
-            # Verifica se há próxima página ativada
+            # Se todos já foram exibidos de uma vez ou não houve novos registros, encerra
+            if todos_exibidos_de_uma_vez or novos_nesta_pagina == 0:
+                break
+
+            # Avança paginação caso a exibição 'Todos' não tenha funcionado
             next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
             if next_btn and next_btn.is_visible():
                 next_btn.click()
@@ -69,26 +97,29 @@ def extrair_alunos_completos():
 def atualizar_supabase():
     alunos = extrair_alunos_completos()
     total_registros = len(alunos)
-    
-    # Separação/Contagem por Filial e Matriz
-    alunos_filial = [a for a in alunos if "Filial" in a.get("turma", "") or "Castanhal" in a.get("turma", "")]
-    alunos_matriz = [a for a in alunos if "Matriz" in a.get("turma", "") or "Central" in a.get("turma", "")]
 
-    total_filial = len(alunos_filial) if alunos_filial else total_registros
-    total_matriz = len(alunos_matriz) if alunos_matriz else 0
+    if total_registros == 0:
+        print("Aviso: Nenhum aluno capturado pelo scraper.")
+        return
 
-    # Payload completo sem limite de 10
+    # Separação e Contagem exatas por Unidade
+    total_matriz = len([a for a in alunos if a.get("unidade") == "Matriz"])
+    total_filial = len([a for a in alunos if a.get("unidade") == "Filial"])
+
+    # Payload formatado diretamente para colunas JSONB
     payload = {
+        "id": 1, # Atualiza sempre a linha de ID 1
         "total_filial": total_filial,
         "total_matriz": total_matriz,
-        "dados_completos": json.dumps(alunos),
-        "alunos_criticos": len([a for a in alunos if a.get("dias", 0) > 90]),
-        "alunos_moderados": len([a for a in alunos if 60 <= a.get("dias", 0) <= 89])
+        "dados_completos": alunos,  # Envia como Lista Python (O Supabase converte p/ JSONB nativo)
+        "alunos_criticos": len([a for a in alunos if a.get("dias", 0) >= 90]),
+        "alunos_moderados": len([a for a in alunos if 60 <= a.get("dias", 0) < 90]),
+        "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
     }
 
-    # Gravação na tabela resumo_cgd
-    response = supabase.table("resumo_cgd").insert(payload).execute()
-    print(f"Sucesso! Enviados {total_registros} alunos para a tabela resumo_cgd.")
+    # Upsert (Atualiza a linha existente sem criar duplicatas)
+    response = supabase.table("resumo_cgd").upsert(payload).execute()
+    print(f"Sucesso! Atualizado registro no Supabase com {total_registros} alunos (Matriz: {total_matriz}, Filial: {total_filial}).")
 
 if __name__ == "__main__":
     atualizar_supabase()
