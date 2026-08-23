@@ -24,33 +24,43 @@ def classificar_aluno(dias_sem_frequencia, faltas=0):
 
 def extrair_alunos_unidade(page, url_relatorio, nome_unidade):
     if not url_relatorio:
+        print(f"URL de relatório não configurada para {nome_unidade}.")
         return []
 
-    print(f"Acessando relatório de {nome_unidade}: {url_relatorio}")
-    page.goto(url_relatorio, wait_until="networkidle", timeout=40000)
-    page.wait_for_timeout(3000)
-
+    print(f"Navegando para relatório de {nome_unidade}: {url_relatorio}")
+    
+    # Navegação com esperas suaves para evitar bloqueio por WAF/Sessão
     try:
-        page.wait_for_selector("table", timeout=15000)
-    except Exception:
-        print(f"Erro ao carregar a tabela em {nome_unidade}.")
+        page.goto(url_relatorio, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+    except Exception as e:
+        print(f"Erro ao acessar URL {url_relatorio}: {e}")
         return []
 
-    # Tenta expandir o tamanho da paginação no Datatables para o máximo
-    select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
-    todos_exibidos = False
-    if select_length:
-        for val in ['-1', '10000', '5000', '1000']:
-            try:
-                page.select_option('select[name*="length"], select[name*="table_length"]', val)
-                page.wait_for_timeout(3000)
-                todos_exibidos = True
-                break
-            except Exception:
-                continue
+    # Localiza a tabela principal
+    try:
+        page.wait_for_selector("table", timeout=25000)
+    except Exception:
+        print(f"Erro: Tabela não carregada em {nome_unidade}. URL atual: {page.url}")
+        return []
+
+    # Tenta aumentar a exibição de linhas na tabela caso exista o seletor Datatables
+    try:
+        select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
+        if select_elem:
+            for opcao in ['1000', '500', '100']:
+                try:
+                    page.select_option('select[name*="length"], select[name*="table_length"]', opcao)
+                    page.wait_for_timeout(2500)
+                    break
+                except:
+                    continue
+    except Exception:
+        pass
 
     alunos_coletados = []
     chaves_processadas = set()
+    pagina_atual = 1
 
     while True:
         rows = page.query_selector_all("table tbody tr")
@@ -58,61 +68,63 @@ def extrair_alunos_unidade(page, url_relatorio, nome_unidade):
 
         for row in rows:
             cols = row.query_selector_all("td")
-            if len(cols) >= 4:
-                col_texto_completo = row.inner_text().lower()
+            if len(cols) < 4:
+                continue
 
-                # FILTRO 1: Apenas alunos ATIVOS e de INFORMÁTICA
-                if "informática" not in col_texto_completo and "informatica" not in col_texto_completo:
-                    continue
-                
-                # Se houver coluna explicita de status, valida ativo; senao checa no texto da linha
-                if "inativo" in col_texto_completo or "cancelado" in col_texto_completo:
-                    continue
+            linha_texto = row.inner_text().lower()
 
-                contrato_cod = cols[0].inner_text().strip()
-                nome_aluno = cols[1].inner_text().strip()
-                curso_turma = cols[2].inner_text().strip()
+            # FILTROS: Somente Informática e Somente Ativos
+            if "informática" not in linha_texto and "informatica" not in linha_texto:
+                continue
+            if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
+                continue
 
-                chave_unica = f"{contrato_cod}_{nome_aluno}"
-                if chave_unica in chaves_processadas:
-                    continue
+            col_0 = cols[0].inner_text().strip()
+            col_1 = cols[1].inner_text().strip()
+            col_2 = cols[2].inner_text().strip()
 
-                chaves_processadas.add(chave_unica)
-                novos_nesta_pagina += 1
+            chave_unica = f"{col_0}_{col_1}"
+            if chave_unica in chaves_processadas:
+                continue
 
-                # Trata dias e faltas das colunas
-                col_dias = cols[3].inner_text().strip()
-                col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
+            chaves_processadas.add(chave_unica)
+            novos_nesta_pagina += 1
 
-                dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
-                faltas = int(col_faltas) if col_faltas.isdigit() else 0
+            col_dias = cols[3].inner_text().strip()
+            col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
 
-                criticidade, status_bloqueio = classificar_aluno(dias_sem_freq, faltas)
+            dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
+            faltas = int(col_faltas) if col_faltas.isdigit() else 0
 
-                aluno = {
-                    "contrato": contrato_cod,
-                    "nome": nome_aluno,
-                    "curso": curso_turma,
-                    "unidade": nome_unidade,
-                    "dias": dias_sem_freq,
-                    "faltas": faltas,
-                    "criticidade": criticidade,
-                    "status": status_bloqueio
-                }
-                alunos_coletados.append(aluno)
+            criticidade, status_bloqueio = classificar_aluno(dias_sem_freq, faltas)
 
-        if todos_exibidos or novos_nesta_pagina == 0:
-            break
+            aluno = {
+                "contrato": col_0,
+                "nome": col_1,
+                "curso": col_2,
+                "unidade": nome_unidade,
+                "dias": dias_sem_freq,
+                "faltas": faltas,
+                "criticidade": criticidade,
+                "status": status_bloqueio
+            }
+            alunos_coletados.append(aluno)
 
-        # Paginação manual caso o select não exiba todos em uma única página
-        next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
+        print(f"Página {pagina_atual} de {nome_unidade}: {novos_nesta_pagina} alunos de informática capturados.")
+
+        # Avança para a próxima página do relatório caso exista
+        next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled), li.next:not(.disabled) a')
         if next_btn and next_btn.is_visible():
-            next_btn.click()
-            page.wait_for_timeout(2000)
+            try:
+                next_btn.click()
+                pagina_atual += 1
+                page.wait_for_timeout(2000)
+            except Exception:
+                break
         else:
             break
 
-    print(f"Total filtrado para {nome_unidade} (Informática + Ativos): {len(alunos_coletados)}")
+    print(f"Total filtrado em {nome_unidade}: {len(alunos_coletados)} alunos.")
     return alunos_coletados
 
 def extrair_alunos_completos():
@@ -144,7 +156,7 @@ def extrair_alunos_completos():
         usuario_matriz = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha_matriz = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
-        print(f"1. Efetuando login em: {login_url}")
+        print(f"1. Acessando login: {login_url}")
         page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
@@ -162,15 +174,17 @@ def extrair_alunos_completos():
             else:
                 page.locator(seletor_pass).first.press("Enter")
 
-            page.wait_for_timeout(5000)
+            # Aguarda a confirmação explícita de autenticação
             page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(5000)
+            print(f"Login concluído. URL logada: {page.url}")
         except Exception as err:
-            print(f"Aviso no login: {err}")
+            print(f"Aviso no fluxo de login: {err}")
 
         # Coleta Matriz
         alunos_matriz = extrair_alunos_unidade(page, matriz_url, "Matriz")
 
-        # Coleta Filial
+        # Coleta Filial (se houver URL distinta)
         alunos_filial = []
         if filial_url and filial_url != matriz_url:
             alunos_filial = extrair_alunos_unidade(page, filial_url, "Filial")
@@ -187,7 +201,7 @@ def atualizar_supabase():
         print("Aviso: Nenhum aluno de Informática Ativo foi localizado.")
         return
 
-    # Salva arquivo local para commit no repositório
+    # Salva JSON local para o passo do Git Commit
     with open("dados_alunos.json", "w", encoding="utf-8") as f:
         json.dump(alunos, f, ensure_ascii=False, indent=2)
 
@@ -207,7 +221,7 @@ def atualizar_supabase():
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"Sucesso! {total_registros} alunos gravados no Supabase (Matriz: {total_matriz}, Filial: {total_filial}).")
+    print(f"Sucesso! {total_registros} alunos salvos no Supabase (Matriz: {total_matriz}, Filial: {total_filial}).")
 
 if __name__ == "__main__":
     atualizar_supabase()
