@@ -18,27 +18,27 @@ def extrair_alunos_completos():
         page = context.new_page()
 
         login_url = os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br"
+        relatorio_url = os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url
         usuario = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER")
         senha = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS")
 
-        print(f"Acessando URL de Login: {login_url}")
+        print(f"1. Acessando URL de Login: {login_url}")
         page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
 
-        # 1. TENTATIVA DE LOGIN FLEXÍVEL (Procura por múltiplos seletores comuns)
+        # FORÇAR PREENCHIMENTO DO LOGIN
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[id*="user"], input[id*="login"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
 
         try:
-            # Aguarda qualquer input visível
+            print("Tentando localizar campos de autenticação...")
             page.wait_for_selector(seletor_user, timeout=10000, state="visible")
             
-            # Preenche Usuário e Senha nos primeiros campos visíveis encontrados
             page.locator(seletor_user).first.fill(usuario)
             page.locator(seletor_pass).first.fill(senha)
             page.wait_for_timeout(500)
 
-            # Clica no botão de envio
+            print("Campos preenchidos com sucesso. Clicando em Entrar...")
             btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), .btn-primary').first
             if btn_login.is_visible():
                 btn_login.click()
@@ -47,16 +47,15 @@ def extrair_alunos_completos():
 
             page.wait_for_timeout(5000)
         except Exception as err:
-            print(f"Erro na tentativa de preenchimento automatizado: {err}")
+            print(f"AVISO: Falha ao tentar preencher o formulário na URL {page.url}. Erro: {err}")
 
-        # 2. NAVEGAÇÃO PARA A PÁGINA DO RELATÓRIO
-        relatorio_url = os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url
-        if page.url != relatorio_url:
-            print(f"Navegando para a página de alunos: {relatorio_url}")
+        # NAVEGAÇÃO PARA O RELATÓRIO APÓS AUTENTICAR
+        if relatorio_url != login_url:
+            print(f"2. Navegando para o relatório final: {relatorio_url}")
             page.goto(relatorio_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(3000)
 
-        # 3. EXTRAÇÃO DA TABELA
+        # EXTRAÇÃO DA TABELA
         try:
             page.wait_for_selector("table", timeout=15000)
             print("Tabela capturada com sucesso!")
@@ -66,7 +65,7 @@ def extrair_alunos_completos():
             browser.close()
             return []
 
-        # 4. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS
+        # FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
         todos_exibidos = False
         
@@ -80,7 +79,7 @@ def extrair_alunos_completos():
                 except:
                     continue
 
-        # 5. COLETA DE REGISTROS
+        # COLETA DE REGISTROS
         todos_alunos = []
         contratos_processados = set()
 
