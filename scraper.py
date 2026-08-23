@@ -7,6 +7,7 @@ from supabase import create_client, Client
 # Configurações do Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def extrair_alunos_completos():
     with sync_playwright() as p:
@@ -14,17 +15,20 @@ def extrair_alunos_completos():
         page = browser.new_page()
 
         # 1. Login no Portal CGD
-        page.goto("https://seu-portal-cgd.com/login") # Ajuste a URL de login
-        page.fill('input[name="username"]', os.environ.get("CGD_USER"))
-        page.fill('input[name="password"]', os.environ.get("CGD_PASS"))
+        login_url = os.environ.get("CGD_LOGIN_URL") or os.environ.get("CGD_MATRIZ_URL")
+        page.goto(login_url)
+
+        page.fill('input[name="username"]', os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER"))
+        page.fill('input[name="password"]', os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS"))
         page.click('button[type="submit"]')
         page.wait_for_load_state("networkidle")
 
-        # 2. Navegar para a página do relatório de alunos
-        page.goto("https://seu-portal-cgd.com/relatorios/alunos") # Ajuste a URL do relatório
+        # 2. Navegar para o relatório de alunos
+        relatorio_url = os.environ.get("URL_ALUNOS_MATRIZ") or login_url
+        page.goto(relatorio_url)
         page.wait_for_selector("table", timeout=15000)
 
-        # 3. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS (Tentar seletores de 500 / 10000 / Todos)
+        # 3. FORÇAR EXIBIÇÃO DE TODOS OS REGISTROS
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
         todos_exibidos_de_uma_vez = False
         
@@ -52,7 +56,6 @@ def extrair_alunos_completos():
                     contrato_cod = cols[0].inner_text().strip()
                     nome_aluno = cols[1].inner_text().strip()
                     
-                    # Evita duplicatas caso a paginação repita itens
                     chave_unica = f"{contrato_cod}_{nome_aluno}"
                     if chave_unica in contratos_processados:
                         continue
@@ -78,11 +81,9 @@ def extrair_alunos_completos():
                     }
                     todos_alunos.append(aluno)
 
-            # Se todos já foram exibidos de uma vez ou não houve novos registros, encerra
             if todos_exibidos_de_uma_vez or novos_nesta_pagina == 0:
                 break
 
-            # Avança paginação caso a exibição 'Todos' não tenha funcionado
             next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
             if next_btn and next_btn.is_visible():
                 next_btn.click()
@@ -105,18 +106,16 @@ def atualizar_supabase():
     total_matriz = len([a for a in alunos if a.get("unidade") == "Matriz"])
     total_filial = len([a for a in alunos if a.get("unidade") == "Filial"])
 
-    # Payload formatado diretamente para colunas JSONB
     payload = {
-        "id": 1, # Atualiza sempre a linha de ID 1
+        "id": 1,
         "total_filial": total_filial,
         "total_matriz": total_matriz,
-        "dados_completos": alunos,  # Envia como Lista Python (O Supabase converte p/ JSONB nativo)
+        "dados_completos": alunos,
         "alunos_criticos": len([a for a in alunos if a.get("dias", 0) >= 90]),
         "alunos_moderados": len([a for a in alunos if 60 <= a.get("dias", 0) < 90]),
         "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
     }
 
-    # Upsert (Atualiza a linha existente sem criar duplicatas)
     response = supabase.table("resumo_cgd").upsert(payload).execute()
     print(f"Sucesso! Atualizado registro no Supabase com {total_registros} alunos (Matriz: {total_matriz}, Filial: {total_filial}).")
 
