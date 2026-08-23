@@ -26,17 +26,61 @@ def classificar_aluno(dias_sem_frequencia, faltas, reposicoes=0):
     else:
         return "Normal", "Sem Tratativa Necessária"
 
+def extrair_detalhes_contrato(page, id_interno):
+    """Acessa as abas internas de Cursos e Frequência do ID interno do contrato no CGD"""
+    cursos_em_andamento = []
+    cursos_a_fazer = []
+    ultimo_passo = "-"
+    
+    # 1. Captura Cursos em andamento e Cursos a fazer
+    try:
+        page.goto(f"https://app.cgd.com.br/contratos/cursos/{id_interno}", wait_until="domcontentloaded", timeout=12000)
+        page.wait_for_timeout(1000)
+        
+        # Cursos em andamento (Tabela 1)
+        rows_andamento = page.query_selector_all("text='Cursos em andamento' >> xpath=ancestor::div[contains(@class,'card') or contains(@class,'panel')]//table//tbody//tr")
+        for r in rows_andamento:
+            txt = r.inner_text().split("\t")[0].strip()
+            if txt and "nenhum" not in txt.lower():
+                cursos_em_andamento.append(txt)
+                
+        # Cursos a fazer (Tabela 2)
+        rows_fazer = page.query_selector_all("text='Cursos a fazer' >> xpath=ancestor::div[contains(@class,'card') or contains(@class,'panel')]//table//tbody//tr")
+        for r in rows_fazer:
+            txt = r.inner_text().split("\t")[0].strip()
+            if txt and "nenhum" not in txt.lower():
+                cursos_a_fazer.append(txt)
+    except Exception:
+        pass
+
+    # 2. Captura Frequência e Último Passo executado
+    try:
+        page.goto(f"https://app.cgd.com.br/contratos/frequencias/{id_interno}", wait_until="domcontentloaded", timeout=12000)
+        page.wait_for_timeout(1000)
+        
+        first_row_passo = page.query_selector("table tbody tr td:nth-child(7)")
+        if first_row_passo:
+            ultimo_passo = first_row_passo.inner_text().strip() or "-"
+    except Exception:
+        pass
+
+    return {
+        "andamento": ", ".join(cursos_em_andamento) if cursos_em_andamento else "Módulo Ativo",
+        "pendentes": ", ".join(cursos_a_fazer) if cursos_a_fazer else "Nenhuma Pendência",
+        "ultimo_passo": ultimo_passo
+    }
+
 def extrair_alunos_da_tabela(page, nome_unidade):
     try:
         page.wait_for_selector("table", timeout=15000)
     except Exception:
-        print(f"Tabela de alunos não localizada em {nome_unidade}. URL: {page.url}")
+        print(f"Tabela de alunos não localizada em {nome_unidade}.")
         return []
 
     try:
-        select_elem = page.query_selector('select[name*="length"], select[name*="table_length"]')
+        select_elem = page.query_selector('select[name*="length"]')
         if select_elem:
-            page.select_option('select[name*="length"], select[name*="table_length"]', '500')
+            page.select_option('select[name*="length"]', '500')
             page.wait_for_timeout(2000)
     except Exception:
         pass
@@ -44,7 +88,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
     alunos_coletados = []
     chaves_processadas = set()
     pagina_atual = 1
-    MAX_PAGINAS = 50
+    MAX_PAGINAS = 30
 
     while pagina_atual <= MAX_PAGINAS:
         rows = page.query_selector_all("table tbody tr")
@@ -56,14 +100,16 @@ def extrair_alunos_da_tabela(page, nome_unidade):
                 continue
 
             linha_texto = row.inner_text().lower()
-
-            # Filtros de descarte de alunos inativos
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
                 continue
 
-            col_0 = cols[0].inner_text().strip()  # ID / Código / Contrato
+            # Captura o link interno do contrato para extrair o id_interno exato (ex: 832412)
+            link_elem = row.query_selector("a[href*='/contratos/']")
+            href = link_elem.get_attribute("href") if link_elem else ""
+            id_interno = href.split("/contratos/")[1].split("?")[0].strip() if "/contratos/" in href else ""
+
+            col_0 = cols[0].inner_text().strip()  # Contrato/Matrícula
             col_1 = cols[1].inner_text().strip()  # Nome
-            col_2 = cols[2].inner_text().strip() if len(cols) >= 3 else "Curso Geral"
 
             chave_unica = f"{nome_unidade}_{col_0}_{col_1}"
             if chave_unica in chaves_processadas:
@@ -75,32 +121,26 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             col_dias = cols[3].inner_text().strip() if len(cols) >= 4 else "0"
             col_faltas = cols[4].inner_text().strip() if len(cols) >= 5 else "0"
             col_reposicoes = cols[5].inner_text().strip() if len(cols) >= 6 else "0"
-            col_disciplina = cols[6].inner_text().strip() if len(cols) >= 7 else "Módulo Geral"
-            col_pendentes = cols[7].inner_text().strip() if len(cols) >= 8 else "Consultar no Portal"
 
             dias_sem_freq = int(col_dias) if col_dias.isdigit() else 0
             faltas = int(col_faltas) if col_faltas.isdigit() else 0
             reposicoes = int(col_reposicoes) if col_reposicoes.isdigit() else 0
             faltas_efetivas = max(0, faltas - reposicoes)
 
-            # Classificação & Tratativa Recomendada
             criticidade, tratativa_recomendada = classificar_aluno(dias_sem_freq, faltas, reposicoes)
 
-            # Ritmo base (Lento, Regular, Acelerado)
-            if faltas_efetivas >= 2 or dias_sem_freq > 30:
-                ritmo_sugerido = "Lento"
-            elif faltas_efetivas == 1:
-                ritmo_sugerido = "Regular"
-            else:
-                ritmo_sugerido = "Acelerado"
+            # URL DIRETA E EXATA PARA O ALUNO NO CGD
+            link_cgd_aluno = f"https://app.cgd.com.br/contratos/{id_interno}" if id_interno else f"https://app.cgd.com.br/alunos?busca={col_0}"
 
-            # URL exata para busca/direcionamento de contrato/aluno no CGD
-            link_cgd_aluno = f"https://app.cgd.com.br/alunos?busca={col_0}"
+            # Extrai detalhes de Cursos/Passos se id_interno existir
+            detalhes = {"andamento": "Carregando...", "pendentes": "Consultar", "ultimo_passo": "-"}
+            if id_interno:
+                detalhes = extrair_detalhes_contrato(page, id_interno)
 
             aluno = {
+                "id_interno": id_interno,
                 "contrato": col_0,
                 "nome": col_1,
-                "curso": col_2,
                 "unidade": nome_unidade,
                 "dias": dias_sem_freq,
                 "faltas": faltas,
@@ -110,17 +150,14 @@ def extrair_alunos_da_tabela(page, nome_unidade):
                 "tratativa": tratativa_recomendada,
                 "status_tratativa": "Pendente" if criticidade != "Normal" else "Normal",
                 "ultimo_acesso": f"Há {dias_sem_freq} dia(s)" if dias_sem_freq > 0 else "Hoje",
-                "disciplina_andamento": col_disciplina,
-                "disciplinas_pendentes": col_pendentes,
-                "ritmo": ritmo_sugerido,
+                "disciplina_andamento": detalhes["andamento"],
+                "disciplinas_pendentes": detalhes["pendentes"],
+                "passo_atual": detalhes["ultimo_passo"],
                 "link_cgd": link_cgd_aluno
             }
             alunos_coletados.append(aluno)
 
-        print(f"Página {pagina_atual} ({nome_unidade}): {novos_nesta_pagina} alunos válidos capturados.")
-
-        if novos_nesta_pagina == 0 and pagina_atual > 1:
-            break
+        print(f"Página {pagina_atual} ({nome_unidade}): {novos_nesta_pagina} alunos processados.")
 
         next_btn = page.query_selector('.paginate_button.next:not(.disabled), a[rel="next"]:not(.disabled)')
         if next_btn and next_btn.is_visible():
@@ -133,111 +170,63 @@ def extrair_alunos_da_tabela(page, nome_unidade):
         else:
             break
 
-    print(f"Total extraído em {nome_unidade}: {len(alunos_coletados)} alunos.")
     return alunos_coletados
 
 def processar_unidade(browser, nome_unidade, usuario, senha, alunos_url):
     context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        viewport={"width": 1366, "height": 768},
-        locale="pt-BR"
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        viewport={"width": 1366, "height": 768}
     )
     page = context.new_page()
     if STEALTH_ATIVO:
         stealth_sync(page)
 
-    login_url = "https://app.cgd.com.br"
     print(f"\n--- Processando {nome_unidade} ---")
-    
-    page.goto(login_url, wait_until="domcontentloaded", timeout=25000)
-
-    seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
-    seletor_pass = 'input[type="password"]'
+    page.goto("https://app.cgd.com.br", wait_until="domcontentloaded", timeout=25000)
 
     try:
-        page.wait_for_selector(seletor_user, timeout=10000, state="visible")
-        page.locator(seletor_user).first.fill(usuario)
-        page.locator(seletor_pass).first.fill(senha)
-        page.wait_for_timeout(300)
-
-        btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
-        if btn_login.is_visible():
-            btn_login.click()
-        else:
-            page.locator(seletor_pass).first.press("Enter")
-
+        page.fill('input[type="text"], input[name="usuario"]', usuario)
+        page.fill('input[type="password"]', senha)
+        page.click('button[type="submit"], input[type="submit"]')
         page.wait_for_timeout(3000)
     except Exception as err:
         print(f"Aviso no login ({nome_unidade}): {err}")
 
-    print(f"Navegando para lista de alunos ({nome_unidade}): {alunos_url}")
     page.goto(alunos_url, wait_until="domcontentloaded", timeout=25000)
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(2000)
 
     alunos = extrair_alunos_da_tabela(page, nome_unidade)
-    
-    try:
-        page.goto("https://app.cgd.com.br/logout", timeout=5000)
-    except Exception:
-        pass
     context.close()
-    
     return alunos
 
-def extrair_todos_alunos():
+def atualizar_supabase():
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        )
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
 
-        user_matriz = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
-        pass_matriz = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
-        url_matriz = "https://app.cgd.com.br/alunos"
+        user_matriz = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or ""
+        pass_matriz = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or ""
 
-        user_filial = (os.environ.get("CGD_USER_FILIAL") or user_matriz).strip()
-        pass_filial = (os.environ.get("CGD_PASS_FILIAL") or pass_matriz).strip()
-        url_filial = "https://app.cgd.com.br/alunos"
+        user_filial = os.environ.get("CGD_USER_FILIAL") or user_matriz
+        pass_filial = os.environ.get("CGD_PASS_FILIAL") or pass_matriz
 
-        alunos_matriz = processar_unidade(browser, "Matriz", user_matriz, pass_matriz, url_matriz)
-        alunos_filial = processar_unidade(browser, "Filial", user_filial, pass_filial, url_filial)
+        alunos_matriz = processar_unidade(browser, "Matriz", user_matriz, pass_matriz, "https://app.cgd.com.br/alunos")
+        alunos_filial = processar_unidade(browser, "Filial", user_filial, pass_filial, "https://app.cgd.com.br/alunos")
 
         browser.close()
-        return alunos_matriz + alunos_filial
+        todos_alunos = alunos_matriz + alunos_filial
 
-def atualizar_supabase():
-    alunos = extrair_todos_alunos()
-    total_registros = len(alunos)
+        payload = {
+            "id": 1,
+            "total_filial": len(alunos_filial),
+            "total_matriz": len(alunos_matriz),
+            "dados_completos": todos_alunos,
+            "alunos_criticos": len([a for a in todos_alunos if a.get("criticidade") == "Crítico"]),
+            "alunos_moderados": len([a for a in todos_alunos if a.get("criticidade") == "Moderado"]),
+            "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+        }
 
-    if total_registros == 0:
-        print("Aviso: Nenhum aluno capturado pelo scraper.")
-        return
-
-    with open("dados_alunos.json", "w", encoding="utf-8") as f:
-        json.dump(alunos, f, ensure_ascii=False, indent=2)
-
-    total_matriz = len([a for a in alunos if a.get("unidade") == "Matriz"])
-    total_filial = len([a for a in alunos if a.get("unidade") == "Filial"])
-    alunos_criticos = len([a for a in alunos if a.get("criticidade") == "Crítico"])
-    alunos_moderados = len([a for a in alunos if a.get("criticidade") == "Moderado"])
-
-    payload = {
-        "id": 1,
-        "total_filial": total_filial,
-        "total_matriz": total_matriz,
-        "dados_completos": alunos,
-        "alunos_criticos": alunos_criticos,
-        "alunos_moderados": alunos_moderados,
-        "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
-    }
-
-    supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"\nSucesso! {total_registros} alunos gravados no Supabase (Matriz: {total_matriz} | Filial: {total_filial}).")
+        supabase.table("resumo_cgd").upsert(payload).execute()
+        print(f"\nSucesso! {len(todos_alunos)} alunos salvos com links diretos, disciplinas e passos.")
 
 if __name__ == "__main__":
     atualizar_supabase()
