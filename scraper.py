@@ -38,11 +38,12 @@ def extrair_alunos_completos():
             stealth_sync(page)
 
         login_url = (os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br").strip()
-        relatorio_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url).strip()
+        # Garante a busca da URL do relatório sem cair na home
+        relatorio_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or "").strip()
         usuario = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
-        print(f"1. Acessando login: {login_url}")
+        print(f"1. Acessando portal de login: {login_url}")
         page.goto(login_url, wait_until="networkidle", timeout=30000)
 
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
@@ -53,11 +54,11 @@ def extrair_alunos_completos():
             
             field_user = page.locator(seletor_user).first
             field_user.click()
-            field_user.press_sequentially(usuario, delay=50)
+            field_user.press_sequentially(usuario, delay=40)
 
             field_pass = page.locator(seletor_pass).first
             field_pass.click()
-            field_pass.press_sequentially(senha, delay=50)
+            field_pass.press_sequentially(senha, delay=40)
             
             page.wait_for_timeout(500)
 
@@ -69,21 +70,26 @@ def extrair_alunos_completos():
             else:
                 field_pass.press("Enter")
 
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(4000)
             page.wait_for_load_state("networkidle")
         except Exception as err:
             print(f"Aviso na autenticação: {err}")
 
-        if page.url != relatorio_url and relatorio_url != login_url:
-            print(f"2. Acessando relatório: {relatorio_url}")
+        # FORÇAR NAVEGAÇÃO PARA A URL DO RELATÓRIO
+        if relatorio_url:
+            print(f"2. Navegando diretamente para o relatório: {relatorio_url}")
             page.goto(relatorio_url, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(3000)
+        else:
+            print("AVISO: CGD_MATRIZ_URL não definida! Tentando localizar tabela na página corrente...")
 
+        # CAPTURA DA TABELA
         try:
             page.wait_for_selector("table", timeout=15000)
-            print("Tabela capturada com sucesso!")
+            print("Sucesso! Tabela do relatório localizada.")
         except Exception:
-            print(f"Falha de acesso ao relatório. URL: {page.url}")
+            print(f"Falha de acesso ao relatório. URL atual: {page.url}")
+            print(f"Título da página: {page.title()}")
             browser.close()
             return []
 
