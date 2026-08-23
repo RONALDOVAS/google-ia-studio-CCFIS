@@ -6,8 +6,7 @@ from supabase import create_client, Client
 
 # Configurações do Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def extrair_alunos_completos():
     with sync_playwright() as p:
