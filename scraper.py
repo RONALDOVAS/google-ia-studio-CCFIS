@@ -4,12 +4,11 @@ import time
 from playwright.sync_api import sync_playwright
 from supabase import create_client, Client
 
-# Tenta carregar o stealth para mascarar o headless contra Cloudflare/WAF
 try:
     from playwright_stealth import stealth_sync
-    STEALTH_DISPONIVEL = True
+    STEALTH_ATIVO = True
 except ImportError:
-    STEALTH_DISPONIVEL = False
+    STEALTH_ATIVO = False
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -17,35 +16,36 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def extrair_alunos_completos():
     with sync_playwright() as p:
-        # Lança navegador simulando estritamente um Google Chrome real
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                "--disable-setuid-sandbox"
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
             ]
         )
+        
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1366, "height": 768},
             locale="pt-BR"
         )
+        
         page = context.new_page()
 
-        # Aplica o stealth no contexto da página se disponível
-        if STEALTH_DISPONIVEL:
+        if STEALTH_ATIVO:
             stealth_sync(page)
 
-        login_url = os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br"
-        relatorio_url = os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url
+        login_url = (os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br").strip()
+        relatorio_url = (os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url).strip()
         usuario = (os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or "").strip()
         senha = (os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or "").strip()
 
-        print(f"1. Acessando URL de Login: {login_url}")
+        print(f"1. Acessando login: {login_url}")
         page.goto(login_url, wait_until="networkidle", timeout=30000)
 
-        seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[id*="user"], input[id*="login"], input[type="text"]'
+        seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
 
         try:
@@ -53,16 +53,16 @@ def extrair_alunos_completos():
             
             field_user = page.locator(seletor_user).first
             field_user.click()
-            field_user.press_sequentially(usuario, delay=40)
+            field_user.press_sequentially(usuario, delay=50)
 
             field_pass = page.locator(seletor_pass).first
             field_pass.click()
-            field_pass.press_sequentially(senha, delay=40)
+            field_pass.press_sequentially(senha, delay=50)
             
             page.wait_for_timeout(500)
 
-            print("Enviando credenciais no formulário...")
-            btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), .btn-primary').first
+            print("Enviando credenciais...")
+            btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), .btn-primary').first
             
             if btn_login.is_visible():
                 btn_login.click()
@@ -72,28 +72,23 @@ def extrair_alunos_completos():
             page.wait_for_timeout(5000)
             page.wait_for_load_state("networkidle")
         except Exception as err:
-            print(f"Aviso no login: {err}")
+            print(f"Aviso na autenticação: {err}")
 
-        # NAVEGAÇÃO PARA O RELATÓRIO DE ALUNOS
         if page.url != relatorio_url and relatorio_url != login_url:
-            print(f"2. Navegando para o relatório final: {relatorio_url}")
+            print(f"2. Acessando relatório: {relatorio_url}")
             page.goto(relatorio_url, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(3000)
 
-        # CAPTURA DA TABELA
         try:
             page.wait_for_selector("table", timeout=15000)
             print("Tabela capturada com sucesso!")
         except Exception:
-            print(f"Falha de acesso. URL atual: {page.url}")
-            print(f"Título da Página: {page.title()}")
+            print(f"Falha de acesso ao relatório. URL: {page.url}")
             browser.close()
             return []
 
-        # EXPANDIR EXIBIÇÃO DA PAGINAÇÃO
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
         todos_exibidos = False
-        
         if select_length:
             for val in ['-1', '10000', '1000', '500']:
                 try:
@@ -104,7 +99,6 @@ def extrair_alunos_completos():
                 except:
                     continue
 
-        # LEITURA E RETORNO DOS DADOS
         todos_alunos = []
         contratos_processados = set()
 
@@ -174,7 +168,7 @@ def atualizar_supabase():
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"Sucesso! Registros gravados no Supabase: {total_registros} alunos.")
+    print(f"Sucesso! Registros salvos no Supabase: {total_registros} alunos.")
 
 if __name__ == "__main__":
     atualizar_supabase()
