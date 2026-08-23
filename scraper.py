@@ -16,7 +16,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def classificar_aluno(dias_sem_frequencia, faltas, reposicoes=0):
     faltas_efetivas = max(0, faltas - reposicoes)
-
     if faltas_efetivas >= 3 or dias_sem_frequencia >= 90:
         return "Crítico", "Aulão de Recuperação"
     elif faltas_efetivas == 2 or (60 <= dias_sem_frequencia < 90):
@@ -27,24 +26,20 @@ def classificar_aluno(dias_sem_frequencia, faltas, reposicoes=0):
         return "Normal", "Sem Tratativa Necessária"
 
 def extrair_detalhes_contrato(page, id_interno):
-    """Acessa as abas internas de Cursos e Frequência do ID interno do contrato no CGD"""
-    cursos_em_andamento = []
-    cursos_a_fazer = []
-    ultimo_passo = "-"
-    
-    # 1. Captura Cursos em andamento e Cursos a fazer
+    cursos_em_andamento, cursos_a_fazer, ultimo_passo = [], [], "-"
+    if not id_interno:
+        return {"andamento": "Módulo Ativo", "pendentes": "Consultar no CGD", "ultimo_passo": "-"}
+
     try:
-        page.goto(f"https://app.cgd.com.br/contratos/cursos/{id_interno}", wait_until="domcontentloaded", timeout=12000)
-        page.wait_for_timeout(1000)
+        page.goto(f"https://app.cgd.com.br/contratos/cursos/{id_interno}", wait_until="domcontentloaded", timeout=10000)
+        page.wait_for_timeout(600)
         
-        # Cursos em andamento (Tabela 1)
         rows_andamento = page.query_selector_all("text='Cursos em andamento' >> xpath=ancestor::div[contains(@class,'card') or contains(@class,'panel')]//table//tbody//tr")
         for r in rows_andamento:
             txt = r.inner_text().split("\t")[0].strip()
             if txt and "nenhum" not in txt.lower():
                 cursos_em_andamento.append(txt)
-                
-        # Cursos a fazer (Tabela 2)
+
         rows_fazer = page.query_selector_all("text='Cursos a fazer' >> xpath=ancestor::div[contains(@class,'card') or contains(@class,'panel')]//table//tbody//tr")
         for r in rows_fazer:
             txt = r.inner_text().split("\t")[0].strip()
@@ -53,11 +48,9 @@ def extrair_detalhes_contrato(page, id_interno):
     except Exception:
         pass
 
-    # 2. Captura Frequência e Último Passo executado
     try:
-        page.goto(f"https://app.cgd.com.br/contratos/frequencias/{id_interno}", wait_until="domcontentloaded", timeout=12000)
-        page.wait_for_timeout(1000)
-        
+        page.goto(f"https://app.cgd.com.br/contratos/frequencias/{id_interno}", wait_until="domcontentloaded", timeout=10000)
+        page.wait_for_timeout(600)
         first_row_passo = page.query_selector("table tbody tr td:nth-child(7)")
         if first_row_passo:
             ultimo_passo = first_row_passo.inner_text().strip() or "-"
@@ -103,15 +96,14 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             if "inativo" in linha_texto or "cancelado" in linha_texto or "trancado" in linha_texto:
                 continue
 
-            # Captura o link interno do contrato para extrair o id_interno exato (ex: 832412)
             link_elem = row.query_selector("a[href*='/contratos/']")
             href = link_elem.get_attribute("href") if link_elem else ""
             id_interno = href.split("/contratos/")[1].split("?")[0].strip() if "/contratos/" in href else ""
 
-            col_0 = cols[0].inner_text().strip()  # Contrato/Matrícula
-            col_1 = cols[1].inner_text().strip()  # Nome
+            num_contrato = cols[0].inner_text().strip()
+            nome_aluno = cols[1].inner_text().strip()
 
-            chave_unica = f"{nome_unidade}_{col_0}_{col_1}"
+            chave_unica = f"{nome_unidade}_{num_contrato}_{nome_aluno}"
             if chave_unica in chaves_processadas:
                 continue
 
@@ -127,32 +119,29 @@ def extrair_alunos_da_tabela(page, nome_unidade):
             reposicoes = int(col_reposicoes) if col_reposicoes.isdigit() else 0
             faltas_efetivas = max(0, faltas - reposicoes)
 
-            criticidade, tratativa_recomendada = classificar_aluno(dias_sem_freq, faltas, reposicoes)
+            criticidade, tratativa = classificar_aluno(dias_sem_freq, faltas, reposicoes)
+            link_cgd_aluno = f"https://app.cgd.com.br/contratos/{id_interno}" if id_interno else f"https://app.cgd.com.br/alunos?busca={num_contrato}"
 
-            # URL DIRETA E EXATA PARA O ALUNO NO CGD
-            link_cgd_aluno = f"https://app.cgd.com.br/contratos/{id_interno}" if id_interno else f"https://app.cgd.com.br/alunos?busca={col_0}"
-
-            # Extrai detalhes de Cursos/Passos se id_interno existir
-            detalhes = {"andamento": "Carregando...", "pendentes": "Consultar", "ultimo_passo": "-"}
-            if id_interno:
-                detalhes = extrair_detalhes_contrato(page, id_interno)
+            detalhes = extrair_detalhes_contrato(page, id_interno)
 
             aluno = {
                 "id_interno": id_interno,
-                "contrato": col_0,
-                "nome": col_1,
+                "contrato": num_contrato,
+                "nome": nome_aluno,
                 "unidade": nome_unidade,
                 "dias": dias_sem_freq,
                 "faltas": faltas,
                 "reposicoes": reposicoes,
                 "faltas_efetivas": faltas_efetivas,
                 "criticidade": criticidade,
-                "tratativa": tratativa_recomendada,
+                "status": criticidade.upper(),
+                "tratativa": tratativa,
                 "status_tratativa": "Pendente" if criticidade != "Normal" else "Normal",
                 "ultimo_acesso": f"Há {dias_sem_freq} dia(s)" if dias_sem_freq > 0 else "Hoje",
                 "disciplina_andamento": detalhes["andamento"],
                 "disciplinas_pendentes": detalhes["pendentes"],
                 "passo_atual": detalhes["ultimo_passo"],
+                "curso": detalhes["andamento"],
                 "link_cgd": link_cgd_aluno
             }
             alunos_coletados.append(aluno)
@@ -174,7 +163,7 @@ def extrair_alunos_da_tabela(page, nome_unidade):
 
 def processar_unidade(browser, nome_unidade, usuario, senha, alunos_url):
     context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         viewport={"width": 1366, "height": 768}
     )
     page = context.new_page()
@@ -185,7 +174,7 @@ def processar_unidade(browser, nome_unidade, usuario, senha, alunos_url):
     page.goto("https://app.cgd.com.br", wait_until="domcontentloaded", timeout=25000)
 
     try:
-        page.fill('input[type="text"], input[name="usuario"]', usuario)
+        page.fill('input[type="text"], input[name="usuario"], input[name="login"]', usuario)
         page.fill('input[type="password"]', senha)
         page.click('button[type="submit"], input[type="submit"]')
         page.wait_for_timeout(3000)
@@ -205,7 +194,6 @@ def atualizar_supabase():
 
         user_matriz = os.environ.get("CGD_USER_MATRIZ") or os.environ.get("CGD_USER") or ""
         pass_matriz = os.environ.get("CGD_PASS_MATRIZ") or os.environ.get("CGD_PASS") or ""
-
         user_filial = os.environ.get("CGD_USER_FILIAL") or user_matriz
         pass_filial = os.environ.get("CGD_PASS_FILIAL") or pass_matriz
 
@@ -215,18 +203,30 @@ def atualizar_supabase():
         browser.close()
         todos_alunos = alunos_matriz + alunos_filial
 
+        if not todos_alunos:
+            print("Aviso: Nenhum aluno capturado.")
+            return
+
+        # GRAVA NOS DOIS FORMATOS PARA GARANTIR COMPATIBILIDADE TOTAL
+        relatorio_compatibilidade = json.dumps({
+            "total_matriz": len(alunos_matriz),
+            "total_filial": len(alunos_filial),
+            "detalhes": todos_alunos
+        })
+
         payload = {
             "id": 1,
             "total_filial": len(alunos_filial),
             "total_matriz": len(alunos_matriz),
             "dados_completos": todos_alunos,
+            "relatorio": relatorio_compatibilidade,
             "alunos_criticos": len([a for a in todos_alunos if a.get("criticidade") == "Crítico"]),
             "alunos_moderados": len([a for a in todos_alunos if a.get("criticidade") == "Moderado"]),
             "atualizado_em": time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
         }
 
         supabase.table("resumo_cgd").upsert(payload).execute()
-        print(f"\nSucesso! {len(todos_alunos)} alunos salvos com links diretos, disciplinas e passos.")
+        print(f"\nSucesso! {len(todos_alunos)} alunos salvos no Supabase com compatibilidade dupla.")
 
 if __name__ == "__main__":
     atualizar_supabase()
