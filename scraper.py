@@ -4,18 +4,38 @@ import time
 from playwright.sync_api import sync_playwright
 from supabase import create_client, Client
 
+# Tenta carregar o stealth para mascarar o headless contra Cloudflare/WAF
+try:
+    from playwright_stealth import stealth_sync
+    STEALTH_DISPONIVEL = True
+except ImportError:
+    STEALTH_DISPONIVEL = False
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def extrair_alunos_completos():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Lança navegador simulando estritamente um Google Chrome real
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox"
+            ]
+        )
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768},
+            locale="pt-BR"
         )
         page = context.new_page()
+
+        # Aplica o stealth no contexto da página se disponível
+        if STEALTH_DISPONIVEL:
+            stealth_sync(page)
 
         login_url = os.environ.get("CGD_LOGIN_URL") or "https://app.cgd.com.br"
         relatorio_url = os.environ.get("CGD_MATRIZ_URL") or os.environ.get("URL_ALUNOS_MATRIZ") or login_url
@@ -25,27 +45,23 @@ def extrair_alunos_completos():
         print(f"1. Acessando URL de Login: {login_url}")
         page.goto(login_url, wait_until="networkidle", timeout=30000)
 
-        # SELETORES E DIGITAÇÃO HUMANA REAL
         seletor_user = 'input[name="usuario"], input[name="login"], input[name="email"], input[id*="user"], input[id*="login"], input[type="text"]'
         seletor_pass = 'input[type="password"]'
 
         try:
             page.wait_for_selector(seletor_user, timeout=10000, state="visible")
             
-            # Limpa e digita caractere por caractere para acionar todos os gatilhos JS da página
             field_user = page.locator(seletor_user).first
             field_user.click()
-            field_user.focus()
-            field_user.press_sequentially(usuario, delay=50)
+            field_user.press_sequentially(usuario, delay=40)
 
             field_pass = page.locator(seletor_pass).first
             field_pass.click()
-            field_pass.focus()
-            field_pass.press_sequentially(senha, delay=50)
+            field_pass.press_sequentially(senha, delay=40)
             
             page.wait_for_timeout(500)
 
-            print("Enviando formulário de login...")
+            print("Enviando credenciais no formulário...")
             btn_login = page.locator('button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), .btn-primary').first
             
             if btn_login.is_visible():
@@ -53,19 +69,18 @@ def extrair_alunos_completos():
             else:
                 field_pass.press("Enter")
 
-            # Aguarda tempo suficiente para a validação do token/cookie de sessão
-            page.wait_for_timeout(6000)
+            page.wait_for_timeout(5000)
             page.wait_for_load_state("networkidle")
         except Exception as err:
             print(f"Aviso no login: {err}")
 
-        # NAVEGAÇÃO PARA O RELATÓRIO APÓS LOGIN
+        # NAVEGAÇÃO PARA O RELATÓRIO DE ALUNOS
         if page.url != relatorio_url and relatorio_url != login_url:
             print(f"2. Navegando para o relatório final: {relatorio_url}")
             page.goto(relatorio_url, wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(3000)
 
-        # CAPTURA DA TABELA DE DADOS
+        # CAPTURA DA TABELA
         try:
             page.wait_for_selector("table", timeout=15000)
             print("Tabela capturada com sucesso!")
@@ -75,7 +90,7 @@ def extrair_alunos_completos():
             browser.close()
             return []
 
-        # EXIBIR TODOS OS REGISTROS DA TABELA
+        # EXPANDIR EXIBIÇÃO DA PAGINAÇÃO
         select_length = page.query_selector('select[name*="length"], select[name*="table_length"]')
         todos_exibidos = False
         
@@ -89,7 +104,7 @@ def extrair_alunos_completos():
                 except:
                     continue
 
-        # LEITURA E PROCESSAMENTO DAS LINHAS
+        # LEITURA E RETORNO DOS DADOS
         todos_alunos = []
         contratos_processados = set()
 
@@ -159,7 +174,7 @@ def atualizar_supabase():
     }
 
     supabase.table("resumo_cgd").upsert(payload).execute()
-    print(f"Sucesso! Registros salvos no Supabase: {total_registros} alunos.")
+    print(f"Sucesso! Registros gravados no Supabase: {total_registros} alunos.")
 
 if __name__ == "__main__":
     atualizar_supabase()
