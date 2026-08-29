@@ -829,24 +829,74 @@ def fazer_login_e_extrair(
                         )
                     )
 
-                    aluno_data = {
+                    unidade_db = (
+    "matriz"
+    if unidade_nome.lower() == "matriz"
+    else "filial"
+)
 
-                        "contrato": contrato,
+criticidade_db = criticidade.lower()
 
-                        "nome": nome,
+if criticidade_db == "critico":
+    tratativa_sugerida = "aulao"
+elif criticidade_db == "moderado":
+    tratativa_sugerida = "atividade_pratica"
+elif criticidade_db == "atencao":
+    tratativa_sugerida = "acompanhamento"
+else:
+    tratativa_sugerida = "normal"
 
-                        "unidade": unidade_nome,
+aluno_data = {
+    "cgd_matricula_id": contrato,
+    "nome": nome,
+    "contrato": contrato,
 
-                        "curso": curso,
+    "email": None,
+    "telefone": None,
 
-                        "status": "ATIVO",
+    "curso": curso,
+    "turma_nome": "",
+    "professor_nome": "",
 
-                        "dias": dias_ativos,
+    "data_inicio": (
+        datetime.strptime(
+            data_inicio_str,
+            "%d/%m/%Y"
+        ).strftime("%Y-%m-%d")
+        if data_inicio_str
+        else datetime.now().strftime("%Y-%m-%d")
+    ),
 
-                        "faltas": 0,
+    "meses_contrato_total": 12,
 
-                        "criticidade": criticidade
-                    }
+    "ultima_aula": None,
+    "ultimo_acesso": None,
+
+    "faltas_totais": 0,
+    "faltas_mes_atual": 0,
+
+    "mes_referencia_faltas": datetime.now().strftime("%m/%Y"),
+
+    "dias_em_curso": dias_ativos,
+
+    "criticidade": criticidade_db,
+
+    "tratativa_sugerida": tratativa_sugerida,
+
+    "status_tratativa": "pendente",
+
+    "status_matricula": "ativo",
+
+    "bloqueado_automaticamente": False,
+
+    "motivo_bloqueio": None,
+
+    "total_disciplinas_grade": 0,
+
+    "disciplinas_concluidas": 0,
+
+    "unidade": unidade_db
+}
 
                     alunos_capturados.append(
                         aluno_data
