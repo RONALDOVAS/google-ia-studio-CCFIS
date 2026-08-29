@@ -1229,7 +1229,7 @@ def main():
             f"{len(todos_alunos)} alunos."
         )
 
-        # ======================================================================
+                # ======================================================================
         # SUPABASE
         # ======================================================================
 
@@ -1237,7 +1237,7 @@ def main():
 
             print("")
             print(
-                "Enviando dados para o Supabase..."
+                "Enviando alunos estruturados para o Supabase..."
             )
 
             supabase: Client = create_client(
@@ -1245,29 +1245,139 @@ def main():
                 SUPABASE_KEY
             )
 
-            data = {
-                "relatorio": json.dumps(
-                    todos_alunos,
-                    ensure_ascii=False
-                ),
-                "atualizado_em": datetime.now().isoformat()
-            }
+            # ------------------------------------------------------------------
+            # 1. UPSERT DOS ALUNOS
+            # ------------------------------------------------------------------
 
-            res = (
-                supabase
-                .table("resumo_cgd")
-                .upsert(data)
-                .execute()
-            )
+            if todos_alunos:
 
-            print(
-                "Relatório enviado com sucesso "
-                "para resumo_cgd."
-            )
+                resposta_alunos = (
+                    supabase
+                    .table("alunos")
+                    .upsert(
+                        todos_alunos,
+                        on_conflict="cgd_matricula_id"
+                    )
+                    .execute()
+                )
 
-            print(
-                f"Resposta Supabase: {res}"
-            )
+                print(
+                    "Alunos enviados com sucesso para a tabela alunos."
+                )
+
+                print(
+                    f"Quantidade enviada: {len(todos_alunos)}"
+                )
+
+            # ------------------------------------------------------------------
+            # 2. GERAR RESUMO POR UNIDADE
+            # ------------------------------------------------------------------
+
+            for unidade in ["matriz", "filial"]:
+
+                alunos_unidade = [
+                    aluno
+                    for aluno in todos_alunos
+                    if aluno["unidade"] == unidade
+                ]
+
+                total_alunos = len(alunos_unidade)
+
+                criticos = sum(
+                    1
+                    for aluno in alunos_unidade
+                    if aluno["criticidade"] == "critico"
+                )
+
+                moderados = sum(
+                    1
+                    for aluno in alunos_unidade
+                    if aluno["criticidade"] == "moderado"
+                )
+
+                atencao = sum(
+                    1
+                    for aluno in alunos_unidade
+                    if aluno["criticidade"] == "atencao"
+                )
+
+                normais = sum(
+                    1
+                    for aluno in alunos_unidade
+                    if aluno["criticidade"] == "normal"
+                )
+
+                bloqueados = sum(
+                    1
+                    for aluno in alunos_unidade
+                    if aluno["bloqueado_automaticamente"]
+                )
+
+                resumo = {
+
+                    "unidade": unidade,
+
+                    "nome_unidade": (
+                        "Matriz"
+                        if unidade == "matriz"
+                        else "Filial"
+                    ),
+
+                    "total_alunos_ativos": total_alunos,
+
+                    "total_matriz": (
+                        total_alunos
+                        if unidade == "matriz"
+                        else 0
+                    ),
+
+                    "total_filial": (
+                        total_alunos
+                        if unidade == "filial"
+                        else 0
+                    ),
+
+                    "alunos_criticos": criticos,
+
+                    "alunos_moderados": moderados,
+
+                    "total_contratos": total_alunos,
+
+                    "laboratorios_ativos": [],
+
+                    "criticos": criticos,
+
+                    "moderados": moderados,
+
+                    "atencao": atencao,
+
+                    "normais": normais,
+
+                    "bloqueados_faltas": bloqueados,
+
+                    "mes_referencia": datetime.now().strftime("%m/%Y"),
+
+                    "alunos_data": alunos_unidade,
+
+                    "origem": "cgd_live",
+
+                    "ultimo_sync": datetime.now().isoformat()
+                }
+
+                resposta_resumo = (
+                    supabase
+                    .table("resumo_cgd")
+                    .upsert(
+                        resumo,
+                        on_conflict="unidade"
+                    )
+                    .execute()
+                )
+
+                print(
+                    f"Resumo da unidade {unidade} "
+                    f"atualizado com sucesso."
+                )
 
         except Exception as erro_supabase:
 
@@ -1277,31 +1387,6 @@ def main():
             )
 
             print(erro_supabase)
-
-    else:
-
-        print("")
-        print(
-            "NENHUM ALUNO VÁLIDO FOI CAPTURADO."
-        )
-
-        # Criamos um JSON vazio somente para deixar
-        # explícito o resultado do processamento.
-
-        with open(
-            JSON_PATH,
-            "w",
-            encoding="utf-8"
-        ) as arquivo:
-
-            json.dump(
-                [],
-                arquivo,
-                ensure_ascii=False,
-                indent=2
-            )
-
-
 # ==============================================================================
 # EXECUÇÃO
 # ==============================================================================
