@@ -3,19 +3,22 @@ name: Execução Automática Scraping CGD
 on:
   schedule:
     - cron: '0 8 * * *'
+
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+
   executar-scraping:
+
     runs-on: ubuntu-latest
 
     steps:
 
       # ================================================================
-      # 1. BAIXAR CÓDIGO
+      # 1. BAIXAR CÓDIGO DO REPOSITÓRIO
       # ================================================================
 
       - name: Baixar código do repositório
@@ -31,17 +34,50 @@ jobs:
           python-version: '3.11'
 
       # ================================================================
-      # 3. INSTALAR DEPENDÊNCIAS
+      # 3. VERIFICAR AMBIENTE
+      # ================================================================
+
+      - name: Verificar ambiente
+        run: |
+          echo "=========================================="
+          echo "AMBIENTE DO GITHUB ACTIONS"
+          echo "=========================================="
+
+          python --version
+          python -m pip --version
+
+          echo ""
+          echo "Arquivos do projeto:"
+          find . -maxdepth 2 -type f | sort
+
+      # ================================================================
+      # 4. INSTALAR DEPENDÊNCIAS
       # ================================================================
 
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
+
           pip install -r requirements.txt
+
+          pip install playwright
+
           pip install playwright-stealth
 
       # ================================================================
-      # 4. INSTALAR CHROMIUM PELO PLAYWRIGHT PYTHON
+      # 5. VERIFICAR PLAYWRIGHT
+      # ================================================================
+
+      - name: Verificar Playwright
+        run: |
+          echo "=========================================="
+          echo "PLAYWRIGHT"
+          echo "=========================================="
+
+          python -m playwright --version
+
+      # ================================================================
+      # 6. INSTALAR CHROMIUM
       # ================================================================
 
       - name: Instalar Navegador do Playwright
@@ -49,12 +85,106 @@ jobs:
           python -m playwright install --with-deps chromium
 
       # ================================================================
-      # 5. EXECUTAR SCRAPER
+      # 7. VERIFICAR SECRETS
+      #
+      # IMPORTANTE:
+      # Os valores nunca são impressos.
+      # Apenas verificamos se existem.
+      # ================================================================
+
+      - name: Verificar configuração dos Secrets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
+
+          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
+          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
+
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+        run: |
+
+          echo "=========================================="
+          echo "VERIFICAÇÃO DOS SECRETS"
+          echo "=========================================="
+
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "GEMINI_API_KEY: OK"
+          else
+            echo "GEMINI_API_KEY: AUSENTE"
+          fi
+
+          if [ -n "$CGD_LOGIN_URL" ]; then
+            echo "CGD_LOGIN_URL: OK"
+          else
+            echo "CGD_LOGIN_URL: AUSENTE"
+          fi
+
+          if [ -n "$CGD_MATRIZ_URL" ]; then
+            echo "CGD_MATRIZ_URL: OK"
+          else
+            echo "CGD_MATRIZ_URL: AUSENTE"
+          fi
+
+          if [ -n "$CGD_FILIAL_URL" ]; then
+            echo "CGD_FILIAL_URL: OK"
+          else
+            echo "CGD_FILIAL_URL: AUSENTE"
+          fi
+
+          if [ -n "$CGD_USER_MATRIZ" ]; then
+            echo "CGD_USER_MATRIZ: OK"
+          else
+            echo "CGD_USER_MATRIZ: AUSENTE"
+          fi
+
+          if [ -n "$CGD_PASS_MATRIZ" ]; then
+            echo "CGD_PASS_MATRIZ: OK"
+          else
+            echo "CGD_PASS_MATRIZ: AUSENTE"
+          fi
+
+          if [ -n "$CGD_USER_FILIAL" ]; then
+            echo "CGD_USER_FILIAL: OK"
+          else
+            echo "CGD_USER_FILIAL: AUSENTE"
+          fi
+
+          if [ -n "$CGD_PASS_FILIAL" ]; then
+            echo "CGD_PASS_FILIAL: OK"
+          else
+            echo "CGD_PASS_FILIAL: AUSENTE"
+          fi
+
+          if [ -n "$SUPABASE_URL" ]; then
+            echo "SUPABASE_URL: OK"
+          else
+            echo "SUPABASE_URL: AUSENTE"
+          fi
+
+          if [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "SUPABASE_SERVICE_ROLE_KEY: OK"
+          else
+            echo "SUPABASE_SERVICE_ROLE_KEY: AUSENTE"
+          fi
+
+      # ================================================================
+      # 8. EXECUTAR SCRAPER
       # ================================================================
 
       - name: Executar Script de Scraping
         env:
+
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
@@ -72,10 +202,106 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
         run: |
+
+          echo "=========================================="
+          echo "INICIANDO SCRAPER"
+          echo "=========================================="
+
           python scraper.py
 
       # ================================================================
-      # 6. SALVAR DIAGNÓSTICOS COMO ARTIFACT
+      # 9. LISTAR DIAGNÓSTICOS
+      # ================================================================
+
+      - name: Listar arquivos de diagnóstico
+        if: always()
+        run: |
+
+          echo "=========================================="
+          echo "ARQUIVOS DE DIAGNÓSTICO"
+          echo "=========================================="
+
+          if [ -d diagnostico_scraping ]; then
+
+            find diagnostico_scraping \
+              -maxdepth 1 \
+              -type f \
+              -printf "%f\n" \
+              | sort
+
+          else
+
+            echo "Diretório diagnostico_scraping não encontrado."
+
+          fi
+
+      # ================================================================
+      # 10. MOSTRAR RESUMO DOS DIAGNÓSTICOS TXT
+      # ================================================================
+
+      - name: Mostrar informações de diagnóstico
+        if: always()
+        run: |
+
+          echo "=========================================="
+          echo "RESUMO DOS DIAGNÓSTICOS"
+          echo "=========================================="
+
+          if [ -d diagnostico_scraping ]; then
+
+            for arquivo in diagnostico_scraping/*.txt; do
+
+              if [ -f "$arquivo" ]; then
+
+                echo ""
+                echo "------------------------------------------"
+                echo "ARQUIVO: $arquivo"
+                echo "------------------------------------------"
+
+                cat "$arquivo"
+
+              fi
+
+            done
+
+          fi
+
+      # ================================================================
+      # 11. VERIFICAR DADOS ALUNOS
+      # ================================================================
+
+      - name: Verificar dados_alunos.json
+        if: always()
+        run: |
+
+          echo "=========================================="
+          echo "STATUS DO dados_alunos.json"
+          echo "=========================================="
+
+          if [ -f dados_alunos.json ]; then
+
+            echo "Arquivo encontrado."
+
+            echo ""
+            echo "Tamanho:"
+            wc -c dados_alunos.json
+
+            echo ""
+            echo "Linhas:"
+            wc -l dados_alunos.json
+
+            echo ""
+            echo "Conteúdo:"
+            head -80 dados_alunos.json
+
+          else
+
+            echo "dados_alunos.json não encontrado."
+
+          fi
+
+      # ================================================================
+      # 12. SALVAR DIAGNÓSTICOS COMO ARTIFACT
       # ================================================================
 
       - name: Salvar diagnóstico do scraping
@@ -83,44 +309,40 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: diagnostico-scraping-cgd
-          path: diagnostico_scraping/
+          path: |
+            diagnostico_scraping/
+            dados_alunos.json
           if-no-files-found: warn
           retention-days: 7
 
       # ================================================================
-      # 7. MOSTRAR STATUS DO JSON
-      # ================================================================
-
-      - name: Verificar dados_alunos.json
-        if: always()
-        run: |
-          echo "=========================================="
-          echo "STATUS DO dados_alunos.json"
-          echo "=========================================="
-
-          if [ -f dados_alunos.json ]; then
-            echo "Arquivo encontrado."
-            echo "Quantidade de linhas:"
-            wc -l dados_alunos.json
-            echo ""
-            echo "Primeiras linhas:"
-            head -40 dados_alunos.json
-          else
-            echo "dados_alunos.json não encontrado."
-          fi
-
-      # ================================================================
-      # 8. COMMIT E PUSH DO JSON
+      # 13. COMMIT E PUSH
       # ================================================================
 
       - name: Commit e Push do arquivo JSON
         if: always()
         run: |
+
+          echo "=========================================="
+          echo "ATUALIZAÇÃO DO REPOSITÓRIO"
+          echo "=========================================="
+
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git config --global user.email \
+            "github-actions[bot]@users.noreply.github.com"
 
           git add dados_alunos.json || true
 
-          git diff --cached --quiet || git commit -m "Auto-update: atualiza dados_alunos.json"
+          if git diff --cached --quiet; then
 
-          git push
+            echo "Nenhuma alteração no dados_alunos.json."
+
+          else
+
+            git commit \
+              -m "Auto-update: atualiza dados_alunos.json"
+
+            git push
+
+          fi
