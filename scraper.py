@@ -396,20 +396,20 @@ def localizar_botao_login(page):
 # ==============================================================================
 
 def calcular_criticidade_e_dias(data_inicio_str):
-
     """
-    Calcula dias desde o início da disciplina.
+    Calcula a criticidade e os dias desde o início da disciplina.
 
-    ATENÇÃO:
-    Durante o diagnóstico estamos usando a data atual real
-    do servidor GitHub Actions.
+    Regras:
+    >= 90 dias -> crítico
+    >= 60 dias -> moderado
+    >= 30 dias -> atenção
+    < 30 dias  -> normal
     """
 
     if not data_inicio_str:
-        return "NORMAL", 0
+        return "normal", 0
 
     try:
-
         data_inicio_str = data_inicio_str.strip()
 
         data_inicio = datetime.strptime(
@@ -417,6 +417,24 @@ def calcular_criticidade_e_dias(data_inicio_str):
             "%d/%m/%Y"
         )
 
+        hoje = datetime.now()
+
+        dias = (hoje - data_inicio).days
+
+        if dias >= 90:
+            return "critico", dias
+
+        elif dias >= 60:
+            return "moderado", dias
+
+        elif dias >= 30:
+            return "atencao", dias
+
+        else:
+            return "normal", max(0, dias)
+
+    except Exception:
+        return "normal", 0
         hoje = datetime.now()
 
         dias = (hoje - data_inicio).days
