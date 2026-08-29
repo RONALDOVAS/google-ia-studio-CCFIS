@@ -421,17 +421,17 @@ def calcular_criticidade_e_dias(data_inicio_str):
 
         dias = (hoje - data_inicio).days
 
-        if dias > 90:
-            return "CRÍTICO", dias
+        if dias >= 90:
+    return "critico", dias
 
-        elif dias > 60:
-            return "MODERADO", dias
+elif dias >= 60:
+    return "moderado", dias
 
-        elif dias > 30:
-            return "ATENÇÃO", dias
+elif dias >= 30:
+    return "atencao", dias
 
-        else:
-            return "NORMAL", max(0, dias)
+else:
+    return "normal", max(0, dias)
 
     except Exception:
 
