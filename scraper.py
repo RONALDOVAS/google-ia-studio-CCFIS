@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -37,21 +38,44 @@ JSON_PATH = Path("dados_alunos.json")
 def salvar_diagnostico(page, unidade_nome, etapa):
     """
     Salva screenshot, HTML e informações básicas da página.
-    Não salva credenciais.
+    Não salva credenciais diretamente.
     """
 
     try:
         prefixo = unidade_nome.lower().replace(" ", "_")
-        etapa_limpa = etapa.lower().replace(" ", "_").replace("/", "_")
+        etapa_limpa = (
+            etapa.lower()
+            .replace(" ", "_")
+            .replace("/", "_")
+        )
 
-        screenshot_path = DIAGNOSTICO_DIR / f"{prefixo}_{etapa_limpa}.png"
-        html_path = DIAGNOSTICO_DIR / f"{prefixo}_{etapa_limpa}.html"
-        info_path = DIAGNOSTICO_DIR / f"{prefixo}_{etapa_limpa}.txt"
+        screenshot_path = (
+            DIAGNOSTICO_DIR /
+            f"{prefixo}_{etapa_limpa}.png"
+        )
+
+        html_path = (
+            DIAGNOSTICO_DIR /
+            f"{prefixo}_{etapa_limpa}.html"
+        )
+
+        info_path = (
+            DIAGNOSTICO_DIR /
+            f"{prefixo}_{etapa_limpa}.txt"
+        )
+
+        # ----------------------------------------------------------------------
+        # SCREENSHOT
+        # ----------------------------------------------------------------------
 
         page.screenshot(
             path=str(screenshot_path),
             full_page=True
         )
+
+        # ----------------------------------------------------------------------
+        # HTML
+        # ----------------------------------------------------------------------
 
         html = page.content()
 
@@ -61,6 +85,10 @@ def salvar_diagnostico(page, unidade_nome, etapa):
             encoding="utf-8"
         ) as arquivo:
             arquivo.write(html)
+
+        # ----------------------------------------------------------------------
+        # INFORMAÇÕES BÁSICAS
+        # ----------------------------------------------------------------------
 
         with open(
             info_path,
@@ -101,7 +129,14 @@ def salvar_diagnostico(page, unidade_nome, etapa):
             )
 
             arquivo.write("\n")
-            arquivo.write("TEXTOS DOS INPUTS:\n")
+
+            # ------------------------------------------------------------------
+            # INPUTS
+            # ------------------------------------------------------------------
+
+            arquivo.write(
+                "TEXTOS DOS INPUTS:\n"
+            )
 
             inputs = page.locator("input").all()
 
@@ -111,7 +146,9 @@ def salvar_diagnostico(page, unidade_nome, etapa):
                     tipo = input_element.get_attribute("type")
                     nome = input_element.get_attribute("name")
                     identificador = input_element.get_attribute("id")
-                    placeholder = input_element.get_attribute("placeholder")
+                    placeholder = input_element.get_attribute(
+                        "placeholder"
+                    )
 
                     arquivo.write(
                         f"[{i}] "
@@ -123,6 +160,10 @@ def salvar_diagnostico(page, unidade_nome, etapa):
 
                 except Exception:
                     pass
+
+            # ------------------------------------------------------------------
+            # FRAMES
+            # ------------------------------------------------------------------
 
             arquivo.write("\n")
             arquivo.write("FRAMES:\n")
@@ -152,27 +193,908 @@ def salvar_diagnostico(page, unidade_nome, etapa):
         )
 
 
-def imprimir_estado_pagina(page, unidade_nome, etapa):
+# ==============================================================================
+# DIAGNÓSTICO DE NAVEGAÇÃO DO CGD - ETAPA 3A
+# ==============================================================================
+
+def diagnosticar_navegacao_cgd(page, unidade_nome):
     """
-    Imprime no log do GitHub Actions informações úteis,
-    sem revelar senhas.
+    Diagnóstico específico da navegação disponível no CGD.
+
+    Objetivo da Etapa 3A:
+    descobrir quais menus, links, botões e possíveis áreas de
+    frequência/faltas estão disponíveis após o login.
+
+    IMPORTANTE:
+    esta função NÃO altera dados e NÃO tenta registrar faltas.
     """
 
     print("")
     print("=" * 80)
-    print(f"DIAGNÓSTICO DA PÁGINA - {unidade_nome}")
-    print(f"ETAPA: {etapa}")
+    print(
+        f"[{unidade_nome}] ETAPA 3A - "
+        f"DIAGNÓSTICO DA NAVEGAÇÃO DO CGD"
+    )
+    print("=" * 80)
+
+    prefixo = unidade_nome.lower().replace(" ", "_")
+
+    diagnostico_path = (
+        DIAGNOSTICO_DIR /
+        f"{prefixo}_navegacao_cgd.txt"
+    )
+
+    palavras_interesse = [
+        "falta",
+        "faltas",
+        "frequencia",
+        "frequência",
+        "presenca",
+        "presença",
+        "aula",
+        "aulas",
+        "aluno",
+        "alunos",
+        "relatorio",
+        "relatório",
+        "relatorios",
+        "relatórios",
+        "operacional",
+        "operacionais",
+        "chamada",
+        "presente",
+        "ausente",
+        "frequências",
+    ]
+
+    try:
+
+        with open(
+            diagnostico_path,
+            "w",
+            encoding="utf-8"
+        ) as arquivo:
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "DIAGNÓSTICO DE NAVEGAÇÃO DO CGD - ETAPA 3A\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n\n"
+            )
+
+            arquivo.write(
+                f"UNIDADE: {unidade_nome}\n"
+            )
+
+            arquivo.write(
+                f"URL ATUAL: {page.url}\n"
+            )
+
+            arquivo.write(
+                f"TÍTULO: {page.title()}\n\n"
+            )
+
+            # ------------------------------------------------------------------
+            # URL
+            # ------------------------------------------------------------------
+
+            print(
+                f"[{unidade_nome}] URL atual: {page.url}"
+            )
+
+            arquivo.write(
+                f"URL ATUAL:\n{page.url}\n\n"
+            )
+
+            # ------------------------------------------------------------------
+            # TEXTO VISÍVEL
+            # ------------------------------------------------------------------
+
+            print(
+                f"[{unidade_nome}] "
+                f"Analisando texto visível..."
+            )
+
+            try:
+
+                texto_body = page.locator(
+                    "body"
+                ).inner_text(
+                    timeout=10000
+                )
+
+                arquivo.write(
+                    "===============================================================================\n"
+                )
+
+                arquivo.write(
+                    "TEXTO VISÍVEL DA PÁGINA\n"
+                )
+
+                arquivo.write(
+                    "===============================================================================\n"
+                )
+
+                arquivo.write(
+                    texto_body[:30000]
+                )
+
+                arquivo.write("\n\n")
+
+            except Exception as erro:
+
+                arquivo.write(
+                    f"Erro ao obter body: {erro}\n\n"
+                )
+
+            # ------------------------------------------------------------------
+            # LINKS
+            # ------------------------------------------------------------------
+
+            print(
+                f"[{unidade_nome}] "
+                f"Analisando links..."
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "LINKS ENCONTRADOS\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            links = page.locator("a")
+
+            quantidade_links = links.count()
+
+            print(
+                f"[{unidade_nome}] "
+                f"Total de links: {quantidade_links}"
+            )
+
+            for i in range(quantidade_links):
+
+                try:
+
+                    link = links.nth(i)
+
+                    if not link.is_visible():
+                        continue
+
+                    texto = (
+                        link.inner_text(
+                            timeout=2000
+                        )
+                        .strip()
+                    )
+
+                    href = (
+                        link.get_attribute("href")
+                        or ""
+                    )
+
+                    title = (
+                        link.get_attribute("title")
+                        or ""
+                    )
+
+                    aria = (
+                        link.get_attribute("aria-label")
+                        or ""
+                    )
+
+                    linha = (
+                        f"[LINK {i}] "
+                        f"texto={texto!r} | "
+                        f"href={href!r} | "
+                        f"title={title!r} | "
+                        f"aria-label={aria!r}"
+                    )
+
+                    arquivo.write(
+                        linha + "\n"
+                    )
+
+                    texto_busca = (
+                        f"{texto} "
+                        f"{href} "
+                        f"{title} "
+                        f"{aria}"
+                    ).lower()
+
+                    if any(
+                        palavra in texto_busca
+                        for palavra in palavras_interesse
+                    ):
+
+                        print(
+                            f"[{unidade_nome}] "
+                            f"LINK DE INTERESSE: {linha}"
+                        )
+
+                except Exception as erro:
+
+                    arquivo.write(
+                        f"[LINK {i}] erro: {erro}\n"
+                    )
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # BOTÕES
+            # ------------------------------------------------------------------
+
+            print(
+                f"[{unidade_nome}] "
+                f"Analisando botões..."
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "BOTÕES ENCONTRADOS\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            botoes = page.locator("button")
+
+            quantidade_botoes = botoes.count()
+
+            print(
+                f"[{unidade_nome}] "
+                f"Total de botões: {quantidade_botoes}"
+            )
+
+            for i in range(quantidade_botoes):
+
+                try:
+
+                    botao = botoes.nth(i)
+
+                    if not botao.is_visible():
+                        continue
+
+                    texto = (
+                        botao.inner_text(
+                            timeout=2000
+                        )
+                        .strip()
+                    )
+
+                    title = (
+                        botao.get_attribute("title")
+                        or ""
+                    )
+
+                    aria = (
+                        botao.get_attribute("aria-label")
+                        or ""
+                    )
+
+                    tipo = (
+                        botao.get_attribute("type")
+                        or ""
+                    )
+
+                    classes = (
+                        botao.get_attribute("class")
+                        or ""
+                    )
+
+                    linha = (
+                        f"[BUTTON {i}] "
+                        f"texto={texto!r} | "
+                        f"title={title!r} | "
+                        f"aria-label={aria!r} | "
+                        f"type={tipo!r} | "
+                        f"class={classes!r}"
+                    )
+
+                    arquivo.write(
+                        linha + "\n"
+                    )
+
+                    texto_busca = (
+                        f"{texto} "
+                        f"{title} "
+                        f"{aria} "
+                        f"{classes}"
+                    ).lower()
+
+                    if any(
+                        palavra in texto_busca
+                        for palavra in palavras_interesse
+                    ):
+
+                        print(
+                            f"[{unidade_nome}] "
+                            f"BOTÃO DE INTERESSE: {linha}"
+                        )
+
+                except Exception as erro:
+
+                    arquivo.write(
+                        f"[BUTTON {i}] erro: {erro}\n"
+                    )
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # ELEMENTOS ROLE=MENUITEM
+            # ------------------------------------------------------------------
+
+            print(
+                f"[{unidade_nome}] "
+                f"Analisando elementos de menu..."
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "ELEMENTOS ROLE=MENUITEM\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            menuitems = page.locator(
+                '[role="menuitem"]'
+            )
+
+            quantidade_menuitems = menuitems.count()
+
+            print(
+                f"[{unidade_nome}] "
+                f"Menuitems: {quantidade_menuitems}"
+            )
+
+            for i in range(quantidade_menuitems):
+
+                try:
+
+                    item = menuitems.nth(i)
+
+                    if not item.is_visible():
+                        continue
+
+                    texto = (
+                        item.inner_text(
+                            timeout=2000
+                        )
+                        .strip()
+                    )
+
+                    aria = (
+                        item.get_attribute("aria-label")
+                        or ""
+                    )
+
+                    href = (
+                        item.get_attribute("href")
+                        or ""
+                    )
+
+                    linha = (
+                        f"[MENUITEM {i}] "
+                        f"texto={texto!r} | "
+                        f"aria-label={aria!r} | "
+                        f"href={href!r}"
+                    )
+
+                    arquivo.write(
+                        linha + "\n"
+                    )
+
+                    texto_busca = (
+                        f"{texto} "
+                        f"{aria} "
+                        f"{href}"
+                    ).lower()
+
+                    if any(
+                        palavra in texto_busca
+                        for palavra in palavras_interesse
+                    ):
+
+                        print(
+                            f"[{unidade_nome}] "
+                            f"MENU DE INTERESSE: {linha}"
+                        )
+
+                except Exception as erro:
+
+                    arquivo.write(
+                        f"[MENUITEM {i}] erro: {erro}\n"
+                    )
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # ELEMENTOS COM TEXTO DE INTERESSE
+            # ------------------------------------------------------------------
+
+            print(
+                f"[{unidade_nome}] "
+                f"Procurando elementos relacionados "
+                f"a faltas/frequência..."
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "ELEMENTOS COM PALAVRAS-CHAVE DE INTERESSE\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            encontrados = []
+
+            seletores_textuais = [
+                "a",
+                "button",
+                "[role='menuitem']",
+                "[role='button']",
+                "li",
+                "span",
+                "div",
+                "td",
+                "th",
+                "label",
+            ]
+
+            for seletor in seletores_textuais:
+
+                try:
+
+                    elementos = page.locator(
+                        seletor
+                    )
+
+                    quantidade = elementos.count()
+
+                    for i in range(
+                        min(quantidade, 1000)
+                    ):
+
+                        try:
+
+                            elemento = elementos.nth(i)
+
+                            if not elemento.is_visible():
+                                continue
+
+                            texto = (
+                                elemento.inner_text(
+                                    timeout=1000
+                                )
+                                .strip()
+                            )
+
+                            if not texto:
+                                continue
+
+                            texto_limpo = (
+                                " ".join(
+                                    texto.split()
+                                )
+                            )
+
+                            if len(texto_limpo) > 300:
+                                continue
+
+                            texto_busca = (
+                                texto_limpo.lower()
+                            )
+
+                            palavras_encontradas = [
+                                palavra
+                                for palavra in palavras_interesse
+                                if palavra in texto_busca
+                            ]
+
+                            if palavras_encontradas:
+
+                                chave = (
+                                    seletor,
+                                    texto_limpo,
+                                )
+
+                                if chave not in encontrados:
+
+                                    encontrados.append(
+                                        chave
+                                    )
+
+                                    linha = (
+                                        f"seletor={seletor} | "
+                                        f"palavras={palavras_encontradas} | "
+                                        f"texto={texto_limpo!r}"
+                                    )
+
+                                    arquivo.write(
+                                        linha + "\n"
+                                    )
+
+                        except Exception:
+                            pass
+
+                except Exception:
+                    pass
+
+            print(
+                f"[{unidade_nome}] "
+                f"Elementos de interesse encontrados: "
+                f"{len(encontrados)}"
+            )
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # SELECTS
+            # ------------------------------------------------------------------
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "SELECTS ENCONTRADOS\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            selects = page.locator("select")
+
+            quantidade_selects = selects.count()
+
+            print(
+                f"[{unidade_nome}] "
+                f"Selects: {quantidade_selects}"
+            )
+
+            for i in range(quantidade_selects):
+
+                try:
+
+                    select = selects.nth(i)
+
+                    if not select.is_visible():
+                        continue
+
+                    nome = (
+                        select.get_attribute("name")
+                        or ""
+                    )
+
+                    identificador = (
+                        select.get_attribute("id")
+                        or ""
+                    )
+
+                    options = select.locator(
+                        "option"
+                    )
+
+                    quantidade_options = options.count()
+
+                    arquivo.write(
+                        f"[SELECT {i}] "
+                        f"name={nome!r} "
+                        f"id={identificador!r} "
+                        f"options={quantidade_options}\n"
+                    )
+
+                    for j in range(
+                        min(quantidade_options, 100)
+                    ):
+
+                        try:
+
+                            option = options.nth(j)
+
+                            texto_option = (
+                                option.inner_text(
+                                    timeout=1000
+                                )
+                                .strip()
+                            )
+
+                            valor_option = (
+                                option.get_attribute(
+                                    "value"
+                                )
+                                or ""
+                            )
+
+                            arquivo.write(
+                                f"    [{j}] "
+                                f"text={texto_option!r} "
+                                f"value={valor_option!r}\n"
+                            )
+
+                        except Exception:
+                            pass
+
+                except Exception as erro:
+
+                    arquivo.write(
+                        f"[SELECT {i}] erro: {erro}\n"
+                    )
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # IFRAMES
+            # ------------------------------------------------------------------
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "IFRAMES\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            for i, frame in enumerate(page.frames):
+
+                try:
+
+                    arquivo.write(
+                        f"[FRAME {i}] "
+                        f"url={frame.url}\n"
+                    )
+
+                    try:
+
+                        frame_texto = frame.locator(
+                            "body"
+                        ).inner_text(
+                            timeout=3000
+                        )
+
+                        frame_texto = (
+                            frame_texto[:10000]
+                        )
+
+                        arquivo.write(
+                            frame_texto + "\n"
+                        )
+
+                    except Exception:
+                        pass
+
+                except Exception:
+                    pass
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # TABELAS
+            # ------------------------------------------------------------------
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "TABELAS\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            tabelas = page.locator("table")
+
+            quantidade_tabelas = tabelas.count()
+
+            print(
+                f"[{unidade_nome}] "
+                f"Tabelas: {quantidade_tabelas}"
+            )
+
+            for i in range(quantidade_tabelas):
+
+                try:
+
+                    tabela = tabelas.nth(i)
+
+                    if not tabela.is_visible():
+                        continue
+
+                    arquivo.write(
+                        f"\n--- TABELA {i} ---\n"
+                    )
+
+                    headers = tabela.locator(
+                        "thead th"
+                    ).all_text_contents()
+
+                    if not headers:
+
+                        headers = tabela.locator(
+                            "tr:first-child th, "
+                            "tr:first-child td"
+                        ).all_text_contents()
+
+                    headers = [
+                        " ".join(
+                            texto.split()
+                        )
+                        for texto in headers
+                    ]
+
+                    arquivo.write(
+                        f"CABEÇALHOS: {headers}\n"
+                    )
+
+                    linhas = tabela.locator(
+                        "tbody tr"
+                    )
+
+                    quantidade_linhas = linhas.count()
+
+                    arquivo.write(
+                        f"LINHAS: {quantidade_linhas}\n"
+                    )
+
+                    for j in range(
+                        min(quantidade_linhas, 50)
+                    ):
+
+                        try:
+
+                            colunas = linhas.nth(j).locator(
+                                "td"
+                            ).all_text_contents()
+
+                            colunas = [
+                                " ".join(
+                                    coluna.split()
+                                )
+                                for coluna in colunas
+                            ]
+
+                            arquivo.write(
+                                f"[{j}] {colunas}\n"
+                            )
+
+                        except Exception:
+                            pass
+
+                except Exception as erro:
+
+                    arquivo.write(
+                        f"TABELA {i} - erro: {erro}\n"
+                    )
+
+            arquivo.write("\n")
+
+            # ------------------------------------------------------------------
+            # PALAVRAS-CHAVE NO HTML
+            # ------------------------------------------------------------------
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            arquivo.write(
+                "PALAVRAS-CHAVE ENCONTRADAS NO HTML\n"
+            )
+
+            arquivo.write(
+                "===============================================================================\n"
+            )
+
+            try:
+
+                html = page.content()
+
+                html_lower = html.lower()
+
+                for palavra in palavras_interesse:
+
+                    quantidade = html_lower.count(
+                        palavra.lower()
+                    )
+
+                    arquivo.write(
+                        f"{palavra}: {quantidade} ocorrência(s)\n"
+                    )
+
+            except Exception as erro:
+
+                arquivo.write(
+                    f"Erro analisando HTML: {erro}\n"
+                )
+
+        print("")
+        print(
+            f"[{unidade_nome}] "
+            f"DIAGNÓSTICO 3A concluído."
+        )
+
+        print(
+            f"[{unidade_nome}] "
+            f"Arquivo principal:"
+        )
+
+        print(
+            str(diagnostico_path)
+        )
+
+        print("=" * 80)
+        print("")
+
+    except Exception as erro:
+
+        print(
+            f"[{unidade_nome}] "
+            f"Erro no diagnóstico de navegação: {erro}"
+        )
+
+
+# ==============================================================================
+# ESTADO DA PÁGINA
+# ==============================================================================
+
+def imprimir_estado_pagina(page, unidade_nome, etapa):
+
+    print("")
+    print("=" * 80)
+    print(
+        f"DIAGNÓSTICO DA PÁGINA - {unidade_nome}"
+    )
+    print(
+        f"ETAPA: {etapa}"
+    )
     print("=" * 80)
 
     try:
-        print(f"URL atual: {page.url}")
+        print(
+            f"URL atual: {page.url}"
+        )
     except Exception:
-        print("URL atual: não disponível")
+        print(
+            "URL atual: não disponível"
+        )
 
     try:
-        print(f"Título: {page.title()}")
+        print(
+            f"Título: {page.title()}"
+        )
     except Exception:
-        print("Título: não disponível")
+        print(
+            "Título: não disponível"
+        )
 
     try:
         print(
@@ -207,10 +1129,15 @@ def imprimir_estado_pagina(page, unidade_nome, etapa):
         pass
 
     print("")
-    print("Texto visível inicial da página:")
+    print(
+        "Texto visível inicial da página:"
+    )
 
     try:
-        texto = page.locator("body").inner_text(
+
+        texto = page.locator(
+            "body"
+        ).inner_text(
             timeout=10000
         )
 
@@ -221,17 +1148,19 @@ def imprimir_estado_pagina(page, unidade_nome, etapa):
     except Exception as erro:
 
         print(
-            f"Não foi possível obter texto da página: {erro}"
+            f"Não foi possível obter texto da página: "
+            f"{erro}"
         )
 
     print("=" * 80)
     print("")
 
 
+# ==============================================================================
+# LOGIN
+# ==============================================================================
+
 def verificar_elementos_login(page):
-    """
-    Verifica vários padrões possíveis de login.
-    """
 
     seletores_login = [
         'input[type="text"]',
@@ -256,18 +1185,25 @@ def verificar_elementos_login(page):
         'input[id*="password" i]',
     ]
 
-    print("Verificando campos de login...")
+    print(
+        "Verificando campos de login..."
+    )
 
     login_encontrado = None
 
     for seletor in seletores_login:
 
         try:
-            locator = page.locator(seletor)
+
+            locator = page.locator(
+                seletor
+            )
+
             quantidade = locator.count()
 
             print(
-                f"LOGIN selector: {seletor} => {quantidade}"
+                f"LOGIN selector: {seletor} "
+                f"=> {quantidade}"
             )
 
             if quantidade > 0:
@@ -277,7 +1213,10 @@ def verificar_elementos_login(page):
                     try:
 
                         if locator.nth(i).is_visible():
-                            login_encontrado = locator.nth(i)
+
+                            login_encontrado = (
+                                locator.nth(i)
+                            )
 
                             print(
                                 f"LOGIN VISÍVEL encontrado com: "
@@ -298,16 +1237,23 @@ def verificar_elementos_login(page):
     senha_encontrada = None
 
     print("")
-    print("Verificando campo de senha...")
+    print(
+        "Verificando campo de senha..."
+    )
 
     for seletor in seletores_senha:
 
         try:
-            locator = page.locator(seletor)
+
+            locator = page.locator(
+                seletor
+            )
+
             quantidade = locator.count()
 
             print(
-                f"SENHA selector: {seletor} => {quantidade}"
+                f"SENHA selector: {seletor} "
+                f"=> {quantidade}"
             )
 
             if quantidade > 0:
@@ -317,7 +1263,10 @@ def verificar_elementos_login(page):
                     try:
 
                         if locator.nth(i).is_visible():
-                            senha_encontrada = locator.nth(i)
+
+                            senha_encontrada = (
+                                locator.nth(i)
+                            )
 
                             print(
                                 f"SENHA VISÍVEL encontrada com: "
@@ -335,13 +1284,13 @@ def verificar_elementos_login(page):
         except Exception:
             pass
 
-    return login_encontrado, senha_encontrada
+    return (
+        login_encontrado,
+        senha_encontrada
+    )
 
 
 def localizar_botao_login(page):
-    """
-    Procura o botão de login utilizando vários padrões.
-    """
 
     seletores = [
         'button[type="submit"]',
@@ -359,11 +1308,16 @@ def localizar_botao_login(page):
     for seletor in seletores:
 
         try:
-            locator = page.locator(seletor)
+
+            locator = page.locator(
+                seletor
+            )
+
             quantidade = locator.count()
 
             print(
-                f"BOTÃO selector: {seletor} => {quantidade}"
+                f"BOTÃO selector: {seletor} "
+                f"=> {quantidade}"
             )
 
             if quantidade > 0:
@@ -395,14 +1349,9 @@ def localizar_botao_login(page):
 # ==============================================================================
 
 def calcular_criticidade_e_dias(data_inicio_str):
-    """
-    Calcula a criticidade e os dias desde o início da disciplina.
 
-    Regras:
-    >= 90 dias -> crítico
-    >= 60 dias -> moderado
-    >= 30 dias -> atenção
-    < 30 dias  -> normal
+    """
+    Calcula dias desde o início da disciplina.
     """
 
     if not data_inicio_str:
@@ -410,7 +1359,9 @@ def calcular_criticidade_e_dias(data_inicio_str):
 
     try:
 
-        data_inicio_str = data_inicio_str.strip()
+        data_inicio_str = (
+            data_inicio_str.strip()
+        )
 
         data_inicio = datetime.strptime(
             data_inicio_str,
@@ -419,19 +1370,28 @@ def calcular_criticidade_e_dias(data_inicio_str):
 
         hoje = datetime.now()
 
-        dias = (hoje - data_inicio).days
+        dias = (
+            hoje - data_inicio
+        ).days
 
         if dias >= 90:
+
             return "critico", dias
 
         elif dias >= 60:
+
             return "moderado", dias
 
         elif dias >= 30:
+
             return "atencao", dias
 
         else:
-            return "normal", max(0, dias)
+
+            return "normal", max(
+                0,
+                dias
+            )
 
     except Exception:
 
@@ -452,7 +1412,9 @@ def fazer_login_e_extrair(
 
     print("")
     print("#" * 80)
-    print(f"INICIANDO PROCESSAMENTO: {unidade_nome}")
+    print(
+        f"INICIANDO PROCESSAMENTO: {unidade_nome}"
+    )
     print("#" * 80)
 
     alunos_capturados = []
@@ -494,8 +1456,8 @@ def fazer_login_e_extrair(
         # 2. PROCURAR LOGIN
         # ----------------------------------------------------------------------
 
-        login_input, senha_input = verificar_elementos_login(
-            page
+        login_input, senha_input = (
+            verificar_elementos_login(page)
         )
 
         # ----------------------------------------------------------------------
@@ -515,10 +1477,17 @@ def fazer_login_e_extrair(
                 f"Preenchendo credenciais..."
             )
 
-            login_input.fill(usuario)
-            senha_input.fill(senha)
+            login_input.fill(
+                usuario
+            )
 
-            botao = localizar_botao_login(page)
+            senha_input.fill(
+                senha
+            )
+
+            botao = localizar_botao_login(
+                page
+            )
 
             if botao:
 
@@ -558,7 +1527,9 @@ def fazer_login_e_extrair(
                     f"Aviso: networkidle não atingido."
                 )
 
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(
+                5000
+            )
 
             imprimir_estado_pagina(
                 page,
@@ -572,6 +1543,15 @@ def fazer_login_e_extrair(
                 "apos_login"
             )
 
+            # ==================================================================
+            # ETAPA 3A
+            # ==================================================================
+
+            diagnosticar_navegacao_cgd(
+                page,
+                unidade_nome
+            )
+
         else:
 
             print("")
@@ -583,13 +1563,22 @@ def fazer_login_e_extrair(
 
             print(
                 f"[{unidade_nome}] "
-                f"Não vamos simplesmente assumir que já está autenticado."
+                f"Não vamos assumir que já está autenticado."
             )
 
             salvar_diagnostico(
                 page,
                 unidade_nome,
                 "login_nao_encontrado"
+            )
+
+            # ------------------------------------------------------------------
+            # TENTATIVA DE DIAGNÓSTICO MESMO SEM LOGIN
+            # ------------------------------------------------------------------
+
+            diagnosticar_navegacao_cgd(
+                page,
+                unidade_nome
             )
 
         # ----------------------------------------------------------------------
@@ -619,7 +1608,9 @@ def fazer_login_e_extrair(
             timeout=60000
         )
 
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(
+            5000
+        )
 
         imprimir_estado_pagina(
             page,
@@ -634,24 +1625,30 @@ def fazer_login_e_extrair(
         )
 
         # ----------------------------------------------------------------------
-        # 5. VERIFICAR SE A PÁGINA REALMENTE TEM TABELA
+        # 5. VERIFICAR TABELA
         # ----------------------------------------------------------------------
 
-        quantidade_tabelas = page.locator("table").count()
+        quantidade_tabelas = (
+            page.locator("table").count()
+        )
 
-        quantidade_linhas = page.locator(
-            "table tbody tr"
-        ).count()
+        quantidade_linhas = (
+            page.locator(
+                "table tbody tr"
+            ).count()
+        )
 
         print("")
         print(
             f"[{unidade_nome}] "
-            f"Tabelas encontradas: {quantidade_tabelas}"
+            f"Tabelas encontradas: "
+            f"{quantidade_tabelas}"
         )
 
         print(
             f"[{unidade_nome}] "
-            f"Linhas encontradas: {quantidade_linhas}"
+            f"Linhas encontradas: "
+            f"{quantidade_linhas}"
         )
 
         if quantidade_tabelas == 0:
@@ -660,12 +1657,6 @@ def fazer_login_e_extrair(
             print(
                 f"[{unidade_nome}] "
                 f"ERRO: nenhuma tabela encontrada."
-            )
-
-            print(
-                f"[{unidade_nome}] "
-                f"Isso indica que a URL provavelmente "
-                f"não abriu a listagem esperada."
             )
 
             salvar_diagnostico(
@@ -677,7 +1668,7 @@ def fazer_login_e_extrair(
             return alunos_capturados
 
         # ----------------------------------------------------------------------
-        # 6. TENTAR AUMENTAR REGISTROS POR PÁGINA
+        # 6. TENTAR AUMENTAR REGISTROS
         # ----------------------------------------------------------------------
 
         try:
@@ -688,7 +1679,9 @@ def fazer_login_e_extrair(
                 'select[name*="per_page" i]'
             ).first
 
-            if select_limit.is_visible(timeout=3000):
+            if select_limit.is_visible(
+                timeout=3000
+            ):
 
                 print(
                     f"[{unidade_nome}] "
@@ -701,13 +1694,16 @@ def fazer_login_e_extrair(
                         value="-1"
                     )
 
-                    page.wait_for_timeout(3000)
+                    page.wait_for_timeout(
+                        3000
+                    )
 
                 except Exception as erro:
 
                     print(
                         f"[{unidade_nome}] "
-                        f"Não foi possível selecionar -1: {erro}"
+                        f"Não foi possível selecionar -1: "
+                        f"{erro}"
                     )
 
         except Exception:
@@ -727,7 +1723,9 @@ def fazer_login_e_extrair(
                 f"Raspando página {pagina_atual}..."
             )
 
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(
+                2000
+            )
 
             rows = page.locator(
                 "table tbody tr"
@@ -735,7 +1733,8 @@ def fazer_login_e_extrair(
 
             print(
                 f"[{unidade_nome}] "
-                f"Linhas encontradas nesta página: {len(rows)}"
+                f"Linhas encontradas nesta página: "
+                f"{len(rows)}"
             )
 
             for indice, row in enumerate(rows):
@@ -760,10 +1759,14 @@ def fazer_login_e_extrair(
                         continue
 
                     contrato = cols[0]
+
                     nome = cols[1]
+
                     curso = cols[2]
 
-                    curso_texto = curso.lower()
+                    curso_texto = (
+                        curso.lower()
+                    )
 
                     status_texto = (
                         cols[3].upper()
@@ -813,6 +1816,7 @@ def fazer_login_e_extrair(
                     data_inicio_str = ""
 
                     if len(cols) > 4:
+
                         data_inicio_str = cols[4]
 
                     criticidade, dias_ativos = (
@@ -822,7 +1826,7 @@ def fazer_login_e_extrair(
                     )
 
                     # ----------------------------------------------------------
-                    # UNIDADE
+                    # ETAPA 2B - UNIDADE
                     # ----------------------------------------------------------
 
                     unidade_db = (
@@ -832,29 +1836,39 @@ def fazer_login_e_extrair(
                     )
 
                     # ----------------------------------------------------------
-                    # CRITICIDADE E TRATATIVA
+                    # ETAPA 2B - CRITICIDADE
                     # ----------------------------------------------------------
 
-                    criticidade_db = criticidade.lower()
+                    criticidade_db = (
+                        criticidade.lower()
+                    )
 
                     if criticidade_db == "critico":
 
-                        tratativa_sugerida = "aulao"
+                        tratativa_sugerida = (
+                            "aulao"
+                        )
 
                     elif criticidade_db == "moderado":
 
-                        tratativa_sugerida = "atividade_pratica"
+                        tratativa_sugerida = (
+                            "atividade_pratica"
+                        )
 
                     elif criticidade_db == "atencao":
 
-                        tratativa_sugerida = "acompanhamento"
+                        tratativa_sugerida = (
+                            "acompanhamento"
+                        )
 
                     else:
 
-                        tratativa_sugerida = "normal"
+                        tratativa_sugerida = (
+                            "normal"
+                        )
 
                     # ----------------------------------------------------------
-                    # DATA FORMATADA PARA O SUPABASE
+                    # DATA PARA SUPABASE
                     # ----------------------------------------------------------
 
                     if data_inicio_str:
@@ -865,23 +1879,29 @@ def fazer_login_e_extrair(
                                 datetime.strptime(
                                     data_inicio_str,
                                     "%d/%m/%Y"
-                                ).strftime("%Y-%m-%d")
+                                ).strftime(
+                                    "%Y-%m-%d"
+                                )
                             )
 
                         except Exception:
 
                             data_inicio_db = (
-                                datetime.now().strftime("%Y-%m-%d")
+                                datetime.now().strftime(
+                                    "%Y-%m-%d"
+                                )
                             )
 
                     else:
 
                         data_inicio_db = (
-                            datetime.now().strftime("%Y-%m-%d")
+                            datetime.now().strftime(
+                                "%Y-%m-%d"
+                            )
                         )
 
                     # ----------------------------------------------------------
-                    # ESTRUTURA DO ALUNO
+                    # ALUNO
                     # ----------------------------------------------------------
 
                     aluno_data = {
@@ -910,25 +1930,39 @@ def fazer_login_e_extrair(
 
                         "ultimo_acesso": None,
 
+                        # ------------------------------------------------------
+                        # ETAPA 3A AINDA NÃO ALTERA FALTAS
+                        # ------------------------------------------------------
+
                         "faltas_totais": 0,
 
                         "faltas_mes_atual": 0,
 
                         "mes_referencia_faltas": (
-                            datetime.now().strftime("%m/%Y")
+                            datetime.now().strftime(
+                                "%m/%Y"
+                            )
                         ),
 
                         "dias_em_curso": dias_ativos,
 
                         "criticidade": criticidade_db,
 
-                        "tratativa_sugerida": tratativa_sugerida,
+                        "tratativa_sugerida": (
+                            tratativa_sugerida
+                        ),
 
-                        "status_tratativa": "pendente",
+                        "status_tratativa": (
+                            "pendente"
+                        ),
 
-                        "status_matricula": "ativo",
+                        "status_matricula": (
+                            "ativo"
+                        ),
 
-                        "bloqueado_automaticamente": False,
+                        "bloqueado_automaticamente": (
+                            False
+                        ),
 
                         "motivo_bloqueio": None,
 
@@ -954,7 +1988,8 @@ def fazer_login_e_extrair(
                     print(
                         f"[{unidade_nome}] "
                         f"Erro ao processar linha "
-                        f"{indice + 1}: {erro_linha}"
+                        f"{indice + 1}: "
+                        f"{erro_linha}"
                     )
 
             # ------------------------------------------------------------------
@@ -973,7 +2008,9 @@ def fazer_login_e_extrair(
                     '[aria-label="Próxima"]'
                 ).first
 
-                if not btn_proximo.is_visible(timeout=3000):
+                if not btn_proximo.is_visible(
+                    timeout=3000
+                ):
 
                     print(
                         f"[{unidade_nome}] "
@@ -983,7 +2020,9 @@ def fazer_login_e_extrair(
                     break
 
                 classes = (
-                    btn_proximo.get_attribute("class")
+                    btn_proximo.get_attribute(
+                        "class"
+                    )
                     or ""
                 ).lower()
 
@@ -1016,7 +2055,9 @@ def fazer_login_e_extrair(
 
                 btn_proximo.click()
 
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(
+                    3000
+                )
 
                 pagina_atual += 1
 
@@ -1024,7 +2065,8 @@ def fazer_login_e_extrair(
 
                     print(
                         f"[{unidade_nome}] "
-                        f"Proteção ativada: mais de 100 páginas."
+                        f"Proteção ativada: "
+                        f"mais de 100 páginas."
                     )
 
                     break
@@ -1085,7 +2127,9 @@ def main():
     print("=" * 80)
 
     print("")
-    print("Verificação das variáveis de ambiente:")
+    print(
+        "Verificação das variáveis de ambiente:"
+    )
 
     print(
         f"SUPABASE_URL: "
@@ -1151,7 +2195,9 @@ def main():
     with sync_playwright() as p:
 
         print("")
-        print("Iniciando Chromium...")
+        print(
+            "Iniciando Chromium..."
+        )
 
         browser = p.chromium.launch(
             headless=True
@@ -1170,14 +2216,18 @@ def main():
                 }
             )
 
-            page_matriz = context_matriz.new_page()
+            page_matriz = (
+                context_matriz.new_page()
+            )
 
-            alunos_matriz = fazer_login_e_extrair(
-                page_matriz,
-                LOGIN_MATRIZ,
-                SENHA_MATRIZ,
-                URL_MATRIZ,
-                "Matriz"
+            alunos_matriz = (
+                fazer_login_e_extrair(
+                    page_matriz,
+                    LOGIN_MATRIZ,
+                    SENHA_MATRIZ,
+                    URL_MATRIZ,
+                    "Matriz"
+                )
             )
 
             todos_alunos.extend(
@@ -1205,14 +2255,18 @@ def main():
                 }
             )
 
-            page_filial = context_filial.new_page()
+            page_filial = (
+                context_filial.new_page()
+            )
 
-            alunos_filial = fazer_login_e_extrair(
-                page_filial,
-                LOGIN_FILIAL,
-                SENHA_FILIAL,
-                URL_FILIAL,
-                "Filial"
+            alunos_filial = (
+                fazer_login_e_extrair(
+                    page_filial,
+                    LOGIN_FILIAL,
+                    SENHA_FILIAL,
+                    URL_FILIAL,
+                    "Filial"
+                )
             )
 
             todos_alunos.extend(
@@ -1235,10 +2289,12 @@ def main():
 
     print("")
     print("=" * 80)
+
     print(
         f"TOTAL GERAL DE ALUNOS CAPTURADOS: "
         f"{len(todos_alunos)}"
     )
+
     print("=" * 80)
 
     # ==========================================================================
@@ -1309,10 +2365,13 @@ def main():
                 )
 
             # ------------------------------------------------------------------
-            # 2. GERAR RESUMO POR UNIDADE
+            # 2. RESUMO POR UNIDADE
             # ------------------------------------------------------------------
 
-            for unidade in ["matriz", "filial"]:
+            for unidade in [
+                "matriz",
+                "filial"
+            ]:
 
                 alunos_unidade = [
                     aluno
@@ -1364,7 +2423,9 @@ def main():
                         else "Filial"
                     ),
 
-                    "total_alunos_ativos": total_alunos,
+                    "total_alunos_ativos": (
+                        total_alunos
+                    ),
 
                     "total_matriz": (
                         total_alunos
@@ -1397,14 +2458,18 @@ def main():
                     "bloqueados_faltas": bloqueados,
 
                     "mes_referencia": (
-                        datetime.now().strftime("%m/%Y")
+                        datetime.now().strftime(
+                            "%m/%Y"
+                        )
                     ),
 
                     "alunos_data": alunos_unidade,
 
                     "origem": "cgd_live",
 
-                    "ultimo_sync": datetime.now().isoformat()
+                    "ultimo_sync": (
+                        datetime.now().isoformat()
+                    )
                 }
 
                 resposta_resumo = (
@@ -1429,7 +2494,9 @@ def main():
                 "ERRO AO ATUALIZAR SUPABASE:"
             )
 
-            print(erro_supabase)
+            print(
+                erro_supabase
+            )
 
 
 # ==============================================================================
