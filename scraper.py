@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -16,143 +17,332 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 LOGIN_MATRIZ = os.getenv("CGD_USER_MATRIZ")
 SENHA_MATRIZ = os.getenv("CGD_PASS_MATRIZ")
-URL_MATRIZ = os.getenv("URL_ALUNOS_MATRIZ") or os.getenv("CGD_MATRIZ_URL")
+URL_MATRIZ = os.getenv("CGD_MATRIZ_URL")
 
 LOGIN_FILIAL = os.getenv("CGD_USER_FILIAL")
 SENHA_FILIAL = os.getenv("CGD_PASS_FILIAL")
-URL_FILIAL = os.getenv("URL_ALUNOS_FILIAL") or os.getenv("CGD_FILIAL_URL")
+URL_FILIAL = os.getenv("CGD_FILIAL_URL")
 
 CGD_URL = os.getenv("CGD_LOGIN_URL") or "https://cgdgestao.com.br"
 
-# Diretório dos arquivos de diagnóstico
-DIAGNOSTIC_DIR = Path("diagnostico_scraping")
-DIAGNOSTIC_DIR.mkdir(parents=True, exist_ok=True)
+DIAGNOSTICO_DIR = Path("diagnostico_scraping")
+DIAGNOSTICO_DIR.mkdir(parents=True, exist_ok=True)
+
+JSON_PATH = Path("dados_alunos.json")
 
 
 # ==============================================================================
-# UTILITÁRIOS DE DIAGNÓSTICO
+# FUNÇÕES DE DIAGNÓSTICO
 # ==============================================================================
 
 def salvar_diagnostico(page, unidade_nome, etapa):
     """
-    Salva evidências da página que o Playwright está enxergando.
+    Salva screenshot, HTML e informações básicas da página.
+    Não salva credenciais.
     """
-    unidade = unidade_nome.lower().replace(" ", "_")
-    etapa_limpa = (
-        etapa.lower()
-        .replace(" ", "_")
-        .replace("/", "_")
-        .replace("-", "_")
-    )
 
-    prefixo = DIAGNOSTIC_DIR / f"{unidade}_{etapa_limpa}"
+    try:
+        prefixo = unidade_nome.lower().replace(" ", "_")
+        etapa_limpa = etapa.lower().replace(" ", "_").replace("/", "_")
+
+        screenshot_path = (
+            DIAGNOSTICO_DIR /
+            f"{prefixo}_{etapa_limpa}.png"
+        )
+
+        html_path = (
+            DIAGNOSTICO_DIR /
+            f"{prefixo}_{etapa_limpa}.html"
+        )
+
+        info_path = (
+            DIAGNOSTICO_DIR /
+            f"{prefixo}_{etapa_limpa}.txt"
+        )
+
+        # Screenshot
+        page.screenshot(
+            path=str(screenshot_path),
+            full_page=True
+        )
+
+        # HTML
+        html = page.content()
+
+        with open(
+            html_path,
+            "w",
+            encoding="utf-8"
+        ) as arquivo:
+            arquivo.write(html)
+
+        # Informações básicas
+        with open(
+            info_path,
+            "w",
+            encoding="utf-8"
+        ) as arquivo:
+
+            arquivo.write(
+                f"UNIDADE: {unidade_nome}\n"
+            )
+
+            arquivo.write(
+                f"ETAPA: {etapa}\n"
+            )
+
+            arquivo.write(
+                f"URL ATUAL: {page.url}\n"
+            )
+
+            arquivo.write(
+                f"TÍTULO: {page.title()}\n"
+            )
+
+            arquivo.write(
+                f"IFRAMES: {len(page.frames)}\n"
+            )
+
+            arquivo.write(
+                f"INPUTS: {page.locator('input').count()}\n"
+            )
+
+            arquivo.write(
+                f"BUTTONS: {page.locator('button').count()}\n"
+            )
+
+            arquivo.write(
+                f"LINKS: {page.locator('a').count()}\n"
+            )
+
+            arquivo.write("\n")
+
+            arquivo.write("TEXTOS DOS INPUTS:\n")
+
+            inputs = page.locator("input").all()
+
+            for i, input_element in enumerate(inputs):
+                try:
+                    tipo = input_element.get_attribute("type")
+                    nome = input_element.get_attribute("name")
+                    identificador = input_element.get_attribute("id")
+                    placeholder = input_element.get_attribute(
+                        "placeholder"
+                    )
+
+                    arquivo.write(
+                        f"[{i}] "
+                        f"type={tipo} "
+                        f"name={nome} "
+                        f"id={identificador} "
+                        f"placeholder={placeholder}\n"
+                    )
+
+                except Exception:
+                    pass
+
+            arquivo.write("\n")
+            arquivo.write("FRAMES:\n")
+
+            for i, frame in enumerate(page.frames):
+                try:
+                    arquivo.write(
+                        f"[{i}] URL={frame.url}\n"
+                    )
+                except Exception:
+                    pass
+
+        print(
+            f"[DIAGNÓSTICO] Arquivos salvos: "
+            f"{screenshot_path}, "
+            f"{html_path}, "
+            f"{info_path}"
+        )
+
+    except Exception as erro:
+        print(
+            f"[DIAGNÓSTICO] Erro ao salvar diagnóstico "
+            f"de {unidade_nome}/{etapa}: {erro}"
+        )
+
+
+def imprimir_estado_pagina(page, unidade_nome, etapa):
+    """
+    Imprime no log do GitHub Actions informações úteis,
+    sem revelar senhas.
+    """
 
     print("")
     print("=" * 80)
-    print(f"DIAGNÓSTICO: {unidade_nome} - {etapa}")
+    print(f"DIAGNÓSTICO DA PÁGINA - {unidade_nome}")
+    print(f"ETAPA: {etapa}")
     print("=" * 80)
 
     try:
         print(f"URL atual: {page.url}")
-    except Exception as e:
-        print(f"Não foi possível obter URL: {e}")
+    except Exception:
+        print("URL atual: não disponível")
 
     try:
         print(f"Título: {page.title()}")
-    except Exception as e:
-        print(f"Não foi possível obter título: {e}")
+    except Exception:
+        print("Título: não disponível")
 
-    # Screenshot
     try:
-        screenshot_path = f"{prefixo}.png"
-        page.screenshot(path=screenshot_path, full_page=True)
-        print(f"Screenshot salvo: {screenshot_path}")
-    except Exception as e:
-        print(f"Erro ao salvar screenshot: {e}")
+        print(f"Quantidade de inputs: {page.locator('input').count()}")
+    except Exception:
+        pass
 
-    # HTML
     try:
-        html_path = f"{prefixo}.html"
-        html = page.content()
-        Path(html_path).write_text(html, encoding="utf-8")
-        print(f"HTML salvo: {html_path}")
-    except Exception as e:
-        print(f"Erro ao salvar HTML: {e}")
+        print(f"Quantidade de botões: {page.locator('button').count()}")
+    except Exception:
+        pass
 
-    # Texto visível
     try:
-        text_path = f"{prefixo}.txt"
-        texto = page.locator("body").inner_text(timeout=10000)
-        Path(text_path).write_text(texto, encoding="utf-8")
-        print(f"Texto da página salvo: {text_path}")
+        print(f"Quantidade de links: {page.locator('a').count()}")
+    except Exception:
+        pass
 
-        print("")
-        print("--- TEXTO VISÍVEL DA PÁGINA ---")
-        print(texto[:5000])
-        print("--- FIM DO TEXTO ---")
-    except Exception as e:
-        print(f"Erro ao obter texto da página: {e}")
-
-    # Informações sobre frames
     try:
-        frames_path = f"{prefixo}_frames.txt"
+        print(f"Quantidade de frames: {len(page.frames)}")
+    except Exception:
+        pass
 
-        linhas = []
-        linhas.append(f"URL principal: {page.url}")
-        linhas.append(f"Quantidade de frames: {len(page.frames)}")
-        linhas.append("")
+    print("")
+    print("Texto visível inicial da página:")
 
-        for indice, frame in enumerate(page.frames):
-            linhas.append(f"FRAME {indice}")
-            linhas.append(f"URL: {frame.url}")
+    try:
+        texto = page.locator("body").inner_text(
+            timeout=10000
+        )
 
-            try:
-                inputs = frame.locator("input").count()
-                buttons = frame.locator("button").count()
-                selects = frame.locator("select").count()
+        texto = texto[:5000]
 
-                linhas.append(f"Inputs: {inputs}")
-                linhas.append(f"Buttons: {buttons}")
-                linhas.append(f"Selects: {selects}")
-            except Exception as e:
-                linhas.append(f"Erro ao analisar frame: {e}")
+        print(texto)
 
-            linhas.append("")
-
-        Path(frames_path).write_text("\n".join(linhas), encoding="utf-8")
-        print(f"Informações dos frames salvas: {frames_path}")
-
-    except Exception as e:
-        print(f"Erro ao analisar frames: {e}")
+    except Exception as erro:
+        print(
+            f"Não foi possível obter texto da página: {erro}"
+        )
 
     print("=" * 80)
     print("")
 
 
-def procurar_campo_login(page):
+def verificar_elementos_login(page):
     """
-    Procura campos de login na página principal e nos frames.
-    Retorna (frame, login_locator, senha_locator, botao_locator)
+    Verifica vários padrões possíveis de login.
     """
 
     seletores_login = [
-        'input[type="email"]',
         'input[type="text"]',
+        'input[type="email"]',
         'input[name*="user" i]',
         'input[name*="login" i]',
-        'input[name*="usuario" i]',
+        'input[name*="email" i]',
         'input[id*="user" i]',
         'input[id*="login" i]',
-        'input[id*="usuario" i]',
+        'input[id*="email" i]',
+        'input[placeholder*="usuário" i]',
+        'input[placeholder*="usuario" i]',
+        'input[placeholder*="login" i]',
+        'input[placeholder*="email" i]',
     ]
 
     seletores_senha = [
         'input[type="password"]',
-        'input[name*="pass" i]',
         'input[name*="senha" i]',
+        'input[name*="password" i]',
+        'input[id*="senha" i]',
+        'input[id*="password" i]',
     ]
 
-    seletores_botao = [
+    print("Verificando campos de login...")
+
+    login_encontrado = None
+
+    for seletor in seletores_login:
+
+        try:
+            locator = page.locator(seletor)
+
+            quantidade = locator.count()
+
+            print(
+                f"LOGIN selector: {seletor} "
+                f"=> {quantidade}"
+            )
+
+            if quantidade > 0:
+
+                for i in range(quantidade):
+
+                    try:
+                        if locator.nth(i).is_visible():
+                            login_encontrado = locator.nth(i)
+                            print(
+                                f"LOGIN VISÍVEL encontrado com: "
+                                f"{seletor}"
+                            )
+                            break
+
+                    except Exception:
+                        pass
+
+            if login_encontrado:
+                break
+
+        except Exception:
+            pass
+
+    senha_encontrada = None
+
+    print("")
+    print("Verificando campo de senha...")
+
+    for seletor in seletores_senha:
+
+        try:
+            locator = page.locator(seletor)
+
+            quantidade = locator.count()
+
+            print(
+                f"SENHA selector: {seletor} "
+                f"=> {quantidade}"
+            )
+
+            if quantidade > 0:
+
+                for i in range(quantidade):
+
+                    try:
+                        if locator.nth(i).is_visible():
+                            senha_encontrada = locator.nth(i)
+                            print(
+                                f"SENHA VISÍVEL encontrada com: "
+                                f"{seletor}"
+                            )
+                            break
+
+                    except Exception:
+                        pass
+
+            if senha_encontrada:
+                break
+
+        except Exception:
+            pass
+
+    return login_encontrado, senha_encontrada
+
+
+def localizar_botao_login(page):
+    """
+    Procura o botão de login utilizando vários padrões.
+    """
+
+    seletores = [
         'button[type="submit"]',
         'input[type="submit"]',
         'button:has-text("Entrar")',
@@ -160,93 +350,45 @@ def procurar_campo_login(page):
         'button:has-text("Login")',
         'button:has-text("Logar")',
         'button:has-text("Continuar")',
+        'input[value*="Entrar" i]',
+        'input[value*="Acessar" i]',
+        'input[value*="Login" i]',
     ]
 
-    for frame in page.frames:
+    for seletor in seletores:
 
-        login_locator = None
-        senha_locator = None
-        botao_locator = None
+        try:
+            locator = page.locator(seletor)
 
-        for seletor in seletores_login:
-            try:
-                locator = frame.locator(seletor).first
+            quantidade = locator.count()
 
-                if locator.count() > 0 and locator.is_visible(timeout=1000):
-                    login_locator = locator
-                    print(f"Campo de login encontrado com seletor: {seletor}")
-                    break
+            print(
+                f"BOTÃO selector: {seletor} "
+                f"=> {quantidade}"
+            )
 
-            except Exception:
-                pass
+            if quantidade > 0:
 
-        if login_locator is None:
-            continue
+                for i in range(quantidade):
 
-        for seletor in seletores_senha:
-            try:
-                locator = frame.locator(seletor).first
+                    try:
 
-                if locator.count() > 0 and locator.is_visible(timeout=1000):
-                    senha_locator = locator
-                    print(f"Campo de senha encontrado com seletor: {seletor}")
-                    break
+                        if locator.nth(i).is_visible():
 
-            except Exception:
-                pass
+                            print(
+                                f"BOTÃO VISÍVEL encontrado com: "
+                                f"{seletor}"
+                            )
 
-        for seletor in seletores_botao:
-            try:
-                locator = frame.locator(seletor).first
+                            return locator.nth(i)
 
-                if locator.count() > 0 and locator.is_visible(timeout=1000):
-                    botao_locator = locator
-                    print(f"Botão de login encontrado com seletor: {seletor}")
-                    break
+                    except Exception:
+                        pass
 
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-        return frame, login_locator, senha_locator, botao_locator
-
-    return None, None, None, None
-
-
-def tabela_existe(page):
-    """
-    Verifica se existe uma tabela com linhas de dados.
-    """
-
-    try:
-        tabelas = page.locator("table")
-        quantidade_tabelas = tabelas.count()
-
-        print(f"Quantidade de tabelas encontradas: {quantidade_tabelas}")
-
-        if quantidade_tabelas == 0:
-            return False
-
-        for indice in range(quantidade_tabelas):
-            tabela = tabelas.nth(indice)
-
-            try:
-                linhas = tabela.locator("tbody tr").count()
-
-                print(
-                    f"Tabela {indice}: "
-                    f"{linhas} linha(s) no tbody."
-                )
-
-                if linhas > 0:
-                    return True
-
-            except Exception:
-                pass
-
-    except Exception as e:
-        print(f"Erro ao verificar tabela: {e}")
-
-    return False
+    return None
 
 
 # ==============================================================================
@@ -254,88 +396,79 @@ def tabela_existe(page):
 # ==============================================================================
 
 def calcular_criticidade_e_dias(data_inicio_str):
+
     """
-    Calcula os dias desde o início da disciplina e define a criticidade.
+    Calcula dias desde o início da disciplina.
+
+    ATENÇÃO:
+    Durante o diagnóstico estamos usando a data atual real
+    do servidor GitHub Actions.
     """
 
-    if not data_inicio_str or data_inicio_str.strip() == "":
+    if not data_inicio_str:
         return "NORMAL", 0
 
-    formatos = [
-        "%d/%m/%Y",
-        "%d-%m-%Y",
-        "%Y-%m-%d",
-    ]
+    try:
 
-    data_inicio = None
+        data_inicio_str = data_inicio_str.strip()
 
-    for formato in formatos:
-        try:
-            data_inicio = datetime.strptime(
-                data_inicio_str.strip(),
-                formato
-            )
-            break
-        except ValueError:
-            continue
+        data_inicio = datetime.strptime(
+            data_inicio_str,
+            "%d/%m/%Y"
+        )
 
-    if data_inicio is None:
+        hoje = datetime.now()
+
+        dias = (hoje - data_inicio).days
+
+        if dias > 90:
+            return "CRÍTICO", dias
+
+        elif dias > 60:
+            return "MODERADO", dias
+
+        elif dias > 30:
+            return "ATENÇÃO", dias
+
+        else:
+            return "NORMAL", max(0, dias)
+
+    except Exception:
+
         return "NORMAL", 0
-
-    hoje = datetime.now().replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0
-    )
-
-    dias = (hoje - data_inicio).days
-
-    if dias > 90:
-        return "CRÍTICO", dias
-    elif dias > 60:
-        return "MODERADO", dias
-    elif dias > 30:
-        return "ATENÇÃO", dias
-    else:
-        return "NORMAL", max(0, dias)
 
 
 # ==============================================================================
-# LOGIN + EXTRAÇÃO
+# PROCESSAMENTO DE UMA UNIDADE
 # ==============================================================================
 
 def fazer_login_e_extrair(
-    browser,
+    page,
     usuario,
     senha,
     url_destino,
     unidade_nome
 ):
+
     print("")
     print("#" * 80)
-    print(f"# INICIANDO PROCESSAMENTO: {unidade_nome}")
+    print(f"INICIANDO PROCESSAMENTO: {unidade_nome}")
     print("#" * 80)
 
     alunos_capturados = []
 
-    # Novo contexto para cada unidade
-    context = browser.new_context(
-        viewport={
-            "width": 1280,
-            "height": 800
-        }
-    )
-
-    page = context.new_page()
-
     try:
 
         # ----------------------------------------------------------------------
-        # 1. ABRIR LOGIN
+        # 1. ABRIR CGD
         # ----------------------------------------------------------------------
 
-        print(f"Acessando URL de login: {CGD_URL}")
+        print("")
+        print(
+            f"[{unidade_nome}] Acessando:"
+        )
+
+        print(CGD_URL)
 
         page.goto(
             CGD_URL,
@@ -345,185 +478,211 @@ def fazer_login_e_extrair(
 
         page.wait_for_timeout(5000)
 
-        print(f"URL depois de abrir CGD: {page.url}")
-        print(f"Título depois de abrir CGD: {page.title()}")
+        imprimir_estado_pagina(
+            page,
+            unidade_nome,
+            "apos_acessar_cgd"
+        )
 
         salvar_diagnostico(
             page,
             unidade_nome,
-            "01_pagina_inicial"
+            "apos_acessar_cgd"
         )
 
         # ----------------------------------------------------------------------
         # 2. PROCURAR LOGIN
         # ----------------------------------------------------------------------
 
-        print("Procurando campos de login...")
+        login_input, senha_input = verificar_elementos_login(
+            page
+        )
 
-        (
-            frame_login,
-            login_input,
-            senha_input,
-            submit_btn
-        ) = procurar_campo_login(page)
+        # ----------------------------------------------------------------------
+        # 3. TENTAR LOGIN
+        # ----------------------------------------------------------------------
 
-        if login_input is not None:
+        if login_input and senha_input:
 
-            print(f"Login localizado para {unidade_nome}.")
+            print("")
+            print(
+                f"[{unidade_nome}] "
+                f"Campos de login encontrados."
+            )
 
-            if senha_input is None:
-                print("ERRO: Campo de senha não foi localizado.")
-                salvar_diagnostico(
-                    page,
-                    unidade_nome,
-                    "02_login_sem_campo_senha"
-                )
-                return alunos_capturados
-
-            if submit_btn is None:
-                print("ERRO: Botão de login não foi localizado.")
-                salvar_diagnostico(
-                    page,
-                    unidade_nome,
-                    "02_login_sem_botao"
-                )
-                return alunos_capturados
-
-            # --------------------------------------------------------------
-            # 3. PREENCHER LOGIN
-            # --------------------------------------------------------------
-
-            print("Preenchendo usuário...")
+            print(
+                f"[{unidade_nome}] "
+                f"Preenchendo credenciais..."
+            )
 
             login_input.fill(usuario)
 
-            print("Preenchendo senha...")
-
             senha_input.fill(senha)
 
-            salvar_diagnostico(
-                page,
-                unidade_nome,
-                "03_antes_do_login"
-            )
+            botao = localizar_botao_login(page)
 
-            print("Enviando formulário de login...")
+            if botao:
 
-            submit_btn.click()
+                print(
+                    f"[{unidade_nome}] "
+                    f"Clicando no botão de login..."
+                )
 
+                botao.click()
+
+            else:
+
+                print(
+                    f"[{unidade_nome}] "
+                    f"ERRO: botão de login não encontrado."
+                )
+
+                salvar_diagnostico(
+                    page,
+                    unidade_nome,
+                    "botao_login_nao_encontrado"
+                )
+
+                return alunos_capturados
+
+            # Espera após login
             try:
+
                 page.wait_for_load_state(
                     "networkidle",
                     timeout=60000
                 )
+
             except Exception:
+
                 print(
-                    "Aviso: networkidle não foi atingido. "
-                    "Continuando após aguardar."
+                    f"[{unidade_nome}] "
+                    f"Aviso: networkidle não atingido."
                 )
 
             page.wait_for_timeout(5000)
 
-            print(f"URL após login: {page.url}")
-            print(f"Título após login: {page.title()}")
+            imprimir_estado_pagina(
+                page,
+                unidade_nome,
+                "apos_login"
+            )
 
             salvar_diagnostico(
                 page,
                 unidade_nome,
-                "04_depois_do_login"
+                "apos_login"
             )
 
         else:
 
             print("")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(f"LOGIN NÃO LOCALIZADO PARA {unidade_nome}")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print("")
-            print("O scraper NÃO vai considerar que está autenticado.")
-            print("As evidências da página foram salvas.")
-
-            salvar_diagnostico(
-                page,
-                unidade_nome,
-                "02_LOGIN_NAO_LOCALIZADO"
+            print(
+                f"[{unidade_nome}] "
+                f"ERRO DIAGNÓSTICO: "
+                f"não foram encontrados campos de login visíveis."
             )
-
-        # ----------------------------------------------------------------------
-        # 4. IR PARA PÁGINA DE ALUNOS
-        # ----------------------------------------------------------------------
-
-        if url_destino:
-
-            print("")
-            print(f"URL de alunos configurada para {unidade_nome}:")
-            print(url_destino)
-
-            if page.url.rstrip("/") != url_destino.rstrip("/"):
-
-                print("Navegando para a página de alunos...")
-
-                page.goto(
-                    url_destino,
-                    wait_until="domcontentloaded",
-                    timeout=60000
-                )
-
-                page.wait_for_timeout(5000)
-
-            print(f"URL final antes da raspagem: {page.url}")
-            print(f"Título final antes da raspagem: {page.title()}")
-
-            salvar_diagnostico(
-                page,
-                unidade_nome,
-                "05_pagina_alunos"
-            )
-
-        else:
 
             print(
-                f"ERRO: URL de alunos não configurada para "
-                f"{unidade_nome}."
+                f"[{unidade_nome}] "
+                f"Não vamos simplesmente assumir que já está autenticado."
             )
 
             salvar_diagnostico(
                 page,
                 unidade_nome,
-                "05_URL_ALUNOS_NAO_CONFIGURADA"
+                "login_nao_encontrado"
+            )
+
+            # Continua apenas para descobrir se a página destino
+            # está acessível mesmo sem login.
+
+        # ----------------------------------------------------------------------
+        # 4. IR PARA URL DOS ALUNOS
+        # ----------------------------------------------------------------------
+
+        if not url_destino:
+
+            print(
+                f"[{unidade_nome}] "
+                f"ERRO: URL da listagem não configurada."
             )
 
             return alunos_capturados
-
-        # ----------------------------------------------------------------------
-        # 5. VERIFICAR SE CHEGAMOS À TABELA
-        # ----------------------------------------------------------------------
 
         print("")
-        print("Verificando existência de tabela de alunos...")
+        print(
+            f"[{unidade_nome}] "
+            f"Acessando URL dos alunos:"
+        )
 
-        possui_tabela = tabela_existe(page)
+        print(url_destino)
 
-        if not possui_tabela:
+        page.goto(
+            url_destino,
+            wait_until="domcontentloaded",
+            timeout=60000
+        )
+
+        page.wait_for_timeout(5000)
+
+        imprimir_estado_pagina(
+            page,
+            unidade_nome,
+            "pagina_alunos"
+        )
+
+        salvar_diagnostico(
+            page,
+            unidade_nome,
+            "pagina_alunos"
+        )
+
+        # ----------------------------------------------------------------------
+        # 5. VERIFICAR SE A PÁGINA REALMENTE TEM TABELA
+        # ----------------------------------------------------------------------
+
+        quantidade_tabelas = page.locator("table").count()
+
+        quantidade_linhas = page.locator(
+            "table tbody tr"
+        ).count()
+
+        print("")
+        print(
+            f"[{unidade_nome}] "
+            f"Tabelas encontradas: {quantidade_tabelas}"
+        )
+
+        print(
+            f"[{unidade_nome}] "
+            f"Linhas encontradas: {quantidade_linhas}"
+        )
+
+        if quantidade_tabelas == 0:
 
             print("")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(f"TABELA DE ALUNOS NÃO ENCONTRADA EM {unidade_nome}")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print("")
+            print(
+                f"[{unidade_nome}] "
+                f"ERRO: nenhuma tabela encontrada."
+            )
+
+            print(
+                f"[{unidade_nome}] "
+                f"Isso indica que a URL provavelmente "
+                f"não abriu a listagem esperada."
+            )
 
             salvar_diagnostico(
                 page,
                 unidade_nome,
-                "06_TABELA_NAO_ENCONTRADA"
+                "sem_tabela"
             )
 
             return alunos_capturados
 
-        print("Tabela encontrada.")
-
         # ----------------------------------------------------------------------
-        # 6. TENTAR ALTERAR LIMITE POR PÁGINA
+        # 6. TENTAR AUMENTAR REGISTROS POR PÁGINA
         # ----------------------------------------------------------------------
 
         try:
@@ -534,84 +693,81 @@ def fazer_login_e_extrair(
                 'select[name*="per_page" i]'
             ).first
 
-            if (
-                select_limit.count() > 0
-                and select_limit.is_visible(timeout=3000)
-            ):
+            if select_limit.is_visible(timeout=3000):
 
-                print("Controle de quantidade por página encontrado.")
+                print(
+                    f"[{unidade_nome}] "
+                    f"Controle de quantidade por página encontrado."
+                )
 
                 try:
-                    select_limit.select_option(value="-1")
-                    page.wait_for_timeout(3000)
-                    print("Tentativa de selecionar todos os registros realizada.")
-                except Exception as e:
-                    print(
-                        f"Não foi possível selecionar '-1': {e}"
+
+                    select_limit.select_option(
+                        value="-1"
                     )
 
-        except Exception as e:
-            print(
-                f"Controle de paginação por select não encontrado: {e}"
-            )
+                    page.wait_for_timeout(3000)
+
+                except Exception as erro:
+
+                    print(
+                        f"[{unidade_nome}] "
+                        f"Não foi possível selecionar -1: {erro}"
+                    )
+
+        except Exception:
+            pass
 
         # ----------------------------------------------------------------------
         # 7. PAGINAÇÃO
         # ----------------------------------------------------------------------
 
         pagina_atual = 1
-        paginas_processadas = set()
 
         while True:
 
             print("")
             print(
-                f"Raspando página {pagina_atual} "
-                f"de {unidade_nome}..."
+                f"[{unidade_nome}] "
+                f"Raspando página {pagina_atual}..."
             )
 
             page.wait_for_timeout(2000)
-
-            # Evita loop infinito
-            url_atual = page.url
-
-            chave_pagina = (
-                pagina_atual,
-                url_atual
-            )
-
-            if chave_pagina in paginas_processadas:
-                print("Página repetida detectada. Encerrando paginação.")
-                break
-
-            paginas_processadas.add(chave_pagina)
 
             rows = page.locator(
                 "table tbody tr"
             ).all()
 
-            print(f"Linhas encontradas na página: {len(rows)}")
+            print(
+                f"[{unidade_nome}] "
+                f"Linhas encontradas nesta página: {len(rows)}"
+            )
 
-            for row_index, row in enumerate(rows):
+            for indice, row in enumerate(rows):
 
                 try:
 
-                    cols = row.locator("td").all_text_contents()
+                    cols = row.locator(
+                        "td"
+                    ).all_text_contents()
 
                     cols = [
-                        col.strip()
-                        for col in cols
+                        coluna.strip()
+                        for coluna in cols
                     ]
 
-                    if not cols:
-                        continue
+                    print(
+                        f"[{unidade_nome}] "
+                        f"Linha {indice + 1}: {cols}"
+                    )
 
-                    # Ignora linhas que não sejam dados
                     if len(cols) < 3:
                         continue
 
                     contrato = cols[0]
+
                     nome = cols[1]
+
                     curso = cols[2]
 
                     curso_texto = curso.lower()
@@ -623,7 +779,7 @@ def fazer_login_e_extrair(
                     )
 
                     # ----------------------------------------------------------
-                    # DESCARTAR DESATIVADOS
+                    # FILTRO STATUS
                     # ----------------------------------------------------------
 
                     if (
@@ -631,25 +787,40 @@ def fazer_login_e_extrair(
                         or "ENCERRADO" in status_texto
                         or "INATIVO" in status_texto
                     ):
+
+                        print(
+                            f"[{unidade_nome}] "
+                            f"Aluno descartado por status: "
+                            f"{nome}"
+                        )
+
                         continue
 
                     # ----------------------------------------------------------
-                    # FILTRAR INFORMÁTICA
+                    # FILTRO INFORMÁTICA
                     # ----------------------------------------------------------
 
                     if (
                         "informática" not in curso_texto
                         and "informatica" not in curso_texto
                     ):
+
+                        print(
+                            f"[{unidade_nome}] "
+                            f"Aluno descartado por curso: "
+                            f"{nome} | {curso}"
+                        )
+
                         continue
 
                     # ----------------------------------------------------------
-                    # DATA DE INÍCIO
+                    # DATA
                     # ----------------------------------------------------------
 
                     data_inicio_str = ""
 
                     if len(cols) > 4:
+
                         data_inicio_str = cols[4]
 
                     criticidade, dias_ativos = (
@@ -659,28 +830,40 @@ def fazer_login_e_extrair(
                     )
 
                     aluno_data = {
+
                         "contrato": contrato,
+
                         "nome": nome,
+
                         "unidade": unidade_nome,
+
                         "curso": curso,
+
                         "status": "ATIVO",
+
                         "dias": dias_ativos,
+
                         "faltas": 0,
+
                         "criticidade": criticidade
                     }
 
-                    alunos_capturados.append(aluno_data)
-
-                    print(
-                        f"Aluno válido encontrado: "
-                        f"{nome} | {curso} | "
-                        f"{criticidade} | {dias_ativos} dias"
+                    alunos_capturados.append(
+                        aluno_data
                     )
 
-                except Exception as e:
+                    print(
+                        f"[{unidade_nome}] "
+                        f"ALUNO CAPTURADO: "
+                        f"{nome}"
+                    )
+
+                except Exception as erro_linha:
 
                     print(
-                        f"Erro ao processar linha {row_index}: {e}"
+                        f"[{unidade_nome}] "
+                        f"Erro ao processar linha "
+                        f"{indice + 1}: {erro_linha}"
                     )
 
             # ------------------------------------------------------------------
@@ -699,35 +882,47 @@ def fazer_login_e_extrair(
                     '[aria-label="Próxima"]'
                 ).first
 
-                if btn_proximo.count() == 0:
-                    print("Botão de próxima página não encontrado.")
-                    break
-
                 if not btn_proximo.is_visible(timeout=3000):
-                    print("Botão de próxima página não está visível.")
+
+                    print(
+                        f"[{unidade_nome}] "
+                        f"Botão de próxima página não encontrado."
+                    )
+
                     break
 
-                disabled = False
+                # Verifica classes
+                classes = (
+                    btn_proximo.get_attribute("class")
+                    or ""
+                ).lower()
 
-                try:
-                    disabled = btn_proximo.is_disabled()
-                except Exception:
-                    pass
+                aria_disabled = (
+                    btn_proximo.get_attribute(
+                        "aria-disabled"
+                    )
+                    or ""
+                ).lower()
 
-                try:
-                    classes = btn_proximo.get_attribute("class") or ""
-
-                    if "disabled" in classes.lower():
-                        disabled = True
-
-                except Exception:
-                    pass
+                disabled = (
+                    btn_proximo.is_disabled()
+                    or "disabled" in classes
+                    or aria_disabled == "true"
+                )
 
                 if disabled:
-                    print("Botão de próxima página está desabilitado.")
+
+                    print(
+                        f"[{unidade_nome}] "
+                        f"Última página alcançada."
+                    )
+
                     break
 
-                print("Indo para a próxima página...")
+                print(
+                    f"[{unidade_nome}] "
+                    f"Avançando para próxima página..."
+                )
 
                 btn_proximo.click()
 
@@ -735,53 +930,55 @@ def fazer_login_e_extrair(
 
                 pagina_atual += 1
 
-            except Exception as e:
+                if pagina_atual > 100:
+
+                    print(
+                        f"[{unidade_nome}] "
+                        f"Proteção ativada: mais de 100 páginas."
+                    )
+
+                    break
+
+            except Exception as erro_paginacao:
 
                 print(
-                    f"Não foi possível avançar a paginação: {e}"
+                    f"[{unidade_nome}] "
+                    f"Fim da paginação ou erro: "
+                    f"{erro_paginacao}"
                 )
 
                 break
 
         # ----------------------------------------------------------------------
-        # RESULTADO DA UNIDADE
+        # FINAL DA UNIDADE
         # ----------------------------------------------------------------------
 
         print("")
         print(
-            f"Total de alunos válidos filtrados em "
-            f"{unidade_nome}: {len(alunos_capturados)}"
+            f"[{unidade_nome}] "
+            f"TOTAL DE ALUNOS VÁLIDOS: "
+            f"{len(alunos_capturados)}"
         )
 
         salvar_diagnostico(
             page,
             unidade_nome,
-            "07_final_da_raspagem"
+            "final"
         )
 
-    except Exception as e:
+    except Exception as erro:
 
         print("")
         print(
-            f"ERRO GERAL AO PROCESSAR {unidade_nome}:"
+            f"[{unidade_nome}] "
+            f"ERRO GERAL: {erro}"
         )
-        print(str(e))
 
-        try:
-            salvar_diagnostico(
-                page,
-                unidade_nome,
-                "ERRO_GERAL"
-            )
-        except Exception:
-            pass
-
-    finally:
-
-        try:
-            context.close()
-        except Exception:
-            pass
+        salvar_diagnostico(
+            page,
+            unidade_nome,
+            "erro_geral"
+        )
 
     return alunos_capturados
 
@@ -794,29 +991,21 @@ def main():
 
     print("")
     print("=" * 80)
-    print("SCRAPER CGD - INÍCIO")
+    print("INÍCIO DO SCRAPER CGD")
     print("=" * 80)
-    print(
-        f"Data/hora do processamento: "
-        f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-    )
-    print("=" * 80)
+
     print("")
+    print("Verificação das variáveis de ambiente:")
 
-    # --------------------------------------------------------------------------
-    # VALIDAR CONFIGURAÇÃO
-    # --------------------------------------------------------------------------
+    print(
+        f"SUPABASE_URL: "
+        f"{'OK' if SUPABASE_URL else 'AUSENTE'}"
+    )
 
-    if not SUPABASE_URL or not SUPABASE_KEY:
-
-        print(
-            "ERRO CRÍTICO: SUPABASE_URL ou "
-            "SUPABASE_SERVICE_ROLE_KEY não foram encontradas."
-        )
-
-        return
-
-    print("Variáveis principais encontradas:")
+    print(
+        f"SUPABASE_SERVICE_ROLE_KEY: "
+        f"{'OK' if SUPABASE_KEY else 'AUSENTE'}"
+    )
 
     print(
         f"CGD_LOGIN_URL: "
@@ -853,19 +1042,33 @@ def main():
         f"{'OK' if URL_FILIAL else 'AUSENTE'}"
     )
 
-    print("")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+
+        print("")
+        print(
+            "ERRO CRÍTICO: "
+            "credenciais do Supabase ausentes."
+        )
+
+        return
 
     todos_alunos = []
 
-    # --------------------------------------------------------------------------
+    # ==========================================================================
     # PLAYWRIGHT
-    # --------------------------------------------------------------------------
+    # ==========================================================================
 
     with sync_playwright() as p:
+
+        print("")
+        print("Iniciando Chromium...")
 
         browser = p.chromium.launch(
             headless=True
         )
+
+        # Contexto separado para cada unidade
+        # evita que uma sessão interfira na outra.
 
         # ----------------------------------------------------------------------
         # MATRIZ
@@ -873,20 +1076,33 @@ def main():
 
         if LOGIN_MATRIZ and SENHA_MATRIZ:
 
+            context_matriz = browser.new_context(
+                viewport={
+                    "width": 1280,
+                    "height": 800
+                }
+            )
+
+            page_matriz = context_matriz.new_page()
+
             alunos_matriz = fazer_login_e_extrair(
-                browser,
+                page_matriz,
                 LOGIN_MATRIZ,
                 SENHA_MATRIZ,
                 URL_MATRIZ,
                 "Matriz"
             )
 
-            todos_alunos.extend(alunos_matriz)
+            todos_alunos.extend(
+                alunos_matriz
+            )
+
+            context_matriz.close()
 
         else:
 
             print(
-                "Aviso: credenciais da Matriz não encontradas."
+                "Credenciais da Matriz ausentes."
             )
 
         # ----------------------------------------------------------------------
@@ -895,75 +1111,84 @@ def main():
 
         if LOGIN_FILIAL and SENHA_FILIAL:
 
+            context_filial = browser.new_context(
+                viewport={
+                    "width": 1280,
+                    "height": 800
+                }
+            )
+
+            page_filial = context_filial.new_page()
+
             alunos_filial = fazer_login_e_extrair(
-                browser,
+                page_filial,
                 LOGIN_FILIAL,
                 SENHA_FILIAL,
                 URL_FILIAL,
                 "Filial"
             )
 
-            todos_alunos.extend(alunos_filial)
+            todos_alunos.extend(
+                alunos_filial
+            )
+
+            context_filial.close()
 
         else:
 
             print(
-                "Aviso: credenciais da Filial não encontradas."
+                "Credenciais da Filial ausentes."
             )
 
         browser.close()
 
-    # --------------------------------------------------------------------------
-    # RESULTADO FINAL
-    # --------------------------------------------------------------------------
+    # ==========================================================================
+    # RESULTADO
+    # ==========================================================================
 
     print("")
     print("=" * 80)
     print(
-        f"FIM DA RASPAGEM. "
-        f"TOTAL GERAL: {len(todos_alunos)}"
+        f"TOTAL GERAL DE ALUNOS CAPTURADOS: "
+        f"{len(todos_alunos)}"
     )
     print("=" * 80)
-    print("")
 
-    # --------------------------------------------------------------------------
-    # SALVAR JSON
-    # --------------------------------------------------------------------------
-
-    try:
-
-        json_path = Path("dados_alunos.json")
-
-        json_path.write_text(
-            json.dumps(
-                todos_alunos,
-                ensure_ascii=False,
-                indent=2
-            ),
-            encoding="utf-8"
-        )
-
-        print(
-            f"dados_alunos.json atualizado com "
-            f"{len(todos_alunos)} registro(s)."
-        )
-
-    except Exception as e:
-
-        print(
-            f"Erro ao salvar dados_alunos.json: {e}"
-        )
-
-    # --------------------------------------------------------------------------
-    # SUPABASE
-    # --------------------------------------------------------------------------
+    # ==========================================================================
+    # SALVAR JSON LOCAL
+    # ==========================================================================
 
     if todos_alunos:
+
+        with open(
+            JSON_PATH,
+            "w",
+            encoding="utf-8"
+        ) as arquivo:
+
+            json.dump(
+                todos_alunos,
+                arquivo,
+                ensure_ascii=False,
+                indent=2
+            )
+
+        print("")
+        print(
+            f"dados_alunos.json atualizado com "
+            f"{len(todos_alunos)} alunos."
+        )
+
+        # ======================================================================
+        # SUPABASE
+        # ======================================================================
 
         try:
 
             print("")
-            print("Enviando dados para o Supabase...")
+            print(
+                "Enviando dados para o Supabase..."
+            )
 
             supabase: Client = create_client(
                 SUPABASE_URL,
@@ -975,38 +1200,61 @@ def main():
                     todos_alunos,
                     ensure_ascii=False
                 ),
-                "atualizado_em": "now()"
+                "atualizado_em": datetime.now().isoformat()
             }
 
-            supabase.table(
-                "resumo_cgd"
-            ).upsert(data).execute()
+            res = (
+                supabase
+                .table("resumo_cgd")
+                .upsert(data)
+                .execute()
+            )
 
             print(
                 "Relatório enviado com sucesso "
                 "para resumo_cgd."
             )
 
-        except Exception as e:
-
             print(
-                f"ERRO AO ATUALIZAR SUPABASE: {e}"
+                f"Resposta Supabase: {res}"
             )
+
+        except Exception as erro_supabase:
+
+            print("")
+            print(
+                "ERRO AO ATUALIZAR SUPABASE:"
+            )
+
+            print(erro_supabase)
 
     else:
 
+        print("")
         print(
-            "Nenhum aluno válido foi capturado. "
-            "Supabase NÃO será atualizado."
+            "NENHUM ALUNO VÁLIDO FOI CAPTURADO."
         )
 
-    print("")
-    print(
-        f"Arquivos de diagnóstico disponíveis em: "
-        f"{DIAGNOSTIC_DIR}"
-    )
-    print("")
+        # Criamos um JSON vazio somente para deixar
+        # explícito o resultado do processamento.
 
+        with open(
+            JSON_PATH,
+            "w",
+            encoding="utf-8"
+        ) as arquivo:
+
+            json.dump(
+                [],
+                arquivo,
+                ensure_ascii=False,
+                indent=2
+            )
+
+
+# ==============================================================================
+# EXECUÇÃO
+# ==============================================================================
 
 if __name__ == "__main__":
     main()
