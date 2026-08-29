@@ -1,6 +1,5 @@
 import os
 import json
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -45,28 +44,15 @@ def salvar_diagnostico(page, unidade_nome, etapa):
         prefixo = unidade_nome.lower().replace(" ", "_")
         etapa_limpa = etapa.lower().replace(" ", "_").replace("/", "_")
 
-        screenshot_path = (
-            DIAGNOSTICO_DIR /
-            f"{prefixo}_{etapa_limpa}.png"
-        )
+        screenshot_path = DIAGNOSTICO_DIR / f"{prefixo}_{etapa_limpa}.png"
+        html_path = DIAGNOSTICO_DIR / f"{prefixo}_{etapa_limpa}.html"
+        info_path = DIAGNOSTICO_DIR / f"{prefixo}_{etapa_limpa}.txt"
 
-        html_path = (
-            DIAGNOSTICO_DIR /
-            f"{prefixo}_{etapa_limpa}.html"
-        )
-
-        info_path = (
-            DIAGNOSTICO_DIR /
-            f"{prefixo}_{etapa_limpa}.txt"
-        )
-
-        # Screenshot
         page.screenshot(
             path=str(screenshot_path),
             full_page=True
         )
 
-        # HTML
         html = page.content()
 
         with open(
@@ -76,7 +62,6 @@ def salvar_diagnostico(page, unidade_nome, etapa):
         ) as arquivo:
             arquivo.write(html)
 
-        # Informações básicas
         with open(
             info_path,
             "w",
@@ -116,19 +101,17 @@ def salvar_diagnostico(page, unidade_nome, etapa):
             )
 
             arquivo.write("\n")
-
             arquivo.write("TEXTOS DOS INPUTS:\n")
 
             inputs = page.locator("input").all()
 
             for i, input_element in enumerate(inputs):
+
                 try:
                     tipo = input_element.get_attribute("type")
                     nome = input_element.get_attribute("name")
                     identificador = input_element.get_attribute("id")
-                    placeholder = input_element.get_attribute(
-                        "placeholder"
-                    )
+                    placeholder = input_element.get_attribute("placeholder")
 
                     arquivo.write(
                         f"[{i}] "
@@ -145,10 +128,12 @@ def salvar_diagnostico(page, unidade_nome, etapa):
             arquivo.write("FRAMES:\n")
 
             for i, frame in enumerate(page.frames):
+
                 try:
                     arquivo.write(
                         f"[{i}] URL={frame.url}\n"
                     )
+
                 except Exception:
                     pass
 
@@ -160,6 +145,7 @@ def salvar_diagnostico(page, unidade_nome, etapa):
         )
 
     except Exception as erro:
+
         print(
             f"[DIAGNÓSTICO] Erro ao salvar diagnóstico "
             f"de {unidade_nome}/{etapa}: {erro}"
@@ -189,22 +175,34 @@ def imprimir_estado_pagina(page, unidade_nome, etapa):
         print("Título: não disponível")
 
     try:
-        print(f"Quantidade de inputs: {page.locator('input').count()}")
+        print(
+            f"Quantidade de inputs: "
+            f"{page.locator('input').count()}"
+        )
     except Exception:
         pass
 
     try:
-        print(f"Quantidade de botões: {page.locator('button').count()}")
+        print(
+            f"Quantidade de botões: "
+            f"{page.locator('button').count()}"
+        )
     except Exception:
         pass
 
     try:
-        print(f"Quantidade de links: {page.locator('a').count()}")
+        print(
+            f"Quantidade de links: "
+            f"{page.locator('a').count()}"
+        )
     except Exception:
         pass
 
     try:
-        print(f"Quantidade de frames: {len(page.frames)}")
+        print(
+            f"Quantidade de frames: "
+            f"{len(page.frames)}"
+        )
     except Exception:
         pass
 
@@ -221,6 +219,7 @@ def imprimir_estado_pagina(page, unidade_nome, etapa):
         print(texto)
 
     except Exception as erro:
+
         print(
             f"Não foi possível obter texto da página: {erro}"
         )
@@ -265,12 +264,10 @@ def verificar_elementos_login(page):
 
         try:
             locator = page.locator(seletor)
-
             quantidade = locator.count()
 
             print(
-                f"LOGIN selector: {seletor} "
-                f"=> {quantidade}"
+                f"LOGIN selector: {seletor} => {quantidade}"
             )
 
             if quantidade > 0:
@@ -278,12 +275,15 @@ def verificar_elementos_login(page):
                 for i in range(quantidade):
 
                     try:
+
                         if locator.nth(i).is_visible():
                             login_encontrado = locator.nth(i)
+
                             print(
                                 f"LOGIN VISÍVEL encontrado com: "
                                 f"{seletor}"
                             )
+
                             break
 
                     except Exception:
@@ -304,12 +304,10 @@ def verificar_elementos_login(page):
 
         try:
             locator = page.locator(seletor)
-
             quantidade = locator.count()
 
             print(
-                f"SENHA selector: {seletor} "
-                f"=> {quantidade}"
+                f"SENHA selector: {seletor} => {quantidade}"
             )
 
             if quantidade > 0:
@@ -317,12 +315,15 @@ def verificar_elementos_login(page):
                 for i in range(quantidade):
 
                     try:
+
                         if locator.nth(i).is_visible():
                             senha_encontrada = locator.nth(i)
+
                             print(
                                 f"SENHA VISÍVEL encontrada com: "
                                 f"{seletor}"
                             )
+
                             break
 
                     except Exception:
@@ -359,12 +360,10 @@ def localizar_botao_login(page):
 
         try:
             locator = page.locator(seletor)
-
             quantidade = locator.count()
 
             print(
-                f"BOTÃO selector: {seletor} "
-                f"=> {quantidade}"
+                f"BOTÃO selector: {seletor} => {quantidade}"
             )
 
             if quantidade > 0:
@@ -410,6 +409,7 @@ def calcular_criticidade_e_dias(data_inicio_str):
         return "normal", 0
 
     try:
+
         data_inicio_str = data_inicio_str.strip()
 
         data_inicio = datetime.strptime(
@@ -434,26 +434,8 @@ def calcular_criticidade_e_dias(data_inicio_str):
             return "normal", max(0, dias)
 
     except Exception:
+
         return "normal", 0
-        hoje = datetime.now()
-
-        dias = (hoje - data_inicio).days
-
-        if dias >= 90:
-    return "critico", dias
-
-elif dias >= 60:
-    return "moderado", dias
-
-elif dias >= 30:
-    return "atencao", dias
-
-else:
-    return "normal", max(0, dias)
-
-    except Exception:
-
-        return "NORMAL", 0
 
 
 # ==============================================================================
@@ -534,7 +516,6 @@ def fazer_login_e_extrair(
             )
 
             login_input.fill(usuario)
-
             senha_input.fill(senha)
 
             botao = localizar_botao_login(page)
@@ -563,7 +544,6 @@ def fazer_login_e_extrair(
 
                 return alunos_capturados
 
-            # Espera após login
             try:
 
                 page.wait_for_load_state(
@@ -611,9 +591,6 @@ def fazer_login_e_extrair(
                 unidade_nome,
                 "login_nao_encontrado"
             )
-
-            # Continua apenas para descobrir se a página destino
-            # está acessível mesmo sem login.
 
         # ----------------------------------------------------------------------
         # 4. IR PARA URL DOS ALUNOS
@@ -783,9 +760,7 @@ def fazer_login_e_extrair(
                         continue
 
                     contrato = cols[0]
-
                     nome = cols[1]
-
                     curso = cols[2]
 
                     curso_texto = curso.lower()
@@ -838,7 +813,6 @@ def fazer_login_e_extrair(
                     data_inicio_str = ""
 
                     if len(cols) > 4:
-
                         data_inicio_str = cols[4]
 
                     criticidade, dias_ativos = (
@@ -847,74 +821,123 @@ def fazer_login_e_extrair(
                         )
                     )
 
+                    # ----------------------------------------------------------
+                    # UNIDADE
+                    # ----------------------------------------------------------
+
                     unidade_db = (
-    "matriz"
-    if unidade_nome.lower() == "matriz"
-    else "filial"
-)
+                        "matriz"
+                        if unidade_nome.lower() == "matriz"
+                        else "filial"
+                    )
 
-criticidade_db = criticidade.lower()
+                    # ----------------------------------------------------------
+                    # CRITICIDADE E TRATATIVA
+                    # ----------------------------------------------------------
 
-if criticidade_db == "critico":
-    tratativa_sugerida = "aulao"
-elif criticidade_db == "moderado":
-    tratativa_sugerida = "atividade_pratica"
-elif criticidade_db == "atencao":
-    tratativa_sugerida = "acompanhamento"
-else:
-    tratativa_sugerida = "normal"
+                    criticidade_db = criticidade.lower()
 
-aluno_data = {
-    "cgd_matricula_id": contrato,
-    "nome": nome,
-    "contrato": contrato,
+                    if criticidade_db == "critico":
 
-    "email": None,
-    "telefone": None,
+                        tratativa_sugerida = "aulao"
 
-    "curso": curso,
-    "turma_nome": "",
-    "professor_nome": "",
+                    elif criticidade_db == "moderado":
 
-    "data_inicio": (
-        datetime.strptime(
-            data_inicio_str,
-            "%d/%m/%Y"
-        ).strftime("%Y-%m-%d")
-        if data_inicio_str
-        else datetime.now().strftime("%Y-%m-%d")
-    ),
+                        tratativa_sugerida = "atividade_pratica"
 
-    "meses_contrato_total": 12,
+                    elif criticidade_db == "atencao":
 
-    "ultima_aula": None,
-    "ultimo_acesso": None,
+                        tratativa_sugerida = "acompanhamento"
 
-    "faltas_totais": 0,
-    "faltas_mes_atual": 0,
+                    else:
 
-    "mes_referencia_faltas": datetime.now().strftime("%m/%Y"),
+                        tratativa_sugerida = "normal"
 
-    "dias_em_curso": dias_ativos,
+                    # ----------------------------------------------------------
+                    # DATA FORMATADA PARA O SUPABASE
+                    # ----------------------------------------------------------
 
-    "criticidade": criticidade_db,
+                    if data_inicio_str:
 
-    "tratativa_sugerida": tratativa_sugerida,
+                        try:
 
-    "status_tratativa": "pendente",
+                            data_inicio_db = (
+                                datetime.strptime(
+                                    data_inicio_str,
+                                    "%d/%m/%Y"
+                                ).strftime("%Y-%m-%d")
+                            )
 
-    "status_matricula": "ativo",
+                        except Exception:
 
-    "bloqueado_automaticamente": False,
+                            data_inicio_db = (
+                                datetime.now().strftime("%Y-%m-%d")
+                            )
 
-    "motivo_bloqueio": None,
+                    else:
 
-    "total_disciplinas_grade": 0,
+                        data_inicio_db = (
+                            datetime.now().strftime("%Y-%m-%d")
+                        )
 
-    "disciplinas_concluidas": 0,
+                    # ----------------------------------------------------------
+                    # ESTRUTURA DO ALUNO
+                    # ----------------------------------------------------------
 
-    "unidade": unidade_db
-}
+                    aluno_data = {
+
+                        "cgd_matricula_id": contrato,
+
+                        "nome": nome,
+
+                        "contrato": contrato,
+
+                        "email": None,
+
+                        "telefone": None,
+
+                        "curso": curso,
+
+                        "turma_nome": "",
+
+                        "professor_nome": "",
+
+                        "data_inicio": data_inicio_db,
+
+                        "meses_contrato_total": 12,
+
+                        "ultima_aula": None,
+
+                        "ultimo_acesso": None,
+
+                        "faltas_totais": 0,
+
+                        "faltas_mes_atual": 0,
+
+                        "mes_referencia_faltas": (
+                            datetime.now().strftime("%m/%Y")
+                        ),
+
+                        "dias_em_curso": dias_ativos,
+
+                        "criticidade": criticidade_db,
+
+                        "tratativa_sugerida": tratativa_sugerida,
+
+                        "status_tratativa": "pendente",
+
+                        "status_matricula": "ativo",
+
+                        "bloqueado_automaticamente": False,
+
+                        "motivo_bloqueio": None,
+
+                        "total_disciplinas_grade": 0,
+
+                        "disciplinas_concluidas": 0,
+
+                        "unidade": unidade_db
+                    }
 
                     alunos_capturados.append(
                         aluno_data
@@ -959,7 +982,6 @@ aluno_data = {
 
                     break
 
-                # Verifica classes
                 classes = (
                     btn_proximo.get_attribute("class")
                     or ""
@@ -1135,9 +1157,6 @@ def main():
             headless=True
         )
 
-        # Contexto separado para cada unidade
-        # evita que uma sessão interfira na outra.
-
         # ----------------------------------------------------------------------
         # MATRIZ
         # ----------------------------------------------------------------------
@@ -1247,7 +1266,7 @@ def main():
             f"{len(todos_alunos)} alunos."
         )
 
-                # ======================================================================
+        # ======================================================================
         # SUPABASE
         # ======================================================================
 
@@ -1280,11 +1299,13 @@ def main():
                 )
 
                 print(
-                    "Alunos enviados com sucesso para a tabela alunos."
+                    "Alunos enviados com sucesso "
+                    "para a tabela alunos."
                 )
 
                 print(
-                    f"Quantidade enviada: {len(todos_alunos)}"
+                    f"Quantidade enviada: "
+                    f"{len(todos_alunos)}"
                 )
 
             # ------------------------------------------------------------------
@@ -1299,7 +1320,9 @@ def main():
                     if aluno["unidade"] == unidade
                 ]
 
-                total_alunos = len(alunos_unidade)
+                total_alunos = len(
+                    alunos_unidade
+                )
 
                 criticos = sum(
                     1
@@ -1373,7 +1396,9 @@ def main():
 
                     "bloqueados_faltas": bloqueados,
 
-                    "mes_referencia": datetime.now().strftime("%m/%Y"),
+                    "mes_referencia": (
+                        datetime.now().strftime("%m/%Y")
+                    ),
 
                     "alunos_data": alunos_unidade,
 
@@ -1405,6 +1430,8 @@ def main():
             )
 
             print(erro_supabase)
+
+
 # ==============================================================================
 # EXECUÇÃO
 # ==============================================================================
