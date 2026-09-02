@@ -10,8 +10,11 @@ permissions:
 
 jobs:
   executar-scraping:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # O CGD/Cloudflare bloqueia os runners públicos do GitHub.
+    # O runner deve estar na rede autorizada onde o acesso manual ao CGD funciona.
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
@@ -22,13 +25,15 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependências
+        shell: powershell
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install playwright playwright-stealth
-          python -m playwright install --with-deps chromium
+          python -m playwright install chromium
 
-      - name: Verificar configuração dos Secrets
+      - name: Validar Secrets obrigatórios
+        shell: powershell
         env:
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
           CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
@@ -40,13 +45,22 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          test -n "$CGD_LOGIN_URL" || true
-          test -n "$CGD_USER_MATRIZ" || true
-          test -n "$CGD_PASS_MATRIZ" || true
-          test -n "$CGD_USER_FILIAL" || true
-          test -n "$CGD_PASS_FILIAL" || true
+          $required = @(
+            'CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL',
+            'CGD_USER_MATRIZ','CGD_PASS_MATRIZ',
+            'CGD_USER_FILIAL','CGD_PASS_FILIAL',
+            'SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY'
+          )
+          foreach ($name in $required) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              throw "Secret obrigatório ausente: $name"
+            }
+            Write-Host "$name = OK"
+          }
 
-      - name: Executar scraper original
+      - name: Executar scraper CGD
+        shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -61,7 +75,20 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scraper.py
 
+      - name: Validar captura real de alunos
+        shell: powershell
+        run: |
+          if (-not (Test-Path 'dados_alunos.json')) {
+            throw 'Falha: dados_alunos.json não foi gerado.'
+          }
+          $dados = Get-Content 'dados_alunos.json' -Raw | ConvertFrom-Json
+          if ($dados.Count -eq 0) {
+            throw 'Falha: scraper terminou sem alunos. A execução NÃO será considerada sucesso.'
+          }
+          Write-Host "ALUNOS CAPTURADOS: $($dados.Count)"
+
       - name: Sincronizar reposições reais do CGD
+        shell: powershell
         env:
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
           CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
@@ -71,6 +98,18 @@ jobs:
           CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
         run: python sync_cgd_reposicoes.py
+
+      - name: Validar ausência de bloqueio Cloudflare
+        shell: powershell
+        run: |
+          if (Test-Path 'diagnostico_scraping') {
+            $bloqueio = Get-ChildItem 'diagnostico_scraping' -Recurse -File |
+              Select-String -Pattern 'Sorry, you have been blocked|Attention Required! \\| Cloudflare|You are unable to access' -SimpleMatch:$false
+            if ($bloqueio) {
+              throw 'Falha: o CGD retornou bloqueio Cloudflare. Execução não é válida.'
+            }
+          }
+          Write-Host 'Nenhum bloqueio Cloudflare encontrado nos diagnósticos.'
 
       - name: Salvar diagnósticos
         if: always()
@@ -85,14 +124,15 @@ jobs:
           retention-days: 7
 
       - name: Commit e Push dos dados públicos
-        if: always()
+        if: success()
+        shell: powershell
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add dados_alunos.json dados_reposicoes.json || true
-          if git diff --cached --quiet; then
-            echo "Nenhuma alteração nos dados sincronizados."
-          else
-            git commit -m "Auto-update: dados reais CGD"
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add dados_alunos.json dados_reposicoes.json
+          if (git diff --cached --quiet) {
+            Write-Host 'Nenhuma alteração nos dados sincronizados.'
+          } else {
+            git commit -m 'Auto-update: dados reais CGD'
             git push
-          fi
+          }
