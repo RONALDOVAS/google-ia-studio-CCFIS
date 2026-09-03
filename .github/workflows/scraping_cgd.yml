@@ -57,7 +57,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - uma paginacao + contratos azuis
+      - name: Executar scraper CGD - paginação paralela + contratos azuis
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -75,6 +75,7 @@ jobs:
           CGD_MAX_CONTRACTS: '10000'
           CGD_PAGE_WAIT_MS: '180'
           CGD_LIST_WAIT_MS: '100'
+          CGD_LIST_CONCURRENCY: '4'
         run: python scraper_runner.py
 
       - name: Validar captura real de alunos
