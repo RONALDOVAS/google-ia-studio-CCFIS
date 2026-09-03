@@ -5,7 +5,6 @@ substitui apenas a descoberta serial e redundante de contratos por uma
 paginação orientada a URLs, sem qualquer filtro por cor.
 """
 
-import re
 from urllib.parse import urlparse
 
 import scraper
@@ -65,6 +64,7 @@ def _next_page_fast(page, unidade):
                             return True
                         continue
 
+                # Fallback para paginação por JavaScript sem href.
                 before = set()
                 try:
                     for _, h in scraper.links(page):
@@ -116,7 +116,6 @@ def _paginate_listing(page, unidade, found):
         if len(found) >= scraper.MAX_CONTRACTS:
             break
         if len(found) == last_count and page_number > 1:
-            # Duas páginas sem qualquer contrato novo indicam paginação vazia/repetida.
             break
         last_count = len(found)
 
@@ -126,6 +125,10 @@ def _paginate_listing(page, unidade, found):
 
 def optimized_discover_contracts(page, unidade, destino):
     found = {}
+
+    # A navegação de listagem usa espera curta: DOMContentLoaded já é aguardado
+    # pelo scraper.open_page; a espera extra fica apenas como margem para JS.
+    scraper.PAGE_WAIT_MS = min(scraper.PAGE_WAIT_MS, 150)
 
     # Só trata destino como listagem se ele for realmente uma rota de listagem.
     if destino and scraper.same_host(destino) and _is_listing(destino):
@@ -138,7 +141,7 @@ def optimized_discover_contracts(page, unidade, destino):
                 return contracts
 
     # Descobre as rotas de listagem uma única vez e usa somente a primeira
-    # que efetivamente contém contratos. Não percorre três fontes redundantes.
+    # que efetivamente contém contratos. Não percorre fontes redundantes.
     if not scraper.open_page(page, scraper.CGD_URL, unidade, "inicio"):
         return []
 
@@ -164,7 +167,7 @@ def optimized_discover_contracts(page, unidade, destino):
 
 
 # scraper.main() usa a função pelo nome global durante a execução; substituir
-# aqui mantém toda a autenticação, detalhamento paralelo e persistência existentes.
+# aqui mantém autenticação, detalhamento paralelo e persistência existentes.
 scraper.discover_contracts = optimized_discover_contracts
 
 
