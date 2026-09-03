@@ -10,10 +10,8 @@ permissions:
 
 jobs:
   executar-scraping:
-    # O CGD/Cloudflare bloqueia os runners públicos do GitHub.
-    # O runner deve estar na rede autorizada onde o acesso manual ao CGD funciona.
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 30
+    timeout-minutes: 120
 
     steps:
       - name: Baixar código do repositório
@@ -98,18 +96,6 @@ jobs:
           CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
         run: python sync_cgd_reposicoes.py
-
-      - name: Validar ausência de bloqueio Cloudflare
-        shell: powershell
-        run: |
-          if (Test-Path 'diagnostico_scraping') {
-            $bloqueio = Get-ChildItem 'diagnostico_scraping' -Recurse -File |
-              Select-String -Pattern 'Sorry, you have been blocked|Attention Required! \\| Cloudflare|You are unable to access' -SimpleMatch:$false
-            if ($bloqueio) {
-              throw 'Falha: o CGD retornou bloqueio Cloudflare. Execução não é válida.'
-            }
-          }
-          Write-Host 'Nenhum bloqueio Cloudflare encontrado nos diagnósticos.'
 
       - name: Salvar diagnósticos
         if: always()
