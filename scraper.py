@@ -20,7 +20,7 @@ CGD_URL = os.getenv("CGD_LOGIN_URL") or "https://cgdgestao.com.br"
 DIAGNOSTICO_DIR = Path("diagnostico_scraping")
 DIAGNOSTICO_DIR.mkdir(parents=True, exist_ok=True)
 JSON_PATH = Path("dados_alunos.json")
-EDGE_PROFILE_DIR = Path(os.getenv("EDGE_PROFILE_DIR") or "edge_cgd_profile")
+EDGE_PROFILE_BASE = Path(os.getenv("EDGE_PROFILE_DIR") or "edge_cgd_profiles")
 
 
 def salvar_diagnostico(page, unidade, etapa):
@@ -119,10 +119,6 @@ def calcular_criticidade_e_dias(data_inicio_str):
         return "normal", 0
 
 
-def texto_normalizado(valor):
-    return " ".join((valor or "").lower().split())
-
-
 def destino_alcancado(page, destino):
     if not destino:
         return False
@@ -136,6 +132,8 @@ def clicar_link_exato(page, destino, unidade):
         return False
     alvo = urlparse(destino)
     alvo_path = alvo.path.rstrip("/")
+    if not alvo_path:
+        return False
     links = page.locator("a")
     for i in range(links.count()):
         try:
@@ -154,32 +152,51 @@ def clicar_link_exato(page, destino, unidade):
     return False
 
 
+def destino_configurado_valido(destino, unidade):
+    if not destino:
+        print(f"[{unidade}] ERRO: URL de destino não configurada.")
+        return False
+    parsed = urlparse(destino)
+    if parsed.path.rstrip("/") in ("", "/"):
+        print(f"[{unidade}] ERRO: CGD_{unidade.upper()}_URL aponta para a raiz do CGD ({destino}).")
+        print(f"[{unidade}] Configure a URL REAL da página de frequência desta unidade antes de executar a coleta.")
+        return False
+    return True
+
+
 def navegar_para_destino(page, destino, unidade):
+    if not destino_configurado_valido(destino, unidade):
+        return False
     print(f"[{unidade}] Procurando rota pela interface do CGD.")
     if clicar_link_exato(page, destino, unidade):
         print(f"[{unidade}] Destino alcançado por clique.")
         return True
-
-    # O menu /alunos pode existir para o usuário mas negar permissão. Não insistimos nele.
-    # Depois do login confirmado, a URL configurada de frequência é uma navegação normal da sessão autenticada.
-    if destino:
-        print(f"[{unidade}] Rota exata não está exposta no menu atual; abrindo a URL configurada dentro da sessão autenticada.")
+    print(f"[{unidade}] Rota exata não está exposta no menu atual; abrindo a URL configurada dentro da sessão autenticada.")
+    try:
+        page.goto(destino, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+        if pagina_bloqueada(page):
+            print(f"[{unidade}] O destino retornou bloqueio Cloudflare.")
+            salvar_diagnostico(page, unidade, "destino_bloqueado")
+            return False
         try:
-            page.goto(destino, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
-            if pagina_bloqueada(page):
-                print(f"[{unidade}] O destino retornou bloqueio Cloudflare.")
-                salvar_diagnostico(page, unidade, "destino_bloqueado")
-                return False
-            if "Acesso negado" in page.locator("body").inner_text(timeout=5000):
-                print(f"[{unidade}] O CGD recusou a permissão para o destino configurado.")
-                salvar_diagnostico(page, unidade, "destino_acesso_negado")
-                return False
-            print(f"[{unidade}] Destino alcançado: {page.url}")
-            return True
-        except Exception as erro:
-            print(f"[{unidade}] Erro navegando ao destino autenticado: {erro}")
-    return False
+            corpo = page.locator("body").inner_text(timeout=5000)
+        except Exception:
+            corpo = ""
+        if "Acesso negado" in corpo:
+            print(f"[{unidade}] O CGD recusou a permissão para o destino configurado.")
+            salvar_diagnostico(page, unidade, "destino_acesso_negado")
+            return False
+        if not destino_alcancado(page, destino):
+            print(f"[{unidade}] O CGD redirecionou para {page.url}; o destino de frequência não foi alcançado.")
+            salvar_diagnostico(page, unidade, "destino_redirecionado")
+            return False
+        print(f"[{unidade}] Destino alcançado: {page.url}")
+        return True
+    except Exception as erro:
+        print(f"[{unidade}] Erro navegando ao destino autenticado: {erro}")
+        salvar_diagnostico(page, unidade, "erro_destino")
+        return False
 
 
 def extrair_alunos_da_tabela(page, unidade):
@@ -214,8 +231,6 @@ def extrair_alunos_da_tabela(page, unidade):
                     continue
                 data_inicio_str = cols[4] if len(cols) > 4 else ""
                 criticidade, dias_ativos = calcular_criticidade_e_dias(data_inicio_str)
-                criticidade_db = criticidade.lower()
-                tratativa = {"critico":"aulao","moderado":"atividade_pratica","atencao":"acompanhamento"}.get(criticidade_db, "normal")
                 try:
                     data_inicio_db = datetime.strptime(data_inicio_str, "%d/%m/%Y").strftime("%Y-%m-%d") if data_inicio_str else datetime.now().strftime("%Y-%m-%d")
                 except Exception:
@@ -225,7 +240,8 @@ def extrair_alunos_da_tabela(page, unidade):
                     "email": None, "telefone": None, "curso": curso, "turma_nome": "", "professor_nome": "",
                     "data_inicio": data_inicio_db, "meses_contrato_total": 12, "ultima_aula": None, "ultimo_acesso": None,
                     "faltas_totais": 0, "faltas_mes_atual": 0, "mes_referencia_faltas": datetime.now().strftime("%m/%Y"),
-                    "dias_em_curso": dias_ativos, "criticidade": criticidade_db, "tratativa_sugerida": tratativa,
+                    "dias_em_curso": dias_ativos, "criticidade": criticidade.lower(),
+                    "tratativa_sugerida": {"critico":"aulao","moderado":"atividade_pratica","atencao":"acompanhamento"}.get(criticidade.lower(), "normal"),
                     "status_tratativa": "pendente", "status_matricula": "ativo", "bloqueado_automaticamente": False,
                     "motivo_bloqueio": None, "total_disciplinas_grade": 0, "disciplinas_concluidas": 0,
                     "unidade": "matriz" if unidade.lower() == "matriz" else "filial"
@@ -260,7 +276,6 @@ def fazer_login_e_extrair(page, usuario, senha, destino, unidade):
         salvar_diagnostico(page, unidade, "apos_acessar_cgd")
         if not aguardar_acesso_legitimo(page, unidade):
             return []
-
         login_input, senha_input = verificar_elementos_login(page)
         if login_input and senha_input:
             print(f"[{unidade}] Campos de login encontrados; usando as credenciais configuradas.")
@@ -281,8 +296,7 @@ def fazer_login_e_extrair(page, usuario, senha, destino, unidade):
             imprimir_estado_pagina(page, unidade, "apos_login")
             salvar_diagnostico(page, unidade, "apos_login")
         else:
-            print(f"[{unidade}] Nenhum formulário visível: mantendo a sessão já autenticada.")
-
+            print(f"[{unidade}] Nenhum formulário visível: mantendo a sessão persistente exclusiva desta unidade.")
         if not navegar_para_destino(page, destino, unidade):
             return []
         page.wait_for_timeout(3000)
@@ -335,33 +349,42 @@ def main():
     print("INÍCIO DO SCRAPER CGD")
     for nome, valor in [("CGD_LOGIN_URL", CGD_URL),("CGD_USER_MATRIZ",LOGIN_MATRIZ),("CGD_PASS_MATRIZ",SENHA_MATRIZ),("CGD_MATRIZ_URL",URL_MATRIZ),("CGD_USER_FILIAL",LOGIN_FILIAL),("CGD_PASS_FILIAL",SENHA_FILIAL),("CGD_FILIAL_URL",URL_FILIAL)]:
         print(f"{nome}: {'OK' if valor else 'AUSENTE'}")
-
     todos = []
     with sync_playwright() as p:
-        print("Iniciando Microsoft Edge instalado com perfil persistente dedicado...")
-        context = p.chromium.launch_persistent_context(user_data_dir=str(EDGE_PROFILE_DIR), channel="msedge", headless=False, viewport={"width":1440,"height":1000})
-        try:
-            # Uma página independente para CADA unidade. Isso impede que a sessão/permissão da Matriz seja reutilizada na Filial.
-            for unidade, usuario, senha, destino in [("Matriz",LOGIN_MATRIZ,SENHA_MATRIZ,URL_MATRIZ),("Filial",LOGIN_FILIAL,SENHA_FILIAL,URL_FILIAL)]:
-                if not usuario or not senha:
-                    print(f"[{unidade}] credenciais ausentes; ignorada")
-                    continue
-                page = context.new_page()
+        for unidade, usuario, senha, destino, profile_name in [
+            ("Matriz", LOGIN_MATRIZ, SENHA_MATRIZ, URL_MATRIZ, "matriz"),
+            ("Filial", LOGIN_FILIAL, SENHA_FILIAL, URL_FILIAL, "filial")
+        ]:
+            if not usuario or not senha:
+                print(f"[{unidade}] credenciais ausentes; ignorada")
+                continue
+            profile_dir = EDGE_PROFILE_BASE / profile_name
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            print("=" * 80)
+            print(f"ABRINDO SESSÃO EDGE EXCLUSIVA: {unidade}")
+            print(f"Perfil persistente: {profile_dir}")
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                channel="msedge",
+                headless=False,
+                viewport={"width": 1440, "height": 1000}
+            )
+            page = context.new_page()
+            try:
+                todos.extend(fazer_login_e_extrair(page, usuario, senha, destino, unidade))
+            finally:
                 try:
-                    todos.extend(fazer_login_e_extrair(page, usuario, senha, destino, unidade))
-                finally:
-                    try:
-                        page.close()
-                    except Exception:
-                        pass
-            JSON_PATH.write_text(json.dumps(todos, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"TOTAL GERAL DE ALUNOS CAPTURADOS: {len(todos)}")
-            if not todos:
-                print("Falha: scraper terminou sem alunos. A execução NÃO será considerada sucesso.")
-                raise SystemExit(2)
-            atualizar_supabase(todos)
-        finally:
-            context.close()
+                    page.close()
+                except Exception:
+                    pass
+                context.close()
+                print(f"[{unidade}] Sessão Edge encerrada; perfil preservado para a próxima execução.")
+    JSON_PATH.write_text(json.dumps(todos, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"TOTAL GERAL DE ALUNOS CAPTURADOS: {len(todos)}")
+    if not todos:
+        print("Falha: scraper terminou sem alunos. A execução NÃO será considerada sucesso.")
+        raise SystemExit(2)
+    atualizar_supabase(todos)
 
 
 if __name__ == "__main__":
