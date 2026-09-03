@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
+  push:
+    paths:
+      - 'scraper.py'
+      - 'scraper_runner.py'
+      - '.github/workflows/scraping_cgd.yml'
 
 permissions:
   contents: write
@@ -23,6 +28,11 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependências
+        uses: actions/checkout@v4
+        with:
+          repository: ''
+
+      - name: Instalar dependências Python e Playwright
         shell: powershell
         run: |
           python -m pip install --upgrade pip
@@ -57,7 +67,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - paginação paralela + contratos azuis
+      - name: Executar scraper CGD - descoberta otimizada + detalhes paralelos
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -73,9 +83,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
-          CGD_PAGE_WAIT_MS: '180'
-          CGD_LIST_WAIT_MS: '100'
-          CGD_LIST_CONCURRENCY: '4'
+          CGD_PAGE_WAIT_MS: '150'
+          CGD_DETAIL_WORKERS: '4'
         run: python scraper_runner.py
 
       - name: Validar captura real de alunos
