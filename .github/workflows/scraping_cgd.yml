@@ -27,11 +27,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Instalar dependências
-        uses: actions/checkout@v4
-        with:
-          repository: ''
-
       - name: Instalar dependências Python e Playwright
         shell: powershell
         run: |
