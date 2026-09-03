@@ -11,7 +11,7 @@ permissions:
 jobs:
   executar-scraping:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 240
+    timeout-minutes: 360
 
     steps:
       - name: Baixar código do repositório
