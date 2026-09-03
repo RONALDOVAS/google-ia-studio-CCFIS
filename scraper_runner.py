@@ -1,14 +1,8 @@
 """Executor otimizado do scraper CGD.
 
-Fluxo deliberadamente curto:
-1. login da unidade;
-2. uma unica varredura da listagem de alunos;
-3. descarta vermelho/inativo na propria linha e guarda somente azul/ativo;
-4. nao abre novamente o contrato apenas para validar status;
-5. coleta detalhes uma unica vez por contrato ativo;
-6. so depois consulta reposicoes globais uma vez.
-
-Matriz e Filial sao processadas separadamente.
+A listagem e percorrida uma unica vez por unidade. A cor da linha e lida em
+lote no DOM: vermelho/inativo e descartado; azul/ativo e reservado. Depois da
+listagem, cada contrato ativo e aberto somente uma vez para os detalhes.
 """
 import os
 import re
@@ -20,16 +14,14 @@ import scraper
 scraper.MAX_PAGES = int(os.getenv("CGD_MAX_LINK_PAGES", "5000"))
 scraper.MAX_CONTRACTS = int(os.getenv("CGD_MAX_CONTRACTS", "10000"))
 scraper.dump = lambda page, unidade, nome: None
-
-FAST_WAIT = int(os.getenv("CGD_PAGE_WAIT_MS", "250"))
-LIST_WAIT = int(os.getenv("CGD_LIST_WAIT_MS", "150"))
+FAST_WAIT = int(os.getenv("CGD_PAGE_WAIT_MS", "180"))
+LIST_WAIT = int(os.getenv("CGD_LIST_WAIT_MS", "100"))
 _CURRENT_UNIT = None
 _CURRENT_CFG = None
-_ACTIVE_FROM_LISTING = set()
 
 
 # ---------------------------------------------------------------------------
-# Remove --no-sandbox, inclusive de argumentos padrao do Playwright.
+# Remove --no-sandbox dos argumentos fornecidos e dos argumentos padrao.
 # ---------------------------------------------------------------------------
 class _BrowserTypeProxy:
     def __init__(self, browser_type):
@@ -41,15 +33,13 @@ class _BrowserTypeProxy:
             return attr
 
         def wrapped(*args, **kwargs):
-            args_list = list(kwargs.get("args") or [])
-            args_list = [a for a in args_list if str(a).strip().lower() != "--no-sandbox"]
+            args_list = [a for a in list(kwargs.get("args") or []) if str(a).strip().lower() != "--no-sandbox"]
             kwargs["args"] = args_list
             ignored = list(kwargs.get("ignore_default_args") or [])
             if "--no-sandbox" not in ignored:
                 ignored.append("--no-sandbox")
             kwargs["ignore_default_args"] = ignored
             return attr(*args, **kwargs)
-
         return wrapped
 
 
@@ -76,17 +66,11 @@ class _SyncPlaywrightProxy:
 
 
 _original_sync_playwright = scraper.sync_playwright
-
-
-def sync_playwright_without_sandbox():
-    return _SyncPlaywrightProxy(_original_sync_playwright())
-
-
-scraper.sync_playwright = sync_playwright_without_sandbox
+scraper.sync_playwright = lambda: _SyncPlaywrightProxy(_original_sync_playwright())
 
 
 # ---------------------------------------------------------------------------
-# Navegacao curta + recuperacao de sessao.
+# Navegacao curta e recuperacao da sessao.
 # ---------------------------------------------------------------------------
 def _is_login_url(url):
     return "/login" in urlparse(str(url)).path.lower()
@@ -118,9 +102,9 @@ def open_fast(page, url, unidade, nome, wait=1300):
             if ok and not _is_login_url(page.url):
                 return True
         except Exception as exc:
-            print(f"[{unidade}] navegacao tentativa {tentativa}/2: {exc}")
+            print(f"[{unidade}] navegacao {tentativa}/2: {exc}")
         if tentativa == 1:
-            time.sleep(1)
+            time.sleep(0.7)
     return False
 
 
@@ -128,106 +112,88 @@ scraper.open_page = open_fast
 
 
 # ---------------------------------------------------------------------------
-# Cor da linha/link: vermelho = ignorar; azul = ativo.
+# Leitura de contratos em lote: uma chamada JS por pagina, nao dezenas.
 # ---------------------------------------------------------------------------
-def _rgb(value):
-    m = re.search(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", str(value or "").lower())
-    return tuple(map(int, m.groups())) if m else None
+def _classify_color(item):
+    text = " ".join(str(x or "").lower() for x in (
+        item.get("class"), item.get("style"), item.get("title"), item.get("aria"),
+        item.get("rowClass"), item.get("rowStyle"), item.get("rowColor")
+    ))
+    if any(x in text for x in (
+        "text-danger", "bg-danger", "danger", "vermelho", "red",
+        "inativo", "inactive", "cancelado", "encerrado"
+    )):
+        return "red"
+    if any(x in text for x in (
+        "text-primary", "bg-primary", "text-info", "bg-info", "azul", "blue",
+        "ativo", "active", "vigente"
+    )):
+        return "blue"
+    for key in ("color", "backgroundColor", "borderColor", "rowColor"):
+        value = str(item.get(key) or "")
+        m = re.search(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", value.lower())
+        if not m:
+            continue
+        r, g, b = map(int, m.groups())
+        if r >= 150 and r >= g * 1.45 and r >= b * 1.45 and g <= 150 and b <= 150:
+            return "red"
+        if b >= 120 and b >= r * 1.20 and b >= g * 1.05:
+            return "blue"
+    return "unknown"
 
 
-def _element_colors(e):
-    vals = []
+def collect_contracts_batch(page, found):
+    global _CURRENT_UNIT
     try:
-        cur = e
-        for _ in range(4):
-            if not cur:
-                break
-            vals += [
-                (cur.get_attribute("class") or "").lower(),
-                (cur.get_attribute("style") or "").lower(),
-                (cur.get_attribute("title") or "").lower(),
-                (cur.get_attribute("aria-label") or "").lower(),
-            ]
-            try:
-                vals += list(cur.evaluate("""e => { const s=getComputedStyle(e); return [s.color,s.backgroundColor,s.borderColor]; }""" ) or [])
-            except Exception:
-                pass
-            try:
-                cur = cur.locator("..")
-            except Exception:
-                break
-    except Exception:
-        pass
-    return vals
-
-
-def _is_red(e):
-    vals = _element_colors(e)
-    text = " ".join(str(v).lower() for v in vals)
-    if any(x in text for x in ("text-danger", "bg-danger", "danger", "red", "vermelho", "inativo", "inactive", "cancelado", "encerrado")):
-        return True
-    for v in vals:
-        rgb = _rgb(v)
-        if rgb:
-            r, g, b = rgb
-            if r >= 150 and r >= g * 1.45 and r >= b * 1.45 and g <= 150 and b <= 150:
-                return True
-    return False
-
-
-def _is_blue(e):
-    vals = _element_colors(e)
-    text = " ".join(str(v).lower() for v in vals)
-    if any(x in text for x in ("text-primary", "bg-primary", "text-info", "bg-info", "blue", "azul", "active", "ativo", "vigente")):
-        return True
-    for v in vals:
-        rgb = _rgb(v)
-        if rgb:
-            r, g, b = rgb
-            if b >= 120 and b >= r * 1.20 and b >= g * 1.05:
-                return True
-    return False
-
-
-def collect_contracts_once(page, found):
-    global _ACTIVE_FROM_LISTING
-    try:
-        loc = page.locator('a[href*="/contratos/"]')
-        for i in range(min(loc.count(), 10000)):
-            try:
-                e = loc.nth(i)
-                h = scraper.abs_url(page, e.get_attribute("href"))
-                if not scraper.is_contract(h):
-                    continue
-                cid = scraper.contract_id(h)
-                if not cid:
-                    continue
-                if _is_red(e):
-                    print(f"[{_CURRENT_UNIT}] CONTRATO {cid}: VERMELHO -> IGNORADO")
-                    continue
-                # O CGD usa azul para contrato ativo. Quando a cor nao puder ser
-                # lida, mantemos o contrato para a segunda barreira apenas se o
-                # proprio registro nao indicar inatividade.
-                if _is_blue(e):
-                    found[cid] = scraper.contract_url(cid)
-                    _ACTIVE_FROM_LISTING.add(cid)
-                    continue
-                # Nao classificar silenciosamente como ativo se a linha for neutra.
-                # Registros neutros serao tentados somente se a listagem nao expuser
-                # a cor; isso evita perder alunos por diferenca de CSS.
-                found[cid] = scraper.contract_url(cid)
-                print(f"[{_CURRENT_UNIT}] CONTRATO {cid}: COR NAO IDENTIFICADA -> RESERVADO")
-            except Exception:
-                continue
+        items = page.locator('a[href*="/contratos/"]').evaluate_all("""
+            els => els.map(a => {
+                const tr = a.closest('tr');
+                const nodes = [a, tr, tr && tr.parentElement].filter(Boolean);
+                const pick = (n, p) => nodes.map(x => p === 'style' ? x.getAttribute('style') : x.getAttribute(p)).filter(Boolean).join(' ');
+                const styles = nodes.map(x => { const s=getComputedStyle(x); return [s.color,s.backgroundColor,s.borderColor].join(' '); }).join(' ');
+                return {
+                    href: a.href,
+                    class: pick(a,'class'), style: pick(a,'style'), title: pick(a,'title'), aria: pick(a,'aria-label'),
+                    rowClass: tr ? tr.getAttribute('class') : '', rowStyle: tr ? tr.getAttribute('style') : '',
+                    rowColor: styles, color: getComputedStyle(a).color,
+                    backgroundColor: getComputedStyle(a).backgroundColor,
+                    borderColor: getComputedStyle(a).borderColor
+                };
+            })
+        """)
     except Exception as exc:
-        print(f"[{_CURRENT_UNIT}] falha ao ler cores da listagem: {exc}")
+        print(f"[{_CURRENT_UNIT}] leitura DOM em lote falhou: {exc}")
+        return
+
+    for item in items or []:
+        try:
+            href = scraper.abs_url(page, item.get("href"))
+            if not scraper.is_contract(href):
+                continue
+            cid = scraper.contract_id(href)
+            if not cid or cid in found:
+                continue
+            color = _classify_color(item)
+            if color == "red":
+                print(f"[{_CURRENT_UNIT}] CONTRATO {cid}: VERMELHO -> IGNORADO")
+                continue
+            if color == "blue":
+                found[cid] = scraper.contract_url(cid)
+                continue
+            # A listagem real normalmente usa azul/vermelho. Se o CSS estiver
+            # neutro por algum motivo, nao abrimos o contrato: ele nao entra na
+            # coleta automatica. Isso evita gastar tempo com registros duvidosos.
+            print(f"[{_CURRENT_UNIT}] CONTRATO {cid}: COR NAO IDENTIFICADA -> IGNORADO")
+        except Exception:
+            continue
 
 
-scraper.collect_contracts = collect_contracts_once
+scraper.collect_contracts = collect_contracts_batch
 
 
 # ---------------------------------------------------------------------------
-# Pagina seguinte: sem varrer fontes diferentes. Uma fonte por unidade.
+# Paginacao sem repetir tres fontes. Fallback somente se a primeira nao tiver
+# nenhum contrato, nunca para revarrer uma lista ja populada.
 # ---------------------------------------------------------------------------
 NEXT_SELECTORS = [
     'a[rel="next"]', 'button[rel="next"]',
@@ -255,7 +221,7 @@ def next_page_once(page):
                     continue
                 if "disabled" in (e.get_attribute("class") or "").lower():
                     continue
-                e.click(timeout=5000)
+                e.click(timeout=4000)
                 page.wait_for_timeout(LIST_WAIT)
                 if _is_login_url(page.url):
                     if not _relogin(page, _CURRENT_UNIT or "?"):
@@ -267,14 +233,12 @@ def next_page_once(page):
                         return False
                     continue
                 current = scraper.body(page)[:10000]
-                if "Página não encontrada" in current or "Pagina nao encontrada" in current or "404" in current and "não encontrada" in current.lower():
-                    # O CGD informou que nao existe a pagina seguinte. Nao tratar
-                    # como erro fatal: preserva tudo o que ja foi descoberto.
+                if "página não encontrada" in current.lower() or "pagina nao encontrada" in current.lower():
                     try:
                         page.goto(before_url, wait_until="domcontentloaded", timeout=30000)
-                        page.wait_for_timeout(LIST_WAIT)
                     except Exception:
                         pass
+                    print(f"[{_CURRENT_UNIT}] CGD devolveu 404 na pagina seguinte; preservando contratos ja lidos")
                     return False
                 if page.url != before_url or current != before:
                     return True
@@ -286,13 +250,8 @@ def next_page_once(page):
 scraper.next_page = next_page_once
 
 
-# ---------------------------------------------------------------------------
-# Descoberta: UMA fonte. Fallback somente se a primeira nao entregar contratos.
-# ---------------------------------------------------------------------------
 def discover_once(page, unidade, destino):
     found = {}
-    # Depois do login, abre diretamente /alunos: evita rota configurada + inicio
-    # + tres relatorios com a mesma paginacao.
     candidates = []
     if destino and scraper.same_host(destino):
         p = urlparse(destino).path.rstrip("/").lower()
@@ -305,32 +264,32 @@ def discover_once(page, unidade, destino):
     ]
     for src in dict.fromkeys(candidates):
         found.clear()
-        _ACTIVE_FROM_LISTING.clear()
         if not open_fast(page, src, unidade, "lista_alunos", FAST_WAIT):
             continue
         seen = set()
         for pn in range(1, scraper.MAX_PAGES + 1):
-            collect_contracts_once(page, found)
+            scraper.collect_contracts(page, found)
             sig = scraper.body(page)[:12000]
             if sig in seen:
-                print(f"[{unidade}] pagina repetida -> fim da fonte")
+                print(f"[{unidade}] pagina repetida -> fim")
                 break
             seen.add(sig)
-            print(f"[{unidade}] pagina_lista={pn} contratos_ativos_reservados={len(found)}")
+            if pn == 1 or pn % 25 == 0:
+                print(f"[{unidade}] pagina_lista={pn} contratos_azuis={len(found)}")
             if len(found) >= scraper.MAX_CONTRACTS:
                 break
-            if not next_page_once(page):
+            if not scraper.next_page(page):
                 break
         if found:
             print(f"[{unidade}] FONTE UTILIZADA: {src}")
-            print(f"[{unidade}] CONTRATOS RESERVADOS PARA COLETA: {len(found)}")
+            print(f"[{unidade}] CONTRATOS AZUIS/ATIVOS RESERVADOS: {len(found)}")
             return list(found.values())
-    print(f"[{unidade}] NENHUM CONTRATO ENCONTRADO")
     return []
 
 
 # ---------------------------------------------------------------------------
-# Coleta por unidade sem validacao duplicada do contrato.
+# Uma coleta por contrato ativo. Nao existe mais validacao de status +
+# contract_bundle em seguida: a cor da listagem ja fez o filtro.
 # ---------------------------------------------------------------------------
 def run_unit_fast(unidade, cfg, pw):
     global _CURRENT_UNIT, _CURRENT_CFG
@@ -339,9 +298,7 @@ def run_unit_fast(unidade, cfg, pw):
     profile = scraper.EDGE_PROFILE_BASE / unidade
     profile.mkdir(parents=True, exist_ok=True)
     b = pw.chromium.launch_persistent_context(
-        user_data_dir=str(profile),
-        channel="msedge",
-        headless=False,
+        user_data_dir=str(profile), channel="msedge", headless=False,
         viewport={"width": 1440, "height": 1000},
         args=["--disable-blink-features=AutomationControlled"],
         ignore_default_args=["--no-sandbox"],
@@ -350,8 +307,7 @@ def run_unit_fast(unidade, cfg, pw):
     try:
         scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
         contracts = discover_once(page, unidade, cfg.get("destino"))
-        print(f"[{unidade}] CONTRATOS DESCOBERTOS: {len(contracts)}")
-        # Reposicoes globais somente uma vez, depois da descoberta.
+        print(f"[{unidade}] CONTRATOS ATIVOS PARA DETALHAMENTO: {len(contracts)}")
         reps = scraper.global_reps(page, unidade)
         out = []
         for i, cu in enumerate(contracts, 1):
@@ -372,10 +328,9 @@ def run_unit_fast(unidade, cfg, pw):
             pass
 
 
-
 def main_fast():
     print("=" * 80)
-    print("SCRAPER CGD - PAGINACAO UNICA / CONTRATOS ATIVOS / COLETA OTIMIZADA")
+    print("SCRAPER CGD - UMA PAGINACAO / SOMENTE AZUIS / SEM DUPLICACAO")
     print("=" * 80)
     all_data = []
     with scraper.sync_playwright() as pw:
