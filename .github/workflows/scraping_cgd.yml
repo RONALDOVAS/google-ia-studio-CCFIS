@@ -11,7 +11,7 @@ permissions:
 jobs:
   executar-scraping:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     steps:
       - name: Baixar código do repositório
@@ -57,7 +57,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD
+      - name: Executar scraper CGD - paginação longa + somente contratos ativos
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -71,7 +71,9 @@ jobs:
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scraper.py
+          CGD_MAX_LINK_PAGES: '5000'
+          CGD_MAX_CONTRACTS: '10000'
+        run: python scraper_runner.py
 
       - name: Validar captura real de alunos
         shell: powershell
