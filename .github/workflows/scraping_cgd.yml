@@ -73,6 +73,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
+          CGD_PAGE_WAIT_MS: '500'
+          CGD_LIST_WAIT_MS: '300'
         run: python scraper_runner.py
 
       - name: Validar captura real de alunos
