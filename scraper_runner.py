@@ -1,11 +1,12 @@
 """Camada de execucao robusta do scraper CGD.
 
-Objetivos desta camada:
-- suportar paginacao longa sem parar artificialmente em 200/300 paginas;
+Objetivos:
+- paginacao longa sem parar artificialmente em 200/300 paginas;
 - recuperar automaticamente a sessao quando o CGD redirecionar para /login;
-- remover o argumento --no-sandbox do Edge/Playwright;
-- reduzir esperas desnecessarias para acelerar a coleta;
+- remover --no-sandbox;
+- reduzir esperas desnecessarias;
 - nao gerar HTML/TXT/PNG durante a descoberta;
+- IGNORAR JA NA LISTAGEM os contratos visualmente vermelhos;
 - validar contrato ativo antes da coleta detalhada;
 - manter Matriz e Filial separadas.
 """
@@ -15,18 +16,12 @@ import time
 
 import scraper
 
-# Limites seguros para a base real. Podem ser sobrescritos pelo workflow.
 scraper.MAX_PAGES = int(os.getenv("CGD_MAX_LINK_PAGES", "5000"))
 scraper.MAX_CONTRACTS = int(os.getenv("CGD_MAX_CONTRACTS", "10000"))
-
-# A descoberta nao deve criar milhares de arquivos de diagnostico.
 scraper.dump = lambda page, unidade, nome: None
 
-# Espera curta: o goto ja usa domcontentloaded. O valor pode ser ajustado no workflow.
 FAST_WAIT = int(os.getenv("CGD_PAGE_WAIT_MS", "500"))
-LIST_WAIT = int(os.getenv("CGD_LIST_WAIT_MS", "350"))
-
-# Unidade/credenciais da execucao atual. Usado para renovar sessao automaticamente.
+LIST_WAIT = int(os.getenv("CGD_LIST_WAIT_MS", "300"))
 _CURRENT_UNIT = None
 _CURRENT_CFG = None
 
@@ -90,15 +85,14 @@ scraper.sync_playwright = sync_playwright_without_sandbox
 # ---------------------------------------------------------------------------
 # 2) Sessao: detectar /login e refazer login automaticamente
 # ---------------------------------------------------------------------------
+from urllib.parse import urlparse
+
+
 def _is_login_url(url):
     try:
-        return "/login" in (urlparse(url).path.lower())
+        return "/login" in urlparse(url).path.lower()
     except Exception:
         return "/login" in str(url).lower()
-
-
-# Import local para nao alterar o scraper principal.
-from urllib.parse import urlparse
 
 
 def _relogin(page, unidade):
@@ -121,18 +115,14 @@ _original_open_page = scraper.open_page
 
 
 def robust_open_page(page, url, unidade, nome, wait=1300):
-    # No discovery/detalhamento, usar espera curta; evita minutos acumulados.
     target_wait = FAST_WAIT if wait > FAST_WAIT else wait
     for tentativa in range(1, 4):
         try:
             ok = _original_open_page(page, url, unidade, nome, target_wait)
             if ok and not _is_login_url(page.url):
                 return True
-
-            # O CGD pode redirecionar para /login/contratos/<id> quando a sessao cai.
             if _is_login_url(page.url):
                 if _relogin(page, unidade):
-                    # Reabre exatamente a rota que estava sendo processada.
                     ok2 = _original_open_page(page, url, unidade, nome, target_wait)
                     if ok2 and not _is_login_url(page.url):
                         return True
@@ -151,29 +141,20 @@ scraper.open_page = robust_open_page
 # 3) Paginacao rapida e resistente
 # ---------------------------------------------------------------------------
 NEXT_SELECTORS = [
-    'a[rel="next"]',
-    'button[rel="next"]',
-    'a[aria-label*="next" i]',
-    'button[aria-label*="next" i]',
-    'a[aria-label*="proxima" i]',
-    'button[aria-label*="proxima" i]',
-    'a[aria-label*="próxima" i]',
-    'button[aria-label*="próxima" i]',
-    'a:has-text("Próxima")',
-    'button:has-text("Próxima")',
-    'a:has-text("Proxima")',
-    'button:has-text("Proxima")',
-    'a:has-text("Next")',
-    'button:has-text("Next")',
-    'a:has-text("›")',
-    'button:has-text("›")',
+    'a[rel="next"]', 'button[rel="next"]',
+    'a[aria-label*="next" i]', 'button[aria-label*="next" i]',
+    'a[aria-label*="proxima" i]', 'button[aria-label*="proxima" i]',
+    'a[aria-label*="próxima" i]', 'button[aria-label*="próxima" i]',
+    'a:has-text("Próxima")', 'button:has-text("Próxima")',
+    'a:has-text("Proxima")', 'button:has-text("Proxima")',
+    'a:has-text("Next")', 'button:has-text("Next")',
+    'a:has-text("›")', 'button:has-text("›")',
 ]
 
 
 def fast_next_page(page):
     before_url = page.url
     before = scraper.body(page)[:12000]
-
     for sel in NEXT_SELECTORS:
         try:
             loc = page.locator(sel)
@@ -185,22 +166,17 @@ def fast_next_page(page):
                     continue
                 if "disabled" in (e.get_attribute("class") or "").lower():
                     continue
-
                 e.click(timeout=8000)
-                # Aguarda apenas o suficiente para a pagina mudar.
                 for pause in (LIST_WAIT, 500, 900):
                     page.wait_for_timeout(pause)
                     if _is_login_url(page.url):
                         if not _relogin(page, _CURRENT_UNIT or "?"):
                             return False
-                        # Recupera a pagina que estava aberta antes da perda da sessao.
                         try:
                             page.goto(before_url, wait_until="domcontentloaded", timeout=30000)
                             page.wait_for_timeout(LIST_WAIT)
                         except Exception:
                             return False
-                        # Nao clicar novamente dentro deste elemento; o loop externo
-                        # continuara tentando a proxima pagina de forma segura.
                         break
                     if page.url != before_url or scraper.body(page)[:12000] != before:
                         return True
@@ -213,16 +189,104 @@ scraper.next_page = fast_next_page
 
 
 # ---------------------------------------------------------------------------
-# 4) Filtro de contratos ativos
+# 4) Filtro antecipado: contrato visualmente vermelho = nao coletar
+# ---------------------------------------------------------------------------
+def _rgb_is_red(value):
+    """Aceita vermelho forte em rgb/rgba; ignora tons neutros."""
+    if not value:
+        return False
+    m = re.search(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", value.lower())
+    if not m:
+        return False
+    r, g, b = map(int, m.groups())
+    return r >= 150 and r >= g * 1.45 and r >= b * 1.45 and g <= 140 and b <= 140
+
+
+def _element_is_red(e):
+    """Verifica o link e ate dois ancestrais, incluindo a linha da tabela."""
+    try:
+        current = e
+        for _ in range(4):
+            if not current:
+                break
+            cls = (current.get_attribute("class") or "").lower()
+            style = (current.get_attribute("style") or "").lower()
+            title = (current.get_attribute("title") or "").lower()
+            aria = (current.get_attribute("aria-label") or "").lower()
+            marker = " ".join((cls, style, title, aria))
+            # Classes usuais de Bootstrap/CSS para registros inativos.
+            if any(x in marker for x in (
+                "text-danger", "bg-danger", "danger", "red", "vermelho",
+                "inactive", "inativo", "cancelado", "encerrado"
+            )):
+                return True
+
+            # Cor efetivamente renderizada no navegador.
+            try:
+                colors = current.evaluate("""e => {
+                    const s = getComputedStyle(e);
+                    return [s.color, s.backgroundColor, s.borderColor];
+                }""")
+                if any(_rgb_is_red(c) for c in (colors or [])):
+                    return True
+            except Exception:
+                pass
+
+            try:
+                current = current.locator("..")
+            except Exception:
+                break
+    except Exception:
+        pass
+    return False
+
+
+def _add_contract(found, cid, url, unidade, origem):
+    if cid and cid not in found:
+        found[cid] = url
+        print(f"[{unidade}] CONTRATO DESCOBERTO: {cid} | origem={origem}")
+
+
+def collect_contracts_fast(page, found):
+    """Descobre contratos da pagina sem abrir cada contrato.
+
+    Contratos vermelhos sao descartados aqui, antes da etapa cara de cursos,
+    horarios, frequencias e aluno.
+    """
+    try:
+        loc = page.locator('a[href*="/contratos/"]')
+        for i in range(min(loc.count(), 10000)):
+            try:
+                e = loc.nth(i)
+                h = scraper.abs_url(page, e.get_attribute("href"))
+                if not scraper.is_contract(h):
+                    continue
+                cid = scraper.contract_id(h)
+                if not cid:
+                    continue
+                if _element_is_red(e):
+                    print(f"[{_CURRENT_UNIT}] CONTRATO {cid}: VERMELHO/INATIVO NA LISTAGEM -> IGNORADO")
+                    continue
+                _add_contract(found, cid, scraper.contract_url(cid), _CURRENT_UNIT or "?", "listagem")
+            except Exception:
+                continue
+    except Exception:
+        # Fallback para o coletor original se a pagina nao permitir inspecao DOM.
+        scraper.collect_contracts(page, found)
+
+
+scraper.collect_contracts = collect_contracts_fast
+
+
+# ---------------------------------------------------------------------------
+# 5) Filtro de status no contrato, como segunda barreira
 # ---------------------------------------------------------------------------
 INACTIVE = (
     "inativo", "inativa", "encerrado", "encerrada", "cancelado", "cancelada",
     "suspenso", "suspensa", "rescindido", "rescindida", "finalizado", "finalizada",
     "concluido", "concluida", "concluído", "concluída",
 )
-ACTIVE = (
-    "ativo", "ativa", "vigente", "em andamento", "em curso", "cursando",
-)
+ACTIVE = ("ativo", "ativa", "vigente", "em andamento", "em curso", "cursando")
 
 
 def status_values(page):
@@ -286,7 +350,6 @@ _original_contract_bundle = scraper.contract_bundle
 
 
 def active_contract_bundle(page, cid, unidade, reps):
-    # Primeira visita: somente status. So contrato ativo entra na coleta pesada.
     url = scraper.contract_url(cid)
     if not robust_open_page(page, url, unidade, f"validacao_status_{cid}", wait=FAST_WAIT):
         print(f"[{unidade}] CONTRATO {cid}: nao foi possivel validar status -> IGNORADO")
@@ -300,7 +363,7 @@ scraper.contract_bundle = active_contract_bundle
 
 
 # ---------------------------------------------------------------------------
-# 5) Estatisticas por unidade
+# 6) Estatisticas por unidade
 # ---------------------------------------------------------------------------
 _original_run_unit = scraper.run_unit
 
