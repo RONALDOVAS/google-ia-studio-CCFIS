@@ -4,817 +4,283 @@ import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
-
 from playwright.sync_api import sync_playwright
 from supabase import create_client, Client
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-CGD_URL = os.getenv("CGD_LOGIN_URL") or "https://app.cgd.com.br/"
-
-CONFIG = {
-    "matriz": {
-        "usuario": os.getenv("CGD_USER_MATRIZ"),
-        "senha": os.getenv("CGD_PASS_MATRIZ"),
-        "destino": os.getenv("CGD_MATRIZ_URL"),
-    },
-    "filial": {
-        "usuario": os.getenv("CGD_USER_FILIAL"),
-        "senha": os.getenv("CGD_PASS_FILIAL"),
-        "destino": os.getenv("CGD_FILIAL_URL"),
-    },
+SUPABASE_URL=os.getenv("SUPABASE_URL")
+SUPABASE_KEY=os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+CGD_URL=os.getenv("CGD_LOGIN_URL") or "https://app.cgd.com.br/"
+CONFIG={
+ "matriz":{"usuario":os.getenv("CGD_USER_MATRIZ"),"senha":os.getenv("CGD_PASS_MATRIZ"),"destino":os.getenv("CGD_MATRIZ_URL")},
+ "filial":{"usuario":os.getenv("CGD_USER_FILIAL"),"senha":os.getenv("CGD_PASS_FILIAL"),"destino":os.getenv("CGD_FILIAL_URL")},
 }
+JSON_PATH=Path("dados_alunos.json")
+DIAGNOSTICO_DIR=Path("diagnostico_scraping"); DIAGNOSTICO_DIR.mkdir(parents=True,exist_ok=True)
+EDGE_PROFILE_BASE=Path(os.getenv("EDGE_PROFILE_DIR") or "edge_cgd_profiles")
+MAX_CONTRACTS=int(os.getenv("CGD_MAX_CONTRACTS","5000"))
+MAX_PAGES=int(os.getenv("CGD_MAX_LINK_PAGES","300"))
 
-JSON_PATH = Path("dados_alunos.json")
-DIAGNOSTICO_DIR = Path("diagnostico_scraping")
-DIAGNOSTICO_DIR.mkdir(parents=True, exist_ok=True)
-EDGE_PROFILE_BASE = Path(os.getenv("EDGE_PROFILE_DIR") or "edge_cgd_profiles")
-MAX_CONTRACTS = int(os.getenv("CGD_MAX_CONTRACTS", "500"))
-MAX_LINK_PAGES = int(os.getenv("CGD_MAX_LINK_PAGES", "80"))
-
-
-def norm(value):
-    return " ".join(str(value or "").replace("\xa0", " ").split())
-
-
-def low(value):
-    return norm(value).lower()
-
-
+def norm(v): return " ".join(str(v or "").replace("\xa0"," ").split())
+def low(v): return norm(v).lower()
+def abs_url(page,href): return urljoin(page.url,href or "").split("#",1)[0]
 def same_host(url):
-    try:
-        return urlparse(url).netloc == urlparse(CGD_URL).netloc
-    except Exception:
-        return False
+ try:return urlparse(url).netloc==urlparse(CGD_URL).netloc
+ except:return False
 
+def dump(page,u,n):
+ try:
+  s=re.sub(r"[^a-zA-Z0-9_-]+","_",n.lower())
+  (DIAGNOSTICO_DIR/f"{u}_{s}.html").write_text(page.content(),encoding="utf-8")
+  (DIAGNOSTICO_DIR/f"{u}_{s}.txt").write_text(norm(page.locator("body").inner_text())[:120000],encoding="utf-8")
+  page.screenshot(path=str(DIAGNOSTICO_DIR/f"{u}_{s}.png"),full_page=True)
+ except: pass
 
-def absolute(page, href):
-    if not href:
-        return ""
-    return urljoin(page.url, href).split("#", 1)[0]
+def open_page(page,url,u,n,wait=1300):
+ try:
+  page.goto(url,wait_until="domcontentloaded",timeout=60000); page.wait_for_timeout(wait)
+  print(f"[{u}] {n}: {page.url}"); dump(page,u,n); return same_host(page.url)
+ except Exception as e: print(f"[{u}] ERRO abrindo {url}: {e}"); return False
 
-
-def page_links(page):
-    result = []
-    try:
-        anchors = page.locator("a")
-        for i in range(min(anchors.count(), 5000)):
-            try:
-                a = anchors.nth(i)
-                href = absolute(page, a.get_attribute("href") or "")
-                if not href or not same_host(href):
-                    continue
-                result.append((norm(a.inner_text()), href))
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return result
-
-
-def unique_urls(items):
-    seen = set()
-    out = []
-    for item in items:
-        url = item[1] if isinstance(item, tuple) else item
-        if url and url not in seen:
-            seen.add(url)
-            out.append(item)
-    return out
-
-
-def dump(page, unidade, nome):
-    try:
-        safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", nome.lower())
-        prefix = f"{unidade}_{safe}"
-        (DIAGNOSTICO_DIR / f"{prefix}.html").write_text(page.content(), encoding="utf-8")
-        (DIAGNOSTICO_DIR / f"{prefix}.txt").write_text(
-            norm(page.locator("body").inner_text())[:100000], encoding="utf-8"
-        )
-        page.screenshot(path=str(DIAGNOSTICO_DIR / f"{prefix}.png"), full_page=True)
-    except Exception:
-        pass
-
-
-def open_page(page, url, unidade, nome, wait=1600):
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(wait)
-        print(f"[{unidade}] {nome}: {page.url}")
-        dump(page, unidade, nome)
-        return same_host(page.url)
-    except Exception as exc:
-        print(f"[{unidade}] erro abrindo {url}: {exc}")
-        return False
-
-
-def login(page, usuario, senha, unidade):
-    page.goto(CGD_URL, wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(2500)
-
-    # O perfil persistente normalmente já chega autenticado. Só preenche o login
-    # quando os campos realmente aparecem.
-    users = page.locator(
-        'input[type="text"],input[type="email"],input[name*="user" i],'
-        'input[name*="login" i],input[name*="email" i]'
-    )
-    passwords = page.locator(
-        'input[type="password"],input[name*="senha" i],input[name*="password" i]'
-    )
-    u = None
-    p = None
-    for i in range(users.count()):
-        try:
-            if users.nth(i).is_visible():
-                u = users.nth(i)
-                break
-        except Exception:
-            pass
-    for i in range(passwords.count()):
-        try:
-            if passwords.nth(i).is_visible():
-                p = passwords.nth(i)
-                break
-        except Exception:
-            pass
-
-    if u and p and usuario and senha:
-        u.fill(usuario)
-        p.fill(senha)
-        buttons = page.locator(
-            'button[type="submit"],input[type="submit"],'
-            'button:has-text("Entrar"),button:has-text("Acessar"),'
-            'button:has-text("Login")'
-        )
-        btn = None
-        for i in range(buttons.count()):
-            try:
-                if buttons.nth(i).is_visible():
-                    btn = buttons.nth(i)
-                    break
-            except Exception:
-                pass
-        if not btn:
-            raise RuntimeError(f"[{unidade}] botão de login não encontrado")
-        btn.click()
-        page.wait_for_timeout(3500)
-
-    print(f"[{unidade}] apos_login: {page.url}")
-    dump(page, unidade, "apos_login")
-
-
-def is_contract(url):
-    path = urlparse(url).path.rstrip("/").lower()
-    m = re.fullmatch(r"/contratos/(\d+)", path)
-    return bool(m)
-
+def links(page):
+ out=[]
+ try:
+  a=page.locator("a")
+  for i in range(min(a.count(),10000)):
+   try:
+    e=a.nth(i); h=abs_url(page,e.get_attribute("href"))
+    if h and same_host(h): out.append((norm(e.inner_text()),h))
+   except: pass
+ except: pass
+ seen=set(); r=[]
+ for t,u in out:
+  if u not in seen: seen.add(u); r.append((t,u))
+ return r
 
 def contract_id(url):
-    path = urlparse(url).path.rstrip("/")
-    m = re.search(r"/contratos/(\d+)$", path)
-    return m.group(1) if m else None
-
-
-def is_frequency(url):
-    return bool(re.search(r"/contratos/frequencias/\d+", urlparse(url).path, re.I))
-
-
-def is_course(url):
-    return bool(re.search(r"/contratos/cursos/\d+", urlparse(url).path, re.I))
-
-
-def is_schedule(url):
-    return bool(re.search(r"/contratos/horarios/\d+", urlparse(url).path, re.I))
-
-
-def is_student(url):
-    return "/alunos/" in urlparse(url).path.lower()
-
-
-def is_replacement(text, url):
-    s = low(text + " " + url)
-    return "reposi" in s
-
-
-def classify_links(page):
-    ls = unique_urls(page_links(page))
-    contracts = [u for t, u in ls if is_contract(u)]
-    frequencies = [u for t, u in ls if is_frequency(u)]
-    courses = [u for t, u in ls if is_course(u)]
-    schedules = [u for t, u in ls if is_schedule(u)]
-    students = [u for t, u in ls if is_student(u)]
-    replacements = [(t, u) for t, u in ls if is_replacement(t, u)]
-    return {
-        "all": ls,
-        "contracts": unique_urls(contracts),
-        "frequencies": unique_urls(frequencies),
-        "courses": unique_urls(courses),
-        "schedules": unique_urls(schedules),
-        "students": unique_urls(students),
-        "replacements": unique_urls(replacements),
-    }
-
-
-def print_relevant_links(page, unidade):
-    c = classify_links(page)
-    print(
-        f"[{unidade}] links reais encontrados: "
-        f"contratos={len(c['contracts'])} frequencias={len(c['frequencies'])} "
-        f"cursos={len(c['courses'])} horarios={len(c['schedules'])} "
-        f"alunos={len(c['students'])} reposicoes={len(c['replacements'])}"
-    )
-    for text, url in c["all"]:
-        s = low(text + " " + url)
-        if any(k in s for k in (
-            "contrato", "frequência", "frequencia", "curso", "horário", "horario",
-            "aluno", "reposição", "reposicao", "individual"
-        )):
-            print(f"[{unidade}] LINK: {text!r} -> {url}")
-    return c
-
-
-def discover_contracts(page, unidade, destino):
-    """Descobre TODOS os contratos disponíveis ao perfil, não apenas o contrato de teste."""
-    found = []
-    seen = set()
-
-    # 1) A rota configurada é usada como ponto inicial quando existir.
-    if destino and same_host(destino):
-        open_page(page, destino, unidade, "rota_configurada")
-        c = classify_links(page)
-        if is_contract(page.url):
-            found.append(page.url)
-        found.extend(c["contracts"])
-        print_relevant_links(page, unidade)
-
-    # 2) A página inicial/menu é obrigatória para descobrir a lista real de contratos.
-    open_page(page, CGD_URL, unidade, "inicio")
-    c = print_relevant_links(page, unidade)
-    found.extend(c["contracts"])
-
-    # 3) Segue o link real "Contratos" do menu, se ele existir, para obter a lista.
-    menu_candidates = []
-    for text, url in c["all"]:
-        if low(text).strip() == "contratos" or low(text).startswith("contratos"):
-            menu_candidates.append(url)
-    # Se o menu não tiver texto, uma rota /contratos é aceitável apenas quando
-    # descoberta como href real da página.
-    menu_candidates.extend(
-        [u for _, u in c["all"] if urlparse(u).path.rstrip("/").lower() == "/contratos"]
-    )
-
-    for menu_url in unique_urls(menu_candidates):
-        if open_page(page, menu_url, unidade, "lista_contratos", wait=1800):
-            cc = print_relevant_links(page, unidade)
-            found.extend(cc["contracts"])
-            # Algumas listagens usam paginação; os links das páginas seguintes
-            # também são seguidos, sem inventar URLs.
-            for text, href in cc["all"]:
-                if any(k in low(text) for k in ("próxima", "proxima", "next")):
-                    if open_page(page, href, unidade, "lista_contratos_pagina", wait=1200):
-                        cp = print_relevant_links(page, unidade)
-                        found.extend(cp["contracts"])
-
-    # 4) Quando o menu entrega apenas Alunos, segue os links reais de aluno e
-    # recolhe os contratos que o CGD disponibilizar para aquele perfil.
-    queue = []
-    for text, url in page_links(page):
-        if any(k in low(text + " " + url) for k in ("aluno", "contrato", "individual")):
-            queue.append(url)
-
-    visited = set()
-    for url in queue[:MAX_LINK_PAGES]:
-        if url in visited or not same_host(url):
-            continue
-        visited.add(url)
-        if not open_page(page, url, unidade, f"descoberta_{len(visited)}", wait=1000):
-            continue
-        cc = classify_links(page)
-        found.extend(cc["contracts"])
-        if len(set(found)) >= MAX_CONTRACTS:
-            break
-
-    result = []
-    for url in found:
-        cid = contract_id(url)
-        if cid and cid not in seen:
-            seen.add(cid)
-            result.append(f"{urlparse(url).scheme}://{urlparse(url).netloc}/contratos/{cid}")
-        if len(result) >= MAX_CONTRACTS:
-            break
-
-    print(f"[{unidade}] CONTRATOS ÚNICOS DESCOBERTOS: {len(result)}")
-    for url in result:
-        print(f"[{unidade}] CONTRATO: {url}")
-    return result
-
-
-def tables(page):
-    out = []
-    try:
-        ts = page.locator("table")
-        for i in range(ts.count()):
-            t = ts.nth(i)
-            heads = [norm(x) for x in t.locator("thead th").all_text_contents()]
-            if not heads:
-                heads = [norm(x) for x in t.locator("tr:first-child th, tr:first-child td").all_text_contents()]
-            rows = []
-            body_rows = t.locator("tbody tr")
-            if body_rows.count() == 0:
-                body_rows = t.locator("tr").nth(1)
-            for j in range(body_rows.count() if hasattr(body_rows, "count") else 0):
-                try:
-                    vals = [norm(x) for x in body_rows.nth(j).locator("td").all_text_contents()]
-                    if vals:
-                        rows.append(vals)
-                except Exception:
-                    pass
-            out.append((heads, rows))
-    except Exception:
-        pass
-    return out
-
-
-def column(headers, names):
-    names = tuple(low(x) for x in names)
-    for i, h in enumerate(headers):
-        h = low(h)
-        if any(n in h for n in names):
-            return i
-    return None
-
-
-def text_body(page):
-    try:
-        return norm(page.locator("body").inner_text())
-    except Exception:
-        return ""
-
-
-def extract_student(page, fallback=None):
-    body = text_body(page)
-    patterns = [
-        r"(?:Aluno|Estudante|Nome)\s*[:\-]\s*([^\n|]{3,150})",
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, body, re.I)
-        if m:
-            value = norm(m.group(1))
-            if value and value.lower() not in ("aluno", "estudante", "nome"):
-                return value
-    return fallback
-
-
-def extract_frequency(page, frequency_url):
-    cid = contract_id(frequency_url)
-    records = []
-    faltas = 0
-    presencas = 0
-    for headers, rows in tables(page):
-        status_i = column(headers, ("status", "situação", "situacao", "presença", "presenca", "frequência", "frequencia"))
-        date_i = column(headers, ("data", "dia"))
-        student_i = column(headers, ("aluno", "nome", "estudante"))
-        for row in rows:
-            status = low(row[status_i]) if status_i is not None and status_i < len(row) else ""
-            if any(x in status for x in ("falta", "ausente", "não compareceu", "nao compareceu")):
-                faltas += 1
-            elif any(x in status for x in ("presente", "presença", "presenca", "compareceu")):
-                presencas += 1
-            records.append({
-                "data": row[date_i] if date_i is not None and date_i < len(row) else None,
-                "status": row[status_i] if status_i is not None and status_i < len(row) else None,
-                "aluno": row[student_i] if student_i is not None and student_i < len(row) else None,
-                "valores": row,
-                "cabecalhos": headers,
-            })
-    return {
-        "contrato": cid,
-        "rota": frequency_url,
-        "nome": extract_student(page),
-        "faltas": faltas,
-        "presencas": presencas,
-        "registros": records,
-        "contexto": text_body(page)[:20000],
-    }
-
-
-def extract_replacements(page, unidade):
-    result = []
-    for headers, rows in tables(page):
-        joined = low(" ".join(headers))
-        if not any(x in joined for x in ("reposição", "reposicao", "contrato", "aluno", "data")):
-            continue
-        for row in rows:
-            result.append({"cabecalhos": headers, "valores": row, "unidade": unidade})
-    return result
-
-
-def extract_discipline_rows(page, source_url):
-    result = []
-    for headers, rows in tables(page):
-        joined = low(" ".join(headers))
-        if not any(x in joined for x in (
-            "disciplina", "módulo", "modulo", "passo", "etapa", "progresso",
-            "carga horária", "carga horaria", "conclu", "status"
-        )):
-            continue
-        for row in rows:
-            item = {
-                "disciplina": None,
-                "modulo": None,
-                "passo": None,
-                "progresso": None,
-                "carga_horaria": None,
-                "data": None,
-                "status": None,
-                "cabecalhos": headers,
-                "valores": row,
-                "origem": source_url,
-            }
-            for key, names in {
-                "disciplina": ("disciplina",),
-                "modulo": ("módulo", "modulo"),
-                "passo": ("passo", "etapa"),
-                "progresso": ("progresso",),
-                "carga_horaria": ("carga horária", "carga horaria", "carga"),
-                "data": ("data", "última", "ultima"),
-                "status": ("status", "situação", "situacao", "estado"),
-            }.items():
-                idx = column(headers, names)
-                if idx is not None and idx < len(row):
-                    item[key] = row[idx]
-            result.append(item)
-    return result
-
-
-def extract_discipline_from_text(page, source_url):
-    body = text_body(page)
-    if not body:
-        return []
-    # Mantém também o texto bruto porque algumas telas do CGD renderizam
-    # módulo/passo como cards, e não como tabela.
-    items = []
-    module_matches = list(re.finditer(r"M[oó]dulo\s*(\d+)\b", body, re.I))
-    for idx, match in enumerate(module_matches):
-        start = max(0, match.start() - 120)
-        end = module_matches[idx + 1].start() if idx + 1 < len(module_matches) else min(len(body), match.end() + 800)
-        chunk = norm(body[start:end])
-        step = None
-        sm = re.search(r"(?:Passo|Etapa)\s*(\d+)\b", chunk, re.I)
-        if sm:
-            step = sm.group(1)
-        progress = None
-        pm = re.search(r"(\d{1,3})\s*%", chunk)
-        if pm:
-            progress = pm.group(1) + "%"
-        date = None
-        dm = re.search(r"\b(\d{1,2}/\d{1,2}/\d{2,4})\b", chunk)
-        if dm:
-            date = dm.group(1)
-        items.append({
-            "disciplina": None,
-            "modulo": match.group(1),
-            "passo": step,
-            "progresso": progress,
-            "carga_horaria": None,
-            "data": date,
-            "status": None,
-            "texto_contexto": chunk,
-            "cabecalhos": [],
-            "valores": [],
-            "origem": source_url,
-        })
-    return items
-
-
-def merge_disciplines(rows):
-    seen = set()
-    result = []
-    for item in rows:
-        key = json.dumps({
-            "disciplina": item.get("disciplina"),
-            "modulo": item.get("modulo"),
-            "passo": item.get("passo"),
-            "progresso": item.get("progresso"),
-            "data": item.get("data"),
-            "origem": item.get("origem"),
-        }, ensure_ascii=False, sort_keys=True)
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
-
-
-def status_text(item):
-    return low(" ".join(str(item.get(k) or "") for k in (
-        "status", "progresso", "texto_contexto", "valores"
-    )))
-
-
-def classify_disciplines(rows):
-    completed = []
-    current = []
-    future = []
-    for item in rows:
-        s = status_text(item)
-        progress = item.get("progresso") or ""
-        if "100%" in progress or any(x in s for x in (
-            "concluída", "concluida", "concluído", "concluido", "finalizada", "finalizado"
-        )):
-            completed.append(item)
-        elif any(x in s for x in ("não inici", "nao inici", "aguardando", "futura", "não começou", "nao comecou")):
-            future.append(item)
-        elif any(x in s for x in ("andamento", "em curso", "iniciad", "progresso")) or item.get("modulo") or item.get("passo"):
-            current.append(item)
-    return completed, current, future
-
-
-def extract_student_id(url):
-    m = re.search(r"/alunos/(\d+)", urlparse(url).path, re.I)
-    return m.group(1) if m else None
-
-
-def contract_bundle(page, contrato_url, unidade, global_replacements):
-    cid = contract_id(contrato_url)
-    if not cid:
-        return None
-
-    print(f"[{unidade}] >>> PROCESSANDO CONTRATO {cid}")
-    open_page(page, contrato_url, unidade, f"contrato_{cid}")
-    contract_links = classify_links(page)
-
-    # As quatro rotas fornecidas pelo usuário são tratadas como partes do
-    # mesmo contrato: contrato, cursos individuais, horários e frequências.
-    frequency_url = next((u for u in contract_links["frequencies"] if contract_id(u) == cid), None)
-    course_url = next((u for u in contract_links["courses"] if contract_id(u) == cid), None)
-    schedule_url = next((u for u in contract_links["schedules"] if contract_id(u) == cid), None)
-    student_url = next((u for u in contract_links["students"] if extract_student_id(u)), None)
-
-    # Reforça a descoberta a partir das próprias páginas do contrato, sem
-    # fabricar IDs: só segue hrefs que o CGD entregou para este contrato.
-    discipline_rows = []
-    schedule_text = ""
-    student_name = None
-
-    if course_url:
-        open_page(page, course_url, unidade, f"cursos_individuais_{cid}")
-        discipline_rows.extend(extract_discipline_rows(page, course_url))
-        discipline_rows.extend(extract_discipline_from_text(page, course_url))
-        cc = classify_links(page)
-        # Cursos individuais podem possuir links internos para módulos/passos.
-        for _, u in cc["all"][:MAX_LINK_PAGES]:
-            if u == course_url:
-                continue
-            if "/contratos/cursos/" in urlparse(u).path.lower() and contract_id(u) == cid:
-                open_page(page, u, unidade, f"curso_detalhe_{cid}", wait=900)
-                discipline_rows.extend(extract_discipline_rows(page, u))
-                discipline_rows.extend(extract_discipline_from_text(page, u))
-
-    if schedule_url:
-        open_page(page, schedule_url, unidade, f"horarios_{cid}")
-        schedule_text = text_body(page)[:12000]
-
-    freq = {
-        "contrato": cid,
-        "rota": frequency_url,
-        "nome": None,
-        "faltas": 0,
-        "presencas": 0,
-        "registros": [],
-        "contexto": "",
-    }
-    if frequency_url:
-        open_page(page, frequency_url, unidade, f"frequencia_{cid}")
-        freq = extract_frequency(page, frequency_url)
-        student_name = freq.get("nome") or student_name
-
-    if student_url:
-        open_page(page, student_url, unidade, f"aluno_{extract_student_id(student_url)}")
-        student_name = extract_student(page, student_name)
-        student_text = text_body(page)[:15000]
-    else:
-        student_text = ""
-
-    # Reposições globais são filtradas por contrato/aluno abaixo. Se a tela
-    # individual tiver um link específico dentro do contrato, ele também é lido.
-    replacements = []
-    for text, url in contract_links["replacements"]:
-        if open_page(page, url, unidade, f"reposicoes_contrato_{cid}"):
-            replacements.extend(extract_replacements(page, unidade))
-
-    rows = merge_disciplines(discipline_rows)
-    completed, current, future = classify_disciplines(rows)
-    current_point = current[0] if current else None
-
-    # A última posição conhecida é a posição com maior módulo/passo/progresso,
-    # mas sem inventar valor quando o CGD não o forneceu.
-    def numeric(item, key):
-        m = re.search(r"\d+", str(item.get(key) or ""))
-        return int(m.group(0)) if m else -1
-
-    if current:
-        current_point = max(current, key=lambda x: (numeric(x, "modulo"), numeric(x, "passo"), numeric(x, "progresso")))
-
-    aluno = {
-        "cgd_matricula_id": cid,
-        "cgd_aluno_id": extract_student_id(student_url),
-        "nome": student_name or f"Contrato {cid}",
-        "contrato": cid,
-        "email": None,
-        "telefone": None,
-        "curso": None,
-        "turma_nome": None,
-        "professor_nome": None,
-        "data_inicio": None,
-        "meses_contrato_total": None,
-        "ultima_aula": None,
-        "ultimo_acesso": None,
-        "faltas_totais": freq["faltas"],
-        "faltas_mes_atual": 0,
-        "mes_referencia_faltas": datetime.now().strftime("%m/%Y"),
-        "dias_em_curso": 0,
-        "criticidade": "normal",
-        "tratativa_sugerida": "normal",
-        "status_tratativa": "pendente",
-        "status_matricula": "ativo",
-        "bloqueado_automaticamente": freq["faltas"] > 3,
-        "motivo_bloqueio": "mais_de_3_faltas" if freq["faltas"] > 3 else None,
-        "total_disciplinas_grade": len(rows),
-        "disciplinas_concluidas": len(completed),
-        "unidade": unidade.lower(),
-        "origem_dados": "cgd_live",
-        "rota_cgd": contrato_url,
-        "rota_frequencia_cgd": frequency_url,
-        "rota_cursos_individuais_cgd": course_url,
-        "rota_horarios_individuais_cgd": schedule_url,
-        "rota_aluno_cgd": student_url,
-        "frequencia_detalhada": freq["registros"],
-        "reposicoes_detalhadas": replacements + global_replacements,
-        "disciplinas_detalhadas": rows,
-        "disciplinas_concluidas_detalhadas": completed,
-        "disciplinas_em_andamento_detalhadas": current,
-        "disciplinas_futuras_detalhadas": future,
-        "disciplina_atual": current_point.get("disciplina") if current_point else None,
-        "modulo_atual": current_point.get("modulo") if current_point else None,
-        "passo_atual": current_point.get("passo") if current_point else None,
-        "data_ponto_atual": current_point.get("data") if current_point else None,
-        "progresso_atual": current_point.get("progresso") if current_point else None,
-        "carga_horaria_atual": current_point.get("carga_horaria") if current_point else None,
-        "horarios_detalhados": schedule_text,
-        "dados_aluno_detalhados": student_text,
-    }
-    print(
-        f"[{unidade}] CAPTURADO: contrato={cid} aluno={aluno['nome']!r} "
-        f"faltas={freq['faltas']} disciplinas={len(rows)} "
-        f"concluidas={len(completed)} andamento={len(current)} futuras={len(future)}"
-    )
-    return aluno
-
-
-def discover_global_replacements(page, unidade):
-    """Localiza o link real de Individuais - Reposições e coleta a tabela global."""
-    open_page(page, CGD_URL, unidade, "inicio_reposicoes")
-    candidates = [(t, u) for t, u in page_links(page) if is_replacement(t, u)]
-    # O nome pode aparecer exatamente como 'Individuais - Reposições' ou apenas
-    # 'Reposições'. Não exigimos que a URL contenha a palavra individuais.
-    candidates = unique_urls(candidates)
-    for text, url in candidates:
-        print(f"[{unidade}] REPOSIÇÃO REAL: {text!r} -> {url}")
-    if not candidates:
-        print(f"[{unidade}] Individuais - Reposições: link real não encontrado")
-        return []
-    text, url = candidates[0]
-    if not open_page(page, url, unidade, "individuais_reposicoes"):
-        return []
-    rows = extract_replacements(page, unidade)
-    print(f"[{unidade}] REPOSIÇÕES GLOBAIS CAPTURADAS: {len(rows)}")
-    return rows
-
-
-def replacement_belongs(item, aluno):
-    raw = low(" ".join(str(x) for x in item.get("valores", [])))
-    headers = low(" ".join(str(x) for x in item.get("cabecalhos", [])))
-    cid = str(aluno.get("contrato") or "")
-    aid = str(aluno.get("cgd_aluno_id") or "")
-    name = low(aluno.get("nome"))
-    if cid and re.search(rf"(?<!\d){re.escape(cid)}(?!\d)", raw):
-        return True
-    if aid and re.search(rf"(?<!\d){re.escape(aid)}(?!\d)", raw):
-        return True
-    if name and len(name) >= 5 and name in raw:
-        return True
-    # Se a tabela não possui identificador, não atribuímos a reposição a um
-    # aluno por chute. Ela permanece global, preservando a informação real.
-    return False
-
-
-def attach_replacements(alunos, global_rows):
-    for aluno in alunos:
-        aluno["reposicoes_detalhadas"] = [
-            r for r in global_rows if replacement_belongs(r, aluno)
-        ]
-    return alunos
-
-
-def known_alunos_columns():
-    # Mantém compatibilidade com o schema atual. Campos detalhados ficam no JSON
-    # mesmo quando a tabela Supabase ainda não possui colunas equivalentes.
-    return {
-        "cgd_matricula_id", "nome", "contrato", "email", "telefone", "curso",
-        "turma_nome", "professor_nome", "data_inicio", "meses_contrato_total",
-        "ultima_aula", "ultimo_acesso", "faltas_totais", "faltas_mes_atual",
-        "mes_referencia_faltas", "dias_em_curso", "criticidade",
-        "tratativa_sugerida", "status_tratativa", "status_matricula",
-        "bloqueado_automaticamente", "motivo_bloqueio", "total_disciplinas_grade",
-        "disciplinas_concluidas", "unidade", "origem_dados", "rota_cgd",
-    }
-
-
-def synchronize(alunos):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        print("SUPABASE: não configurado; JSON será salvo normalmente.")
-        return
-    try:
-        client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        columns = known_alunos_columns()
-        payload = []
-        for aluno in alunos:
-            row = {k: v for k, v in aluno.items() if k in columns}
-            payload.append(row)
-        if payload:
-            client.table("alunos").upsert(payload, on_conflict="contrato,unidade").execute()
-            print(f"SUPABASE: {len(payload)} alunos sincronizados.")
-    except Exception as exc:
-        print(f"SUPABASE: falha na sincronização: {exc}")
-
-
-def run_unit(unidade, config, playwright):
-    profile = EDGE_PROFILE_BASE / unidade
-    profile.mkdir(parents=True, exist_ok=True)
-    browser = playwright.chromium.launch_persistent_context(
-        user_data_dir=str(profile),
-        channel="msedge",
-        headless=False,
-        viewport={"width": 1440, "height": 1000},
-        args=["--disable-blink-features=AutomationControlled"],
-    )
-    page = browser.pages[0] if browser.pages else browser.new_page()
-    try:
-        login(page, config["usuario"], config["senha"], unidade)
-        contracts = discover_contracts(page, unidade, config["destino"])
-        global_replacements = discover_global_replacements(page, unidade)
-        alunos = []
-        for index, contrato_url in enumerate(contracts, 1):
-            print(f"[{unidade}] contrato {index}/{len(contracts)}")
-            try:
-                aluno = contract_bundle(page, contrato_url, unidade, [])
-                if aluno:
-                    alunos.append(aluno)
-            except Exception as exc:
-                print(f"[{unidade}] erro processando {contrato_url}: {exc}")
-        attach_replacements(alunos, global_replacements)
-        return alunos
-    finally:
-        try:
-            browser.close()
-        except Exception:
-            pass
-
+ m=re.search(r"/contratos/(\d+)$",urlparse(url).path.rstrip("/"),re.I); return m.group(1) if m else None
+def student_id(url):
+ m=re.search(r"/alunos/(\d+)",urlparse(url).path,re.I); return m.group(1) if m else None
+def contract_url(cid): return f"{CGD_URL.rstrip('/')}/contratos/{cid}"
+def child_url(cid,k): return f"{CGD_URL.rstrip('/')}/contratos/{k}/{cid}"
+def is_contract(url): return bool(re.fullmatch(r"/contratos/\d+",urlparse(url).path.rstrip("/"),re.I))
+
+def table_data(page):
+ out=[]
+ try:
+  ts=page.locator("table")
+  for i in range(ts.count()):
+   t=ts.nth(i); heads=[norm(x) for x in t.locator("thead th").all_text_contents()]
+   if not heads: heads=[norm(x) for x in t.locator("tr:first-child th,tr:first-child td").all_text_contents()]
+   trs=t.locator("tbody tr"); start=0
+   if trs.count()==0: trs=t.locator("tr"); start=1 if trs.count() else 0
+   rows=[]
+   for j in range(start,trs.count()):
+    vals=[norm(x) for x in trs.nth(j).locator("td").all_text_contents()]
+    if vals: rows.append(vals)
+   out.append((heads,rows))
+ except: pass
+ return out
+
+def col(heads,*names):
+ names=tuple(low(x) for x in names)
+ for i,h in enumerate(heads):
+  if any(n in low(h) for n in names): return i
+ return None
+
+def body(page):
+ try:return norm(page.locator("body").inner_text())
+ except:return ""
+
+def extract_name(page,fallback=None):
+ try:
+  for sel in ('input[name*="nome" i]','input[id*="nome" i]'):
+   loc=page.locator(sel)
+   for i in range(loc.count()):
+    v=norm(loc.nth(i).input_value())
+    if len(v)>=3 and len(v.split())>=2:return v
+ except:pass
+ for pat in (r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([^\n|]{4,150})",r"\bNome\s*[:\-]\s*([^\n|]{4,150})"):
+  m=re.search(pat,body(page),re.I)
+  if m and len(norm(m.group(1)))>=4:return norm(m.group(1))
+ return fallback
+
+def login(page,user,password,u):
+ page.goto(CGD_URL,wait_until="domcontentloaded",timeout=60000); page.wait_for_timeout(2500)
+ us=page.locator('input[type="text"],input[type="email"],input[name*="user" i],input[name*="login" i],input[name*="email" i]')
+ ps=page.locator('input[type="password"],input[name*="senha" i],input[name*="password" i]')
+ U=P=None
+ for i in range(us.count()):
+  if us.nth(i).is_visible(): U=us.nth(i); break
+ for i in range(ps.count()):
+  if ps.nth(i).is_visible(): P=ps.nth(i); break
+ if U and P and user and password:
+  U.fill(user); P.fill(password)
+  bs=page.locator('button[type="submit"],input[type="submit"],button:has-text("Entrar"),button:has-text("Acessar"),button:has-text("Login")')
+  B=next((bs.nth(i) for i in range(bs.count()) if bs.nth(i).is_visible()),None)
+  if not B: raise RuntimeError(f"[{u}] botao de login nao encontrado")
+  B.click(); page.wait_for_timeout(3500)
+ print(f"[{u}] apos_login: {page.url}"); dump(page,u,"apos_login")
+
+def collect_contracts(page,found):
+ for _,h in links(page):
+  if is_contract(h):
+   cid=contract_id(h)
+   if cid: found[cid]=contract_url(cid)
+ try:
+  loc=page.locator('[href*="/contratos/"]')
+  for i in range(min(loc.count(),10000)):
+   h=abs_url(page,loc.nth(i).get_attribute("href"))
+   if is_contract(h): found[contract_id(h)]=contract_url(contract_id(h))
+ except:pass
+
+def next_page(page):
+ sels=['a[rel="next"]','button[rel="next"]','a[aria-label*="next" i]','button[aria-label*="next" i]','a[aria-label*="proxima" i]','button[aria-label*="proxima" i]','a:has-text("Próxima")','button:has-text("Próxima")','a:has-text("Proxima")','button:has-text("Proxima")','a:has-text("Next")','button:has-text("Next")','a:has-text("›")','button:has-text("›")']
+ before=body(page)[:8000]
+ for sel in sels:
+  try:
+   loc=page.locator(sel)
+   for i in range(loc.count()):
+    e=loc.nth(i)
+    if not e.is_visible(): continue
+    if (e.get_attribute("aria-disabled") or "").lower()=="true" or "disabled" in (e.get_attribute("class") or "").lower(): continue
+    e.click(); page.wait_for_timeout(1300)
+    if body(page)[:8000]!=before:return True
+  except:pass
+ return False
+
+def discover_contracts(page,u,destino):
+ found={}
+ if destino and same_host(destino): open_page(page,destino,u,"rota_configurada"); collect_contracts(page,found)
+ open_page(page,CGD_URL,u,"inicio")
+ sources=[]
+ for t,h in links(page):
+  p=urlparse(h).path.rstrip("/").lower()
+  if p in ("/alunos","/relatorios/alunos","/relatorios/individuais/alunos-curso"): sources.append(h)
+ for src in dict.fromkeys(sources):
+  if len(found)>=MAX_CONTRACTS: break
+  open_page(page,src,u,"lista_alunos",1600); seen=set()
+  for pn in range(1,MAX_PAGES+1):
+   collect_contracts(page,found); sig=body(page)[:12000]
+   if sig in seen: break
+   seen.add(sig); print(f"[{u}] pagina_lista={pn} contratos_acumulados={len(found)}")
+   if not next_page(page): break
+ print(f"[{u}] CONTRATOS UNICOS DESCOBERTOS: {len(found)}")
+ for h in found.values(): print(f"[{u}] CONTRATO: {h}")
+ return list(found.values())
+
+def extract_frequency(page,cid):
+ rec=[]; faltas=pres=0
+ for heads,rows in table_data(page):
+  si=col(heads,"status","situação","situacao","presença","presenca","frequência","frequencia"); di=col(heads,"data","dia"); ai=col(heads,"aluno","nome","estudante")
+  for row in rows:
+   s=low(row[si]) if si is not None and si<len(row) else ""
+   if any(x in s for x in ("falta","ausente","não compareceu","nao compareceu")): faltas+=1
+   elif any(x in s for x in ("presente","presença","presenca","compareceu")): pres+=1
+   rec.append({"data":row[di] if di is not None and di<len(row) else None,"status":row[si] if si is not None and si<len(row) else None,"aluno":row[ai] if ai is not None and ai<len(row) else None,"valores":row,"cabecalhos":heads})
+ return {"faltas":faltas,"presencas":pres,"registros":rec}
+
+def extract_disciplines(page,src):
+ out=[]
+ for heads,rows in table_data(page):
+  if not any(x in low(" ".join(heads)) for x in ("disciplina","módulo","modulo","passo","etapa","progresso","carga horária","carga horaria","status")): continue
+  for row in rows:
+   r={"disciplina":None,"modulo":None,"passo":None,"progresso":None,"carga_horaria":None,"data":None,"status":None,"cabecalhos":heads,"valores":row,"origem":src}
+   for k,n in {"disciplina":("disciplina",),"modulo":("módulo","modulo"),"passo":("passo","etapa"),"progresso":("progresso",),"carga_horaria":("carga horária","carga horaria","carga"),"data":("data","última","ultima"),"status":("status","situação","situacao","estado")}.items():
+    i=col(heads,*n)
+    if i is not None and i<len(row):r[k]=row[i]
+   out.append(r)
+ txt=body(page); ms=list(re.finditer(r"M[oó]dulo\s*(\d+)\b",txt,re.I))
+ for i,m in enumerate(ms):
+  chunk=txt[m.start():ms[i+1].start() if i+1<len(ms) else min(len(txt),m.end()+1000)]
+  sm=re.search(r"(?:Passo|Etapa)\s*(\d+)\b",chunk,re.I); pm=re.search(r"(\d{1,3})\s*%",chunk); dm=re.search(r"\b(\d{1,2}/\d{1,2}/\d{2,4})\b",chunk)
+  out.append({"disciplina":None,"modulo":m.group(1),"passo":sm.group(1) if sm else None,"progresso":pm.group(1)+"%" if pm else None,"carga_horaria":None,"data":dm.group(1) if dm else None,"status":None,"texto_contexto":chunk[:3000],"cabecalhos":[],"valores":[],"origem":src})
+ return out
+
+def classify(rows):
+ seen=set(); r=[]
+ for x in rows:
+  k=json.dumps({q:x.get(q) for q in ("disciplina","modulo","passo","progresso","data","origem")},ensure_ascii=False,sort_keys=True)
+  if k not in seen:seen.add(k);r.append(x)
+ done=[];cur=[];fut=[]
+ for x in r:
+  s=low(" ".join(str(x.get(k) or "") for k in ("status","progresso","texto_contexto","valores")));p=low(x.get("progresso"))
+  if "100%" in p or any(q in s for q in ("concluída","concluida","concluído","concluido","finalizada","finalizado")):done.append(x)
+  elif any(q in s for q in ("não inici","nao inici","aguardando","futura","não começou","nao comecou")):fut.append(x)
+  elif any(q in s for q in ("andamento","em curso","iniciad","progresso")) or x.get("modulo") or x.get("passo"):cur.append(x)
+ return r,done,cur,fut
+
+def extract_replacements(page,u):
+ out=[]
+ for heads,rows in table_data(page):
+  if any(x in low(" ".join(heads)) for x in ("reposição","reposicao","contrato","aluno","data")):
+   for row in rows:out.append({"cabecalhos":heads,"valores":row,"unidade":u})
+ return out
+
+def belongs(r,cid,sid,name):
+ raw=low(" ".join(str(x) for x in r.get("valores",[])))
+ return any(v and low(v) in raw for v in (cid,sid,name))
+
+def contract_bundle(page,cid,u,reps):
+ print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}"); cu=contract_url(cid); open_page(page,cu,u,f"contrato_{cid}")
+ ctext=body(page); sl=[h for _,h in links(page) if student_id(h)]; sid=student_id(sl[0]) if sl else None
+ course=child_url(cid,"cursos"); schedule=child_url(cid,"horarios"); frequrl=child_url(cid,"frequencias")
+ rows=[]; st=""; name=None; freq={"faltas":0,"presencas":0,"registros":[]}
+ if open_page(page,course,u,f"cursos_individuais_{cid}"):rows+=extract_disciplines(page,course)
+ if open_page(page,schedule,u,f"horarios_individuais_{cid}"):st=body(page)[:20000]
+ if open_page(page,frequrl,u,f"frequencia_{cid}"):freq=extract_frequency(page,cid);name=extract_name(page)
+ if not sid:
+  m=re.search(r"/alunos/(\d+)",ctext);sid=m.group(1) if m else None
+ if sid and open_page(page,f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit",u,f"aluno_{sid}"):name=extract_name(page,name); at=body(page)[:25000]
+ else:at=""
+ rows,done,cur,fut=classify(rows)
+ def num(r,k):
+  m=re.search(r"\d+",str(r.get(k) or ""));return int(m.group()) if m else -1
+ point=max(cur,key=lambda r:(num(r,"modulo"),num(r,"passo"),num(r,"progresso"))) if cur else None
+ aluno={"cgd_matricula_id":cid,"nome":name or f"Contrato {cid}","contrato":cid,"email":None,"telefone":None,"curso":None,"turma_nome":None,"professor_nome":None,"data_inicio":None,"meses_contrato_total":None,"ultima_aula":None,"ultimo_acesso":None,"faltas_totais":freq["faltas"],"faltas_mes_atual":0,"mes_referencia_faltas":datetime.now().strftime("%m/%Y"),"dias_em_curso":0,"criticidade":"normal","tratativa_sugerida":"normal","status_tratativa":"pendente","status_matricula":"ativo","bloqueado_automaticamente":freq["faltas"]>3,"motivo_bloqueio":"mais_de_3_faltas" if freq["faltas"]>3 else None,"total_disciplinas_grade":len(rows),"disciplinas_concluidas":len(done),"unidade":u,"rota_cgd":cu,"rota_frequencia_cgd":frequrl,"rota_cursos_individuais_cgd":course,"rota_horarios_individuais_cgd":schedule,"rota_aluno_cgd":f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit" if sid else None,"frequencia_detalhada":freq["registros"],"reposicoes_detalhadas":[r for r in reps if belongs(r,cid,sid,name)],"disciplinas_detalhadas":rows,"disciplinas_concluidas_detalhadas":done,"disciplinas_em_andamento_detalhadas":cur,"disciplinas_futuras_detalhadas":fut,"disciplina_atual":point.get("disciplina") if point else None,"modulo_atual":point.get("modulo") if point else None,"passo_atual":point.get("passo") if point else None,"data_ponto_atual":point.get("data") if point else None,"progresso_atual":point.get("progresso") if point else None,"carga_horaria_atual":point.get("carga_horaria") if point else None,"horarios_detalhados":st,"dados_aluno_detalhados":at}
+ print(f"[{u}] CAPTURADO: contrato={cid} aluno={aluno['nome']!r} aluno_id={sid} faltas={freq['faltas']} disciplinas={len(rows)} concluidas={len(done)} andamento={len(cur)} futuras={len(fut)}")
+ return aluno
+
+def global_reps(page,u):
+ open_page(page,CGD_URL,u,"inicio_reposicoes"); cs=[(t,h) for t,h in links(page) if "reposi" in low(t+" "+h) and "turmas/reposicao" not in h.lower()]
+ if not cs:cs=[(t,h) for t,h in links(page) if "reposi" in low(t+" "+h)]
+ if not cs:return []
+ print(f"[{u}] REPOSICAO REAL: {cs[0][0]!r} -> {cs[0][1]}")
+ if not open_page(page,cs[0][1],u,"individuais_reposicoes"):return []
+ r=extract_replacements(page,u);print(f"[{u}] REPOSICOES GLOBAIS CAPTURADAS: {len(r)}");return r
+
+def run_unit(u,cfg,pw):
+ profile=EDGE_PROFILE_BASE/u;profile.mkdir(parents=True,exist_ok=True)
+ b=pw.chromium.launch_persistent_context(user_data_dir=str(profile),channel="msedge",headless=False,viewport={"width":1440,"height":1000},args=["--disable-blink-features=AutomationControlled"])
+ page=b.pages[0] if b.pages else b.new_page()
+ try:
+  login(page,cfg["usuario"],cfg["senha"],u); contracts=discover_contracts(page,u,cfg["destino"]); reps=global_reps(page,u); out=[]
+  for i,cu in enumerate(contracts,1):
+   print(f"[{u}] contrato {i}/{len(contracts)}")
+   try:out.append(contract_bundle(page,contract_id(cu),u,reps))
+   except Exception as e:print(f"[{u}] ERRO contrato {cu}: {e}")
+  return out
+ finally:
+  try:b.close()
+  except:pass
+
+def sync_supabase(alunos):
+ if not SUPABASE_URL or not SUPABASE_KEY:print("SUPABASE: nao configurado; JSON salvo.");return
+ columns={"cgd_matricula_id","nome","contrato","email","telefone","curso","turma_nome","professor_nome","data_inicio","meses_contrato_total","ultima_aula","ultimo_acesso","faltas_totais","faltas_mes_atual","mes_referencia_faltas","dias_em_curso","criticidade","tratativa_sugerida","status_tratativa","status_matricula","bloqueado_automaticamente","motivo_bloqueio","total_disciplinas_grade","disciplinas_concluidas","unidade","rota_cgd"}
+ try:
+  client:Client=create_client(SUPABASE_URL,SUPABASE_KEY);payload=[{k:v for k,v in a.items() if k in columns} for a in alunos]
+  if payload:client.table("alunos").upsert(payload,on_conflict="contrato,unidade").execute();print(f"SUPABASE: {len(payload)} alunos sincronizados.")
+ except Exception as e:print(f"SUPABASE: falha na sincronizacao: {e}")
 
 def main():
-    print("=" * 80)
-    print("SCRAPER CGD — COLETA REAL POR UNIDADE / CONTRATO / ALUNO")
-    print("Fluxo: contrato -> cursos individuais -> horários -> frequências -> aluno -> Individuais/Reposições")
-    print("=" * 80)
-
-    all_students = []
-    with sync_playwright() as playwright:
-        for unidade in ("matriz", "filial"):
-            try:
-                alunos = run_unit(unidade, CONFIG[unidade], playwright)
-                all_students.extend(alunos)
-            except Exception as exc:
-                print(f"[{unidade}] ERRO FATAL DA UNIDADE: {exc}")
-
-    # Deduplicação somente dentro da mesma unidade. Matriz e Filial jamais são misturadas.
-    unique = {}
-    for aluno in all_students:
-        key = (low(aluno.get("unidade")), str(aluno.get("contrato") or ""))
-        unique[key] = aluno
-    all_students = list(unique.values())
-
-    JSON_PATH.write_text(json.dumps(all_students, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("=" * 80)
-    print(f"TOTAL GERAL DE ALUNOS CAPTURADOS: {len(all_students)}")
-    print(f"MATRIZ: {sum(1 for a in all_students if a.get('unidade') == 'matriz')}")
-    print(f"FILIAL: {sum(1 for a in all_students if a.get('unidade') == 'filial')}")
-    print("=" * 80)
-
-    if not all_students:
-        raise SystemExit("Nenhum aluno foi capturado pelo CGD.")
-
-    synchronize(all_students)
-
-
-if __name__ == "__main__":
-    main()
+ print("="*80);print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO");print("Fluxo: lista completa -> contrato -> cursos individuais -> horarios -> frequencias -> aluno -> reposicoes");print("="*80)
+ all=[]
+ with sync_playwright() as pw:
+  for u in ("matriz","filial"):
+   try:all+=run_unit(u,CONFIG[u],pw)
+   except Exception as e:print(f"[{u}] ERRO FATAL: {e}")
+ unique={(a.get("unidade"),a.get("contrato")):a for a in all};all=list(unique.values())
+ JSON_PATH.write_text(json.dumps(all,ensure_ascii=False,indent=2),encoding="utf-8")
+ print("="*80);print(f"TOTAL GERAL DE ALUNOS CAPTURADOS: {len(all)}");print(f"MATRIZ: {sum(a.get('unidade')=='matriz' for a in all)}");print(f"FILIAL: {sum(a.get('unidade')=='filial' for a in all)}");print("="*80)
+ if not all:raise SystemExit("Nenhum aluno foi capturado pelo CGD.")
+ sync_supabase(all)
+if __name__=="__main__":main()
