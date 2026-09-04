@@ -1,14 +1,15 @@
-"""Executor do scraper CGD com descoberta otimizada.
+"""Executor CGD: descoberta paralela de paginas + detalhamento paralelo.
 
-A coleta de detalhes permanece centralizada em scraper.py. Este executor
-substitui apenas a descoberta serial e redundante de contratos por uma
-paginação orientada a URLs, sem qualquer filtro por cor.
+Nao usa cor de contrato. A listagem e dividida em URLs de pagina e processada
+em paralelo. O scraper.py continua responsavel pelo detalhamento e persistencia.
 """
 
-from urllib.parse import urlparse
+import os
+import re
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import scraper
-
 
 LISTING_PATHS = {
     "/alunos",
@@ -16,160 +17,200 @@ LISTING_PATHS = {
     "/relatorios/individuais/alunos-curso",
 }
 
+LISTING_WORKERS = max(1, int(os.getenv("CGD_LISTING_WORKERS", "12")))
+LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "829")))
+
 NEXT_SELECTORS = [
-    'a[rel="next"]',
-    'button[rel="next"]',
-    'a[aria-label*="next" i]',
-    'button[aria-label*="next" i]',
-    'a[aria-label*="proxima" i]',
-    'button[aria-label*="proxima" i]',
-    'a:has-text("Próxima")',
-    'button:has-text("Próxima")',
-    'a:has-text("Proxima")',
-    'button:has-text("Proxima")',
-    'a:has-text("Next")',
-    'button:has-text("Next")',
-    'a:has-text("›")',
-    'button:has-text("›")',
+    'a[rel="next"]', 'button[rel="next"]',
+    'a[aria-label*="next" i]', 'button[aria-label*="next" i]',
+    'a[aria-label*="proxima" i]', 'button[aria-label*="proxima" i]',
+    'a:has-text("Próxima")', 'button:has-text("Próxima")',
+    'a:has-text("Proxima")', 'button:has-text("Proxima")',
+    'a:has-text("Next")', 'button:has-text("Next")',
 ]
 
 
 def _is_listing(url):
+    return urlparse(url).path.rstrip("/").lower() in LISTING_PATHS
+
+
+def _page_param_from_url(url):
+    q = parse_qs(urlparse(url).query, keep_blank_values=True)
+    for key, values in q.items():
+        if not values:
+            continue
+        value = values[-1]
+        if re.fullmatch(r"\d+", value) and int(value) >= 1:
+            if key.lower() in {"page", "pagina", "p", "page_number", "pag"}:
+                return key, int(value)
+    return None, None
+
+
+def _set_page(url, key, number):
+    parts = urlparse(url)
+    q = parse_qs(parts.query, keep_blank_values=True)
+    q[key] = [str(number)]
+    return urlunparse(parts._replace(query=urlencode(q, doseq=True)))
+
+
+def _pagination_urls(page, base_url):
+    """Descobre o formato real da paginação sem navegar página a página."""
+    candidates = []
     try:
-        return urlparse(url).path.rstrip("/").lower() in LISTING_PATHS
+        anchors = page.locator("a[href]")
+        for i in range(min(anchors.count(), 2000)):
+            e = anchors.nth(i)
+            href = e.get_attribute("href")
+            if not href:
+                continue
+            target = scraper.abs_url(page, href)
+            if not target or not scraper.same_host(target):
+                continue
+            if urlparse(target).path.rstrip("/").lower() != urlparse(base_url).path.rstrip("/").lower():
+                continue
+            key, number = _page_param_from_url(target)
+            if key:
+                candidates.append((key, number, target))
     except Exception:
-        return False
+        pass
 
+    if candidates:
+        key = candidates[0][0]
+        highest = max(n for k, n, _ in candidates if k == key)
+        return key, max(1, highest)
 
-def _next_page_fast(page, unidade):
-    """Avança sem varrer o body inteiro; usa href quando a paginação fornece URL."""
-    current = page.url
+    # Se a página só expõe o link "Próxima", extraímos dele o parâmetro.
     for selector in NEXT_SELECTORS:
         try:
             loc = page.locator(selector)
             for i in range(loc.count()):
-                element = loc.nth(i)
-                if not element.is_visible():
+                e = loc.nth(i)
+                href = e.get_attribute("href")
+                if not href:
                     continue
-                if (element.get_attribute("aria-disabled") or "").lower() == "true":
-                    continue
-                if "disabled" in (element.get_attribute("class") or "").lower():
-                    continue
-
-                href = element.get_attribute("href")
-                if href and not href.startswith("#"):
-                    target = scraper.abs_url(page, href)
-                    if target and target != current and scraper.same_host(target):
-                        if scraper.open_page(page, target, unidade, "pagina_lista"):
-                            return True
-                        continue
-
-                # Fallback para paginação por JavaScript sem href.
-                before = set()
-                try:
-                    for _, h in scraper.links(page):
-                        cid = scraper.contract_id(h)
-                        if cid:
-                            before.add(cid)
-                except Exception:
-                    pass
-
-                element.click()
-                for _ in range(20):
-                    page.wait_for_timeout(100)
-                    if page.url != current:
-                        return True
-                    try:
-                        after = set()
-                        for _, h in scraper.links(page):
-                            cid = scraper.contract_id(h)
-                            if cid:
-                                after.add(cid)
-                        if after and after != before:
-                            return True
-                    except Exception:
-                        pass
+                target = scraper.abs_url(page, href)
+                key, number = _page_param_from_url(target)
+                if key:
+                    return key, 0
         except Exception:
             pass
-    return False
+
+    return None, None
 
 
-def _paginate_listing(page, unidade, found):
-    """Percorre somente a listagem necessária e encerra por URL repetida."""
-    seen_urls = set()
-    last_count = -1
+def _listing_worker(args):
+    unidade, url, user, password = args
+    found = {}
+    try:
+        with scraper.sync_playwright() as pw:
+            browser = pw.chromium.launch(channel="msedge", headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+            scraper.login(page, user, password, unidade)
+            if scraper.open_page(page, url, unidade, "pagina_lista", 100):
+                scraper.collect_contracts(page, found)
+            browser.close()
+        return unidade, list(found.values()), None
+    except Exception as exc:
+        return unidade, [], str(exc)
 
-    for page_number in range(1, scraper.MAX_PAGES + 1):
-        current = page.url
-        if current in seen_urls:
-            break
-        seen_urls.add(current)
 
-        before = len(found)
-        scraper.collect_contracts(page, found)
-        added = len(found) - before
-        print(
-            f"[{unidade}] pagina_lista={page_number} "
-            f"contratos_novos={added} contratos_acumulados={len(found)}"
-        )
+def _parallel_listing(page, unidade, base_url, user, password):
+    key, explicit_last = _pagination_urls(page, base_url)
 
-        if len(found) >= scraper.MAX_CONTRACTS:
-            break
-        if len(found) == last_count and page_number > 1:
-            break
-        last_count = len(found)
+    if not key:
+        print(f"[{unidade}] PAGINACAO: parametro de pagina nao identificado; usando fallback sequencial")
+        found = {}
+        seen = set()
+        for n in range(1, scraper.MAX_PAGES + 1):
+            if page.url in seen:
+                break
+            seen.add(page.url)
+            scraper.collect_contracts(page, found)
+            if len(found) >= scraper.MAX_CONTRACTS:
+                break
+            # Usa a função otimizada apenas como último recurso.
+            moved = False
+            for selector in NEXT_SELECTORS:
+                try:
+                    loc = page.locator(selector)
+                    if loc.count() and loc.first.is_visible():
+                        href = loc.first.get_attribute("href")
+                        if href:
+                            target = scraper.abs_url(page, href)
+                            if scraper.open_page(page, target, unidade, "pagina_lista", 100):
+                                moved = True
+                                break
+                except Exception:
+                    pass
+            if not moved:
+                break
+        return found
 
-        if not _next_page_fast(page, unidade):
-            break
+    # Quando a paginação fornece números, não existe motivo para caminhar 1->2->3.
+    # Montamos todas as URLs e distribuímos o trabalho entre workers independentes.
+    last = explicit_last if explicit_last >= 1 else LISTING_PAGES
+    last = min(last, max(1, scraper.MAX_PAGES))
+    urls = [_set_page(base_url, key, n) for n in range(1, last + 1)]
+    print(f"[{unidade}] PAGINACAO PARALELA: parametro={key} paginas={len(urls)} workers={LISTING_WORKERS}")
+
+    found = {}
+    args = [(unidade, url, user, password) for url in urls]
+    with ProcessPoolExecutor(max_workers=LISTING_WORKERS) as pool:
+        futures = [pool.submit(_listing_worker, a) for a in args]
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+            unit, contracts, error = future.result()
+            for url in contracts:
+                cid = scraper.contract_id(url)
+                if cid:
+                    found[cid] = scraper.contract_url(cid)
+            if error:
+                print(f"[{unit}] pagina_worker_erro={error}")
+            if completed % 10 == 0 or completed == len(futures):
+                print(f"[{unidade}] paginas_processadas={completed}/{len(futures)} contratos={len(found)}")
+            if len(found) >= scraper.MAX_CONTRACTS:
+                break
+    return found
 
 
 def optimized_discover_contracts(page, unidade, destino):
-    found = {}
-
-    # A navegação de listagem usa espera curta: DOMContentLoaded já é aguardado
-    # pelo scraper.open_page; a espera extra fica apenas como margem para JS.
     scraper.PAGE_WAIT_MS = min(scraper.PAGE_WAIT_MS, 150)
+    user = scraper.CONFIG[unidade]["usuario"]
+    password = scraper.CONFIG[unidade]["senha"]
 
-    # Só trata destino como listagem se ele for realmente uma rota de listagem.
+    # Preferimos a rota configurada se ela for realmente uma listagem.
     if destino and scraper.same_host(destino) and _is_listing(destino):
-        if scraper.open_page(page, destino, unidade, "rota_configurada"):
-            _paginate_listing(page, unidade, found)
+        if scraper.open_page(page, destino, unidade, "rota_configurada", 150):
+            found = _parallel_listing(page, unidade, destino, user, password)
             if found:
-                contracts = list(found.values())[: scraper.MAX_CONTRACTS]
+                contracts = list(found.values())[:scraper.MAX_CONTRACTS]
                 print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: {len(contracts)}")
-                print(f"[{unidade}] DETAIL_WORKERS: {scraper.DETAIL_WORKERS}")
                 return contracts
 
-    # Descobre as rotas de listagem uma única vez e usa somente a primeira
-    # que efetivamente contém contratos. Não percorre fontes redundantes.
-    if not scraper.open_page(page, scraper.CGD_URL, unidade, "inicio"):
+    if not scraper.open_page(page, scraper.CGD_URL, unidade, "inicio", 150):
         return []
 
     sources = []
     for _, href in scraper.links(page):
-        path = urlparse(href).path.rstrip("/").lower()
-        if path in LISTING_PATHS:
+        if urlparse(href).path.rstrip("/").lower() in LISTING_PATHS:
             sources.append(href)
 
     for source in dict.fromkeys(sources):
-        if found:
-            break
-        if not scraper.open_page(page, source, unidade, "lista_alunos"):
+        if not scraper.open_page(page, source, unidade, "lista_alunos", 150):
             continue
-        _paginate_listing(page, unidade, found)
+        found = _parallel_listing(page, unidade, source, user, password)
         if found:
-            break
+            contracts = list(found.values())[:scraper.MAX_CONTRACTS]
+            print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: {len(contracts)}")
+            return contracts
 
-    contracts = list(found.values())[: scraper.MAX_CONTRACTS]
-    print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: {len(contracts)}")
-    print(f"[{unidade}] DETAIL_WORKERS: {scraper.DETAIL_WORKERS}")
-    return contracts
+    print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: 0")
+    return []
 
 
-# scraper.main() usa a função pelo nome global durante a execução; substituir
-# aqui mantém autenticação, detalhamento paralelo e persistência existentes.
 scraper.discover_contracts = optimized_discover_contracts
-
 
 if __name__ == "__main__":
     scraper.main()
