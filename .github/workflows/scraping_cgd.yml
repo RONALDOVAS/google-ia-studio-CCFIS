@@ -89,7 +89,7 @@ jobs:
           CGD_LISTING_PAGES: '831'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
-        run: python scraper_runner.py
+        run: python scraper_runner_threaded.py
 
       - name: Validar captura real de alunos
         shell: powershell
