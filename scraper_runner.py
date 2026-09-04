@@ -12,7 +12,7 @@ import multiprocessing as mp
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse, urljoin
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -76,7 +76,7 @@ class _Locator:
 
 
 class HTTPPage:
-    """Pequeno adaptador para reutilizar as funcoes de extracao do scraper.py."""
+    """Adaptador minimo para reutilizar as funcoes de extracao do scraper.py."""
 
     def __init__(self, session):
         self.session = session
@@ -115,10 +115,7 @@ def _session_from_storage_state(storage_state_path):
     session = requests.Session()
     for cookie in state.get("cookies", []):
         try:
-            session.cookies.set(
-                cookie["name"], cookie["value"],
-                domain=cookie.get("domain"), path=cookie.get("path", "/")
-            )
+            session.cookies.set(cookie["name"], cookie["value"], domain=cookie.get("domain"), path=cookie.get("path", "/"))
         except Exception:
             session.cookies.set(cookie["name"], cookie["value"])
     session.headers.update({
@@ -173,7 +170,7 @@ def _fetch_listing(args):
 
 
 def optimized_discover_contracts(page, unidade, destino):
-    source = _listing_source(page, destino)
+    source = LISTING_SOURCE
     print(f"[{unidade}] FONTE_LISTAGEM_FIXA: {source}")
     if not scraper.open_page(page, source, unidade, "lista_pagina_1", 300):
         raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM: {source} final={page.url}")
@@ -223,21 +220,16 @@ def _strict_open_page(page, url, u, name, wait=None):
 
 
 def _http_contract_bundle(session, cid, u, reps):
-    """Coleta o contrato inteiro via HTTP, reutilizando a sessao autenticada."""
+    """Coleta o contrato inteiro via HTTP, reutilizando os cookies autenticados."""
     page = HTTPPage(session)
-    original_open_page = scraper.open_page
-    scraper.open_page = _strict_open_page
-    try:
-        aluno = scraper.contract_bundle(page, cid, u, reps)
-        if not aluno:
-            raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
-        if not aluno.get("nome") or aluno.get("nome") == f"Contrato {cid}":
-            raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
-        if not aluno.get("frequencia_raw") and aluno.get("faltas", 0) == 0 and aluno.get("presencas", 0) == 0:
-            raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
-        return aluno
-    finally:
-        scraper.open_page = original_open_page
+    aluno = scraper.contract_bundle(page, cid, u, reps)
+    if not aluno:
+        raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
+    if not aluno.get("nome") or aluno.get("nome") == f"Contrato {cid}":
+        raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
+    if not aluno.get("frequencia_raw") and aluno.get("faltas", 0) == 0 and aluno.get("presencas", 0) == 0:
+        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
+    return aluno
 
 
 def _detail_http_worker(args):
@@ -254,50 +246,51 @@ def _detail_http_worker(args):
 
 def _storage_state_session(storage_state):
     session = _session_from_storage_state(storage_state)
-    try:
-        r = session.get(LISTING_SOURCE, timeout=LISTING_TIMEOUT_S, allow_redirects=True)
-        path = urlparse(r.url).path.rstrip("/").lower()
-        if path == "/login" or path.startswith("/login/"):
-            raise SessionExpired(f"SESSAO_INVALIDA_ANTES_DOS_DETALHES: {r.url}")
-        r.raise_for_status()
-    except Exception:
-        raise
+    r = session.get(LISTING_SOURCE, timeout=LISTING_TIMEOUT_S, allow_redirects=True)
+    path = urlparse(r.url).path.rstrip("/").lower()
+    if path == "/login" or path.startswith("/login/"):
+        raise SessionExpired(f"SESSAO_INVALIDA_ANTES_DOS_DETALHES: {r.url}")
+    r.raise_for_status()
     return session
 
 
 def safe_process_details(u, cfg, contracts, reps, storage_state):
     if not contracts:
         return []
-    # A sessao e validada antes do primeiro contrato e os cookies sao reutilizados.
     base = _storage_state_session(storage_state)
     cookies = {c.name: c.value for c in base.cookies}
     headers = dict(base.headers)
     pending = list(contracts)
     results = []
-    for attempt in range(1, DETAIL_RETRIES + 2):
-        if not pending:
-            break
-        print(f"[{u}] INICIO DETALHAMENTO_HTTP: rodada={attempt} pendentes={len(pending)} workers={DETAIL_HTTP_WORKERS}")
-        pending_next = []
-        args = [(u, scraper.contract_id(c), reps, cookies, headers, attempt) for c in pending]
-        with ThreadPoolExecutor(max_workers=DETAIL_HTTP_WORKERS) as pool:
-            futures = [pool.submit(_detail_http_worker, a) for a in args]
-            for idx, future in enumerate(as_completed(futures), 1):
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    result = {"ok": False, "cid": "desconhecido", "error": repr(exc), "attempt": attempt}
-                if result.get("ok") and result.get("aluno"):
-                    results.append(result["aluno"])
-                    print(f"[{u}] CONTRATO_OK {idx}/{len(futures)} cid={result['cid']}")
-                else:
-                    cid = result.get("cid")
-                    if cid and cid != "desconhecido":
-                        pending_next.append(cid)
-                    print(f"[{u}] CONTRATO_ERRO {idx}/{len(futures)} cid={cid}: {result.get('error')}")
-                if idx % max(1, DETAIL_HTTP_WORKERS) == 0 or idx == len(futures):
-                    print(f"[{u}] PROGRESSO_DETALHAMENTO_HTTP {idx}/{len(futures)} sucesso={len(results)} falhas={len(pending_next)}")
-        pending = [scraper.contract_url(cid) for cid in pending_next if cid]
+    previous_open_page = scraper.open_page
+    scraper.open_page = _strict_open_page
+    try:
+        for attempt in range(1, DETAIL_RETRIES + 2):
+            if not pending:
+                break
+            print(f"[{u}] INICIO DETALHAMENTO_HTTP: rodada={attempt} pendentes={len(pending)} workers={DETAIL_HTTP_WORKERS}")
+            pending_next = []
+            args = [(u, scraper.contract_id(c), reps, cookies, headers, attempt) for c in pending]
+            with ThreadPoolExecutor(max_workers=DETAIL_HTTP_WORKERS) as pool:
+                futures = [pool.submit(_detail_http_worker, a) for a in args]
+                for idx, future in enumerate(as_completed(futures), 1):
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = {"ok": False, "cid": "desconhecido", "error": repr(exc), "attempt": attempt}
+                    if result.get("ok") and result.get("aluno"):
+                        results.append(result["aluno"])
+                        print(f"[{u}] CONTRATO_OK {idx}/{len(futures)} cid={result['cid']}")
+                    else:
+                        cid = result.get("cid")
+                        if cid and cid != "desconhecido":
+                            pending_next.append(cid)
+                        print(f"[{u}] CONTRATO_ERRO {idx}/{len(futures)} cid={cid}: {result.get('error')}")
+                    if idx % max(1, DETAIL_HTTP_WORKERS) == 0 or idx == len(futures):
+                        print(f"[{u}] PROGRESSO_DETALHAMENTO_HTTP {idx}/{len(futures)} sucesso={len(results)} falhas={len(pending_next)}")
+            pending = [scraper.contract_url(cid) for cid in pending_next if cid]
+    finally:
+        scraper.open_page = previous_open_page
     print(f"[{u}] DETALHAMENTO_HTTP_FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(contracts)}")
     for cu in pending:
         print(f"[{u}] CONTRATO_NAO_CAPTURADO: {cu}")
