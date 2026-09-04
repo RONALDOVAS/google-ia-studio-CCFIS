@@ -83,7 +83,7 @@ jobs:
           CGD_DETAIL_WORKERS: '1'
           CGD_DETAIL_TIMEOUT_S: '120'
           CGD_DETAIL_RETRIES: '1'
-          CGD_LISTING_PAGES: '829'
+          CGD_LISTING_PAGES: '831'
           CGD_HEADLESS: 'true'
         run: python scraper_runner.py
 
