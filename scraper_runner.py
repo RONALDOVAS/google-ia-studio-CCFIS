@@ -18,10 +18,13 @@ DETAIL_TIMEOUT_S = max(30, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "90")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
 
+# URL REAL COMPROVADA no CGD. Nao derivar da CGD_LOGIN_URL,
+# porque essa variavel aponta para /login e nao para a raiz do portal.
+LISTING_SOURCE = "https://app.cgd.com.br/alunos"
+
 
 def _listing_source(page, destino):
-    # A rota comprovada e /alunos?page=N. Nao depender do menu nem de destino.
-    return f"{scraper.CGD_URL.rstrip('/')}/alunos"
+    return LISTING_SOURCE
 
 
 def _page_url(source, page_number):
@@ -67,8 +70,9 @@ def _fetch_listing(args):
 
 def optimized_discover_contracts(page, unidade, destino):
     source = _listing_source(page, destino)
+    print(f"[{unidade}] FONTE_LISTAGEM_FIXA: {source}")
     if not scraper.open_page(page, source, unidade, "lista_pagina_1", 300):
-        raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM: {source}")
+        raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM: {source} final={page.url}")
     first_ids = _extract_contract_ids(page.content())
     print(f"[{unidade}] LISTAGEM REAL: {page.url} contratos_p1={len(first_ids)}")
     if not first_ids:
