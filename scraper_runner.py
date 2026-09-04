@@ -29,10 +29,18 @@ MAX_CONTRACTS = scraper.MAX_CONTRACTS
 
 
 def _listing_source(page, destino):
+    """Retorna a listagem real do CGD.
+
+    O CGD comprovadamente usa /alunos?page=N. As URLs de destino configuradas
+    por unidade podem apontar para uma tela de contrato ou outra rota; portanto
+    elas nao devem bloquear a descoberta da listagem.
+    """
+    candidates = []
     if destino and scraper.same_host(destino):
-        path = urlparse(destino).path.rstrip("/").lower()
-        if path in ("/alunos", "/relatorios/alunos", "/relatorios/individuais/alunos-curso"):
-            return destino
+        candidates.append(destino)
+
+    # Rota real comprovada pela paginacao do CGD.
+    candidates.append(f"{scraper.CGD_URL.rstrip('/')}/alunos")
 
     selectors = 'a[href*="/alunos"],a[href*="/relatorios/alunos"],a[href*="/relatorios/individuais/alunos-curso"]'
     try:
@@ -43,11 +51,17 @@ def _listing_source(page, destino):
             if not href:
                 continue
             href = scraper.abs_url(page, href)
-            path = urlparse(href).path.rstrip("/").lower()
-            if path in ("/alunos", "/relatorios/alunos", "/relatorios/individuais/alunos-curso"):
-                return href
+            candidates.append(href)
     except Exception:
         pass
+
+    for candidate in candidates:
+        try:
+            path = urlparse(candidate).path.rstrip("/").lower()
+            if path in ("/alunos", "/relatorios/alunos", "/relatorios/individuais/alunos-curso"):
+                return candidate
+        except Exception:
+            pass
     return None
 
 
@@ -134,7 +148,6 @@ def optimized_discover_contracts(page, unidade, destino):
 
 
 def _detail_process_entry(args, queue):
-    """Executa um contrato isoladamente para permitir encerramento forçado."""
     try:
         result = scraper.detail_worker(args)
         queue.put(result)
@@ -143,11 +156,6 @@ def _detail_process_entry(args, queue):
 
 
 def _run_detail_batch(u, cfg, contracts, reps, storage_state, attempt):
-    """Executa no maximo DETAIL_WORKERS contratos simultaneamente.
-
-    Cada contrato tem um processo proprio. Um processo que excede
-    DETAIL_TIMEOUT_S e terminado, liberando a vaga para o proximo contrato.
-    """
     ctx = mp.get_context("spawn")
     results = []
     failed = []
@@ -190,19 +198,14 @@ def _run_detail_batch(u, cfg, contracts, reps, storage_state, attempt):
                 pass
 
             now = time.monotonic()
-            expired = []
             for cid, (proc, _) in list(pending.items()):
                 if now - started_at[cid] >= DETAIL_TIMEOUT_S:
-                    expired.append(cid)
                     print(f"[{u}] TIMEOUT CONTRATO {cid} apos {DETAIL_TIMEOUT_S}s; encerrando processo")
                     if proc.is_alive():
                         proc.terminate()
                     proc.join(timeout=5)
                     failed.append(cid)
                     pending.pop(cid, None)
-
-            if not pending:
-                break
 
         for proc, _ in running:
             if proc.is_alive():
@@ -241,8 +244,6 @@ def safe_process_details(u, cfg, contracts, reps, storage_state):
     return results
 
 
-# A listagem e o detalhamento sao substituidos aqui; o restante da coleta,
-# criticidade, faltas, disciplinas, reposicoes e persistencia continua no scraper.py.
 scraper.discover_contracts = optimized_discover_contracts
 scraper.process_details = safe_process_details
 
