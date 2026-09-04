@@ -1,6 +1,5 @@
 """Runner CGD: listagem HTTP direta e detalhamento protegido com baixo consumo de recursos."""
 
-import multiprocessing as mp
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,7 +9,7 @@ import requests
 import scraper
 from playwright.sync_api import sync_playwright
 
-LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "829")))
+LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
 LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "4")))
 LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
 DETAIL_TIMEOUT_S = max(30, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "120")))
@@ -101,13 +100,14 @@ def optimized_discover_contracts(page, unidade, destino):
 
 
 def _persistent_detail_round(u, cfg, contracts, reps, storage_state, attempt):
-    """Processa todos os contratos da unidade usando UM unico navegador Edge."""
+    """Processa todos os contratos da unidade usando UM unico navegador Edge em modo headless."""
     results, failed = [], []
     if not contracts:
         return results, failed
     print(f"[{u}] DETALHAMENTO_PERSISTENTE: {len(contracts)} contratos / 1 Edge / timeout={DETAIL_TIMEOUT_S}s")
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(channel="msedge", headless=scraper.HEADLESS)
+        # Forca headless=True para impedir abertura de janela no runner Windows.
+        browser = pw.chromium.launch(channel="msedge", headless=True)
         context = browser.new_context(storage_state=storage_state)
         page = context.new_page()
         try:
