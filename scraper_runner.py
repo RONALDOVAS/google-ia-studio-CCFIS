@@ -25,6 +25,7 @@ DETAIL_HTTP_WORKERS = max(1, int(os.getenv("CGD_DETAIL_HTTP_WORKERS", os.getenv(
 DETAIL_TIMEOUT_S = max(10, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "60")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 DETAIL_LIMIT = max(0, int(os.getenv("CGD_DETAIL_LIMIT", "0")))
+HEADLESS = os.getenv("CGD_HEADLESS", "false").strip().lower() in {"1", "true", "yes", "on"}
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
 LISTING_SOURCE = "https://app.cgd.com.br/alunos"
 
