@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: scraping-cgd
+  cancel-in-progress: true
+
 jobs:
   executar-scraping:
     runs-on: [self-hosted, Windows, X64]
