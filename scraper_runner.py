@@ -1,8 +1,9 @@
-"""Executor CGD: descoberta paralela de paginas + detalhamento paralelo.
+"""Executor CGD: paginas da listagem em workers persistentes + detalhes em paralelo.
 
-A descoberta NAO percorre 829 paginas em serie. Ela usa a primeira pagina
-apenas para descobrir como o CGD representa a pagina seguinte; depois gera
-as URLs das paginas e distribui o trabalho entre workers.
+IMPORTANTE: a listagem NAO cria um processo/browser/login por pagina.
+Ela cria no maximo LISTING_WORKERS processos persistentes; cada processo faz
+login UMA vez e percorre um bloco de paginas. Assim 829 paginas nao viram
+829 logins nem 829 browsers.
 """
 
 import os
@@ -37,7 +38,6 @@ def _is_listing(url):
 
 
 def _page_param_from_url(url):
-    """Retorna qualquer parametro numerico plausivelmente usado para pagina."""
     q = parse_qs(urlparse(url).query, keep_blank_values=True)
     preferred = {"page", "pagina", "p", "page_number", "pag", "pageindex", "page_index"}
     for key, values in q.items():
@@ -57,6 +57,8 @@ def _set_page(url, key, number):
 
 
 def _next_click(page):
+    before_url = page.url
+    before_body = scraper.body(page)[:12000]
     for selector in NEXT_SELECTORS:
         try:
             loc = page.locator(selector)
@@ -68,18 +70,17 @@ def _next_click(page):
                     continue
                 if "disabled" in (e.get_attribute("class") or "").lower():
                     continue
-                before = page.url
                 e.click()
                 page.wait_for_timeout(scraper.PAGE_WAIT_MS)
-                if page.url != before or scraper.body(page)[:8000] != "":
+                if page.url != before_url or scraper.body(page)[:12000] != before_body:
                     return True
         except Exception:
             pass
     return False
 
 
-def _pagination_urls(page, base_url):
-    """Primeiro tenta hrefs numerados; depois aprende o formato clicando UMA vez."""
+def _pagination_pattern(page, base_url):
+    """Descobre o parametro de pagina sem iniciar qualquer varredura serial."""
     candidates = []
     try:
         anchors = page.locator("a[href]")
@@ -93,98 +94,137 @@ def _pagination_urls(page, base_url):
                 continue
             key, number = _page_param_from_url(target)
             if key:
-                candidates.append((key, number, target))
+                candidates.append((key, number))
     except Exception:
         pass
 
     if candidates:
         key = candidates[0][0]
-        nums = [n for k, n, _ in candidates if k == key]
-        return key, max(nums) if nums else 0
+        nums = [n for k, n in candidates if k == key]
+        return key, max(nums) if nums else None
 
-    # Muitos portais deixam o "Próxima" apenas como botão JS. Nesse caso,
-    # fazemos UMA única navegação para descobrir o URL real da página 2.
-    before_url = page.url
+    before = page.url
     if _next_click(page):
-        after_url = page.url
-        key, number = _page_param_from_url(after_url)
+        after = page.url
+        key, number = _page_param_from_url(after)
         if key:
             return key, number
-        # Se o clique alterou o path em vez da query, ainda permitimos o
-        # diagnóstico, mas não entramos silenciosamente em paginação serial.
-        if after_url != before_url:
-            print(f"[{before_url}] NEXT mudou URL para {after_url}, mas o parametro nao foi identificado")
+        if after != before:
+            print(f"[PAGINACAO] NEXT mudou URL para {after}, parametro numerico nao identificado")
 
     return None, None
 
 
-def _listing_worker(args):
-    unidade, url, user, password = args
+def _listing_chunk_worker(args):
+    """Um worker persistente: UMA sessao Edge/login para varias paginas."""
+    unidade, base_url, key, pages, user, password, worker_no = args
     found = {}
+    browser = None
     try:
         with scraper.sync_playwright() as pw:
             browser = pw.chromium.launch(channel="msedge", headless=True)
             context = browser.new_context()
             page = context.new_page()
+
             scraper.login(page, user, password, unidade)
-            if scraper.open_page(page, url, unidade, "pagina_lista", 100):
-                scraper.collect_contracts(page, found)
-            browser.close()
-        return unidade, url, list(found.values()), None
+            print(
+                f"[{unidade}] LISTING_WORKER={worker_no} LOGIN_OK "
+                f"paginas={pages[0]}-{pages[-1]} total={len(pages)}"
+            )
+
+            for pos, page_number in enumerate(pages, 1):
+                url = _set_page(base_url, key, page_number)
+                if scraper.open_page(page, url, unidade, f"lista_pagina_{page_number}", 50):
+                    scraper.collect_contracts(page, found)
+                else:
+                    print(
+                        f"[{unidade}] LISTING_WORKER={worker_no} "
+                        f"PAGINA_ERRO={page_number}"
+                    )
+
+                if pos == 1 or pos % 10 == 0 or pos == len(pages):
+                    print(
+                        f"[{unidade}] LISTING_WORKER={worker_no} "
+                        f"PROGRESSO={pos}/{len(pages)} CONTRATOS={len(found)}"
+                    )
+
+            return unidade, worker_no, list(found.values()), None
     except Exception as exc:
-        return unidade, url, [], str(exc)
+        return unidade, worker_no, [], str(exc)
+    finally:
+        try:
+            if browser:
+                browser.close()
+        except Exception:
+            pass
+
+
+def _split_pages(last, workers):
+    workers = min(max(1, workers), last)
+    chunks = [[] for _ in range(workers)]
+    for index, number in enumerate(range(1, last + 1)):
+        chunks[index % workers].append(number)
+    return [c for c in chunks if c]
 
 
 def _parallel_listing(page, unidade, base_url, user, password):
-    # Captura a primeira pagina antes de descobrir o next.
     found = {}
     scraper.collect_contracts(page, found)
 
-    key, discovered_last = _pagination_urls(page, base_url)
-
+    key, discovered_last = _pagination_pattern(page, base_url)
     if not key:
         raise RuntimeError(
-            f"[{unidade}] PAGINACAO NAO IDENTIFICADA: execucao abortada para impedir fallback sequencial. "
-            "O scraper nao vai percorrer centenas de paginas uma a uma."
+            f"[{unidade}] PAGINACAO NAO IDENTIFICADA: execucao abortada. "
+            "Nao existe fallback sequencial."
         )
 
-    # Se so conseguimos descobrir a pagina 2, usamos o limite configurado como
-    # teto. O workflow atual informa 829, que foi o total observado no CGD.
-    last = discovered_last if discovered_last > 1 else LISTING_PAGES
-    if last < LISTING_PAGES and discovered_last <= 2:
-        last = LISTING_PAGES
+    # O CGD tem 829 paginas observadas. Links visiveis normalmente mostram
+    # apenas uma janela (ex.: 1..10), portanto nao usamos essa janela como
+    # total. O valor configurado pelo workflow e o teto autoritativo.
+    configured = LISTING_PAGES
+    last = configured
+    if discovered_last and discovered_last > configured:
+        last = discovered_last
     last = min(last, max(1, scraper.MAX_PAGES))
 
-    urls = [_set_page(base_url, key, n) for n in range(1, last + 1)]
+    chunks = _split_pages(last, LISTING_WORKERS)
     print(
-        f"[{unidade}] PAGINACAO PARALELA REAL: parametro={key} paginas={len(urls)} "
-        f"workers={LISTING_WORKERS}"
+        f"[{unidade}] PAGINACAO PARALELA REAL: parametro={key} paginas={last} "
+        f"workers={len(chunks)}"
+    )
+    print(
+        f"[{unidade}] MODO=WORKERS_PERSISTENTES: {len(chunks)} browsers/logins "
+        f"para {last} paginas; NAO 1 browser/login por pagina"
     )
 
-    # A pagina original pode ter sido levada para a pagina 2 pelo diagnostico.
-    # Os workers sempre recebem URLs explicitas, inclusive a pagina 1.
-    args = [(unidade, url, user, password) for url in urls]
-    with ProcessPoolExecutor(max_workers=LISTING_WORKERS) as pool:
-        futures = [pool.submit(_listing_worker, a) for a in args]
-        completed = 0
-        errors = 0
+    args = []
+    for worker_no, chunk in enumerate(chunks, 1):
+        args.append((unidade, base_url, key, chunk, user, password, worker_no))
+
+    errors = 0
+    with ProcessPoolExecutor(max_workers=len(chunks)) as pool:
+        futures = [pool.submit(_listing_chunk_worker, a) for a in args]
         for future in as_completed(futures):
-            completed += 1
-            unit, url, contracts, error = future.result()
+            unit, worker_no, contracts, error = future.result()
+            if error:
+                errors += 1
+                print(
+                    f"[{unit}] LISTING_WORKER_ERRO worker={worker_no} erro={error}"
+                )
+                continue
             for contract in contracts:
                 cid = scraper.contract_id(contract)
                 if cid:
                     found[cid] = scraper.contract_url(cid)
-            if error:
-                errors += 1
-                print(f"[{unit}] PAGINA_WORKER_ERRO url={url} erro={error}")
-            if completed % 10 == 0 or completed == len(futures):
-                print(
-                    f"[{unidade}] PAGINAS_PROCESSADAS={completed}/{len(futures)} "
-                    f"CONTRATOS={len(found)} ERROS={errors}"
-                )
+            print(
+                f"[{unit}] LISTING_WORKER_FINALIZADO worker={worker_no} "
+                f"CONTRATOS_ACUMULADOS={len(found)}"
+            )
 
-    print(f"[{unidade}] PAGINACAO FINALIZADA: paginas={last} contratos={len(found)} erros={errors}")
+    print(
+        f"[{unidade}] PAGINACAO FINALIZADA: paginas={last} "
+        f"workers={len(chunks)} contratos={len(found)} erros={errors}"
+    )
     return found
 
 
