@@ -1,13 +1,18 @@
-"""Runner CGD com descoberta de contratos por HTTP autenticado.
+"""Runner CGD com descoberta de contratos por HTTP autenticado e detalhamento protegido.
 
 O navegador e usado pelo scraper.py somente para autenticar e estabelecer a
 sessao. A listagem do CGD usa a paginacao real /alunos?page=N diretamente por
-HTTP, em paralelo e sem abrir um navegador por pagina. A etapa de detalhes
-continua sendo responsabilidade do scraper.py.
+HTTP, em paralelo e sem abrir um navegador por pagina.
+
+O detalhamento dos contratos e executado em processos independentes, em lotes
+de ate 4, com timeout real por contrato. Assim, um Playwright preso nao trava
+a coleta inteira.
 """
 
+import multiprocessing as mp
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -17,11 +22,13 @@ import scraper
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "829")))
 LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "8")))
 LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
+DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
+DETAIL_TIMEOUT_S = max(30, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "90")))
+DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
 
 
 def _listing_source(page, destino):
-    """Retorna a rota real de listagem /alunos usada pelo CGD."""
     if destino and scraper.same_host(destino):
         path = urlparse(destino).path.rstrip("/").lower()
         if path in ("/alunos", "/relatorios/alunos", "/relatorios/individuais/alunos-curso"):
@@ -45,7 +52,6 @@ def _listing_source(page, destino):
 
 
 def _page_url(source, page_number):
-    """Monta exatamente /alunos?page=N, preservando os demais parametros."""
     parsed = urlparse(source)
     query = parse_qs(parsed.query, keep_blank_values=True)
     query["page"] = [str(page_number)]
@@ -53,34 +59,23 @@ def _page_url(source, page_number):
 
 
 def _session_from_page(page):
-    """Copia os cookies da sessao autenticada do Playwright para requests."""
     session = requests.Session()
     for cookie in page.context.cookies():
-        session.cookies.set(
-            cookie["name"],
-            cookie["value"],
-            domain=cookie.get("domain"),
-            path=cookie.get("path", "/"),
-        )
-
+        session.cookies.set(cookie["name"], cookie["value"], domain=cookie.get("domain"), path=cookie.get("path", "/"))
     try:
         user_agent = page.evaluate("() => navigator.userAgent")
     except Exception:
         user_agent = None
-
-    session.headers.update(
-        {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-        }
-    )
+    session.headers.update({
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    })
     if user_agent:
         session.headers["User-Agent"] = user_agent
     return session
 
 
 def _extract_contract_ids(html):
-    """Extrai somente IDs de contrato do HTML bruto, sem interpretar cores."""
     return set(re.findall(r"/contratos/(\d+)", html or "", flags=re.IGNORECASE))
 
 
@@ -91,25 +86,19 @@ def _fetch_listing(args):
     session.headers.update(headers)
     response = session.get(url, timeout=LISTING_TIMEOUT_S, allow_redirects=True)
     final_path = urlparse(response.url).path.rstrip("/").lower()
-
     if final_path.startswith("/login") or "/login" in final_path:
         raise RuntimeError(f"sessao redirecionada para login: {url}")
     response.raise_for_status()
-
     ids = _extract_contract_ids(response.text)
     return unidade, url, ids, len(response.text)
 
 
 def optimized_discover_contracts(page, unidade, destino):
-    """Descobre todos os contratos sem navegar pagina por pagina no navegador."""
     source = _listing_source(page, destino)
     if not source:
         raise RuntimeError(f"[{unidade}] LISTAGEM_NAO_ENCONTRADA")
-
-    # Uma unica navegacao inicial valida que a sessao autenticada enxerga a lista.
     if not scraper.open_page(page, source, unidade, "lista_pagina_1", 300):
         raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM")
-
     first_html = page.content()
     first_ids = _extract_contract_ids(first_html)
     if not first_ids:
@@ -118,23 +107,13 @@ def optimized_discover_contracts(page, unidade, destino):
     session = _session_from_page(page)
     cookies = {c.name: c.value for c in session.cookies}
     headers = dict(session.headers)
-
     urls = [_page_url(source, n) for n in range(1, LISTING_PAGES + 1)]
-    found = {}
-    for cid in first_ids:
-        found[cid] = scraper.contract_url(cid)
+    found = {cid: scraper.contract_url(cid) for cid in first_ids}
 
-    print(
-        f"[{unidade}] PAGINACAO_HTTP_DIRETA iniciado paginas=1..{LISTING_PAGES} "
-        f"workers={LISTING_HTTP_WORKERS} contratos_p1={len(first_ids)}"
-    )
-
+    print(f"[{unidade}] PAGINACAO_HTTP_DIRETA iniciado paginas=1..{LISTING_PAGES} workers={LISTING_HTTP_WORKERS} contratos_p1={len(first_ids)}")
     completed = 1
     with ThreadPoolExecutor(max_workers=LISTING_HTTP_WORKERS) as pool:
-        futures = {
-            pool.submit(_fetch_listing, (unidade, url, cookies, headers)): url
-            for url in urls[1:]
-        }
+        futures = {pool.submit(_fetch_listing, (unidade, url, cookies, headers)): url for url in urls[1:]}
         for future in as_completed(futures):
             url = futures[future]
             try:
@@ -145,24 +124,127 @@ def optimized_discover_contracts(page, unidade, destino):
                 completed += 1
                 page_number = parse_qs(urlparse(url).query).get("page", ["?"])[0]
                 if completed % 10 == 0 or page_number == str(LISTING_PAGES):
-                    print(
-                        f"[{unidade}] pagina_lista={page_number}/{LISTING_PAGES} "
-                        f"contratos_acumulados={len(found)} novos={len(found)-before} bytes={body_size}"
-                    )
+                    print(f"[{unidade}] pagina_lista={page_number}/{LISTING_PAGES} contratos_acumulados={len(found)} novos={len(found)-before} bytes={body_size}")
             except Exception as exc:
                 completed += 1
                 print(f"[{unidade}] pagina_lista_ERRO url={url}: {exc}")
 
-    print(
-        f"[{unidade}] PAGINACAO_HTTP_FINAL paginas={completed}/{LISTING_PAGES} "
-        f"contratos={len(found)}"
-    )
+    print(f"[{unidade}] PAGINACAO_HTTP_FINAL paginas={completed}/{LISTING_PAGES} contratos={len(found)}")
     return list(found.values())[:MAX_CONTRACTS]
 
 
-# Substitui somente a descoberta de contratos; toda a coleta de detalhes,
-# criticidade, faltas, disciplinas, reposicoes e persistencia permanece em scraper.py.
+def _detail_process_entry(args, queue):
+    """Executa um contrato isoladamente para permitir encerramento forçado."""
+    try:
+        result = scraper.detail_worker(args)
+        queue.put(result)
+    except BaseException as exc:
+        queue.put({"ok": False, "cid": args[2], "error": repr(exc), "attempt": args[5]})
+
+
+def _run_detail_batch(u, cfg, contracts, reps, storage_state, attempt):
+    """Executa no maximo DETAIL_WORKERS contratos simultaneamente.
+
+    Cada contrato tem um processo proprio. Um processo que excede
+    DETAIL_TIMEOUT_S e terminado, liberando a vaga para o proximo contrato.
+    """
+    ctx = mp.get_context("spawn")
+    results = []
+    failed = []
+    total = len(contracts)
+    print(f"[{u}] BATCH {attempt}: {total} contratos / {min(DETAIL_WORKERS, total)} processos / timeout={DETAIL_TIMEOUT_S}s")
+
+    for start in range(0, total, DETAIL_WORKERS):
+        chunk = contracts[start:start + DETAIL_WORKERS]
+        queue = ctx.Queue()
+        running = []
+        started_at = {}
+
+        for cu in chunk:
+            cid = scraper.contract_id(cu)
+            args = (u, cfg, cid, reps, storage_state, attempt)
+            proc = ctx.Process(target=_detail_process_entry, args=(args, queue))
+            proc.start()
+            running.append((proc, cid))
+            started_at[cid] = time.monotonic()
+
+        pending = {cid: (proc, cid) for proc, cid in running}
+        while pending:
+            try:
+                result = queue.get(timeout=1)
+                cid = result.get("cid")
+                item = pending.pop(cid, None)
+                if item is None:
+                    continue
+                proc, _ = item
+                if result.get("ok"):
+                    results.append(result["aluno"])
+                else:
+                    failed.append(cid)
+                    print(f"[{u}] FALHA CONTRATO {cid}: {result.get('error', 'erro desconhecido')}")
+                proc.join(timeout=2)
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=2)
+            except Exception:
+                pass
+
+            now = time.monotonic()
+            expired = []
+            for cid, (proc, _) in list(pending.items()):
+                if now - started_at[cid] >= DETAIL_TIMEOUT_S:
+                    expired.append(cid)
+                    print(f"[{u}] TIMEOUT CONTRATO {cid} apos {DETAIL_TIMEOUT_S}s; encerrando processo")
+                    if proc.is_alive():
+                        proc.terminate()
+                    proc.join(timeout=5)
+                    failed.append(cid)
+                    pending.pop(cid, None)
+
+            if not pending:
+                break
+
+        for proc, _ in running:
+            if proc.is_alive():
+                proc.terminate()
+            proc.join(timeout=2)
+        try:
+            queue.close()
+            queue.join_thread()
+        except Exception:
+            pass
+
+        done = min(start + DETAIL_WORKERS, total)
+        print(f"[{u}] PROGRESSO DETALHAMENTO: {done}/{total} contratos processados")
+
+    return results, failed
+
+
+def safe_process_details(u, cfg, contracts, reps, storage_state):
+    if not contracts:
+        return []
+    pending = list(contracts)
+    results = []
+    for attempt in range(1, DETAIL_RETRIES + 2):
+        if not pending:
+            break
+        print(f"[{u}] INICIO DETALHAMENTO PROTEGIDO: rodada={attempt} pendentes={len(pending)}")
+        batch_results, failed_ids = _run_detail_batch(u, cfg, pending, reps, storage_state, attempt)
+        results.extend(batch_results)
+        pending = [scraper.contract_url(cid) for cid in failed_ids if cid]
+        if pending and attempt <= DETAIL_RETRIES:
+            print(f"[{u}] RETENTATIVA: {len(pending)} contratos")
+
+    print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(contracts)}")
+    for cu in pending:
+        print(f"[{u}] CONTRATO NAO CAPTURADO: {cu}")
+    return results
+
+
+# A listagem e o detalhamento sao substituidos aqui; o restante da coleta,
+# criticidade, faltas, disciplinas, reposicoes e persistencia continua no scraper.py.
 scraper.discover_contracts = optimized_discover_contracts
+scraper.process_details = safe_process_details
 
 
 if __name__ == "__main__":
