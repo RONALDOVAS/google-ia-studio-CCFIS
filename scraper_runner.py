@@ -1,4 +1,4 @@
-"""Runner CGD com listagem HTTP direta e detalhamento protegido."""
+"""Runner CGD: listagem HTTP direta e detalhamento protegido com baixo consumo de recursos."""
 
 import multiprocessing as mp
 import os
@@ -11,15 +11,12 @@ import requests
 import scraper
 
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "829")))
-LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "8")))
+LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "4")))
 LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
-DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
-DETAIL_TIMEOUT_S = max(30, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "90")))
+DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "1")))
+DETAIL_TIMEOUT_S = max(30, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "120")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
-
-# URL REAL COMPROVADA no CGD. Nao derivar da CGD_LOGIN_URL,
-# porque essa variavel aponta para /login e nao para a raiz do portal.
 LISTING_SOURCE = "https://app.cgd.com.br/alunos"
 
 
@@ -42,10 +39,7 @@ def _session_from_page(page):
         user_agent = page.evaluate("() => navigator.userAgent")
     except Exception:
         user_agent = None
-    session.headers.update({
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-    })
+    session.headers.update({"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"})
     if user_agent:
         session.headers["User-Agent"] = user_agent
     return session
@@ -77,15 +71,13 @@ def optimized_discover_contracts(page, unidade, destino):
     print(f"[{unidade}] LISTAGEM REAL: {page.url} contratos_p1={len(first_ids)}")
     if not first_ids:
         raise RuntimeError(f"[{unidade}] LISTAGEM_PAGINA_1_SEM_CONTRATOS: {page.url}")
-
     session = _session_from_page(page)
     cookies = {c.name: c.value for c in session.cookies}
     headers = dict(session.headers)
     urls = [_page_url(source, n) for n in range(1, LISTING_PAGES + 1)]
     found = {cid: scraper.contract_url(cid) for cid in first_ids}
     print(f"[{unidade}] PAGINACAO_HTTP_DIRETA iniciado paginas=1..{LISTING_PAGES} workers={LISTING_HTTP_WORKERS} contratos_p1={len(first_ids)}")
-    completed = 1
-    errors = 0
+    completed, errors = 1, 0
     with ThreadPoolExecutor(max_workers=LISTING_HTTP_WORKERS) as pool:
         futures = {pool.submit(_fetch_listing, (unidade, url, cookies, headers)): url for url in urls[1:]}
         for future in as_completed(futures):
@@ -104,6 +96,8 @@ def optimized_discover_contracts(page, unidade, destino):
                 errors += 1
                 print(f"[{unidade}] pagina_lista_ERRO url={url}: {exc}")
     print(f"[{unidade}] PAGINACAO_HTTP_FINAL paginas={completed}/{LISTING_PAGES} contratos={len(found)} erros={errors}")
+    if errors >= LISTING_PAGES // 2:
+        raise RuntimeError(f"[{unidade}] LISTAGEM_HTTP_DEMASIADOS_ERROS: {errors}/{LISTING_PAGES}")
     return list(found.values())[:MAX_CONTRACTS]
 
 
@@ -118,12 +112,12 @@ def _run_detail_batch(u, cfg, contracts, reps, storage_state, attempt):
     ctx = mp.get_context("spawn")
     results, failed = [], []
     total = len(contracts)
-    print(f"[{u}] BATCH {attempt}: {total} contratos / {min(DETAIL_WORKERS, total)} processos / timeout={DETAIL_TIMEOUT_S}s")
-    for start in range(0, total, DETAIL_WORKERS):
-        chunk = contracts[start:start + DETAIL_WORKERS]
+    workers = min(DETAIL_WORKERS, total)
+    print(f"[{u}] BATCH {attempt}: {total} contratos / {workers} processos / timeout={DETAIL_TIMEOUT_S}s")
+    for start in range(0, total, workers):
+        chunk = contracts[start:start + workers]
         queue = ctx.Queue()
-        running = []
-        started_at = {}
+        running, started_at = [], {}
         for cu in chunk:
             cid = scraper.contract_id(cu)
             proc = ctx.Process(target=_detail_process_entry, args=((u, cfg, cid, reps, storage_state, attempt), queue))
@@ -163,23 +157,21 @@ def _run_detail_batch(u, cfg, contracts, reps, storage_state, attempt):
                 proc.terminate()
             proc.join(timeout=2)
         try:
-            queue.close()
-            queue.join_thread()
+            queue.close(); queue.join_thread()
         except Exception:
             pass
-        print(f"[{u}] PROGRESSO DETALHAMENTO: {min(start + DETAIL_WORKERS, total)}/{total} contratos processados")
+        print(f"[{u}] PROGRESSO DETALHAMENTO: {min(start + workers, total)}/{total} contratos processados")
     return results, failed
 
 
 def safe_process_details(u, cfg, contracts, reps, storage_state):
     if not contracts:
         return []
-    pending = list(contracts)
-    results = []
+    pending, results = list(contracts), []
     for attempt in range(1, DETAIL_RETRIES + 2):
         if not pending:
             break
-        print(f"[{u}] INICIO DETALHAMENTO PROTEGIDO: rodada={attempt} pendentes={len(pending)}")
+        print(f"[{u}] INICIO DETALHAMENTO PROTEGIDO: rodada={attempt} pendentes={len(pending)} workers={DETAIL_WORKERS}")
         batch_results, failed_ids = _run_detail_batch(u, cfg, pending, reps, storage_state, attempt)
         results.extend(batch_results)
         pending = [scraper.contract_url(cid) for cid in failed_ids if cid]
