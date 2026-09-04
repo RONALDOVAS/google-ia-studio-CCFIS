@@ -10,7 +10,8 @@ from supabase import create_client, Client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-CGD_URL = os.getenv("CGD_LOGIN_URL") or "https://app.cgd.com.br/"
+CGD_URL = "https://app.cgd.com.br/"
+CGD_LOGIN_URL = os.getenv("CGD_LOGIN_URL") or "https://app.cgd.com.br/login"
 CONFIG = {
     "matriz": {"usuario": os.getenv("CGD_USER_MATRIZ"), "senha": os.getenv("CGD_PASS_MATRIZ"), "destino": os.getenv("CGD_MATRIZ_URL")},
     "filial": {"usuario": os.getenv("CGD_USER_FILIAL"), "senha": os.getenv("CGD_PASS_FILIAL"), "destino": os.getenv("CGD_FILIAL_URL")},
@@ -94,7 +95,7 @@ def links(page):
 
 
 def contract_id(url):
-    m = re.search(r"/contratos/(\d+)$", urlparse(url).path.rstrip("/"), re.I)
+    m = re.search(r"/contratos/(\d+)", urlparse(url).path, re.I)
     return m.group(1) if m else None
 
 
@@ -173,7 +174,8 @@ def extract_name(page, fallback=None):
 
 
 def login(page, user, password, u):
-    page.goto(CGD_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
+    # O login deve sempre começar na rota de autenticacao real.
+    page.goto(CGD_LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
     page.wait_for_timeout(1500)
     us = page.locator('input[type="text"],input[type="email"],input[name*="user" i],input[name*="login" i],input[name*="email" i]')
     ps = page.locator('input[type="password"],input[name*="senha" i],input[name*="password" i]')
@@ -186,17 +188,24 @@ def login(page, user, password, u):
         if ps.nth(i).is_visible():
             P = ps.nth(i)
             break
-    if U and P and user and password:
-        U.fill(user)
-        P.fill(password)
-        bs = page.locator('button[type="submit"],input[type="submit"],button:has-text("Entrar"),button:has-text("Acessar"),button:has-text("Login")')
-        B = next((bs.nth(i) for i in range(bs.count()) if bs.nth(i).is_visible()), None)
-        if not B:
-            raise RuntimeError(f"[{u}] botao de login nao encontrado")
-        B.click()
-        page.wait_for_timeout(2000)
+    if not U or not P:
+        raise RuntimeError(f"[{u}] CAMPOS_LOGIN_NAO_ENCONTRADOS: {page.url}")
+    if not user or not password:
+        raise RuntimeError(f"[{u}] CREDENCIAIS_NAO_CONFIGURADAS")
+    U.fill(user)
+    P.fill(password)
+    bs = page.locator('button[type="submit"],input[type="submit"],button:has-text("Entrar"),button:has-text("Acessar"),button:has-text("Login")')
+    B = next((bs.nth(i) for i in range(bs.count()) if bs.nth(i).is_visible()), None)
+    if not B:
+        raise RuntimeError(f"[{u}] botao de login nao encontrado")
+    B.click()
+    page.wait_for_timeout(2500)
     if not same_host(page.url):
-        raise RuntimeError(f"[{u}] login nao permaneceu no host do CGD: {page.url}")
+        raise RuntimeError(f"[{u}] login saiu do host do CGD: {page.url}")
+    # Nao chamar de LOGIN OK enquanto ainda estivermos em /login.
+    final_path = urlparse(page.url).path.rstrip("/").lower()
+    if final_path == "/login" or final_path.startswith("/login/"):
+        raise RuntimeError(f"[{u}] LOGIN_REJEITADO_OU_SESSAO_NAO_ESTABELECIDA: {page.url}")
     print(f"[{u}] LOGIN OK: {page.url}")
     dump(page, u, "apos_login")
 
@@ -378,70 +387,30 @@ def contract_bundle(page, cid, u, reps):
     point = max(cur, key=lambda r: (num(r, "modulo"), num(r, "passo"), num(r, "progresso"))) if cur else None
     aluno = {
         "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "email": None, "telefone": None,
-        "curso": None, "turma_nome": None, "professor_nome": None, "data_inicio": None, "meses_contrato_total": None,
-        "ultima_aula": None, "ultimo_acesso": None, "faltas_totais": freq["faltas"], "faltas_mes_atual": 0,
-        "mes_referencia_faltas": datetime.now().strftime("%m/%Y"), "dias_em_curso": 0, "criticidade": "normal",
-        "tratativa_sugerida": "normal", "status_tratativa": "pendente", "status_matricula": "ativo",
-        "bloqueado_automaticamente": freq["faltas"] > 3, "motivo_bloqueio": "mais_de_3_faltas" if freq["faltas"] > 3 else None,
-        "total_disciplinas_grade": len(rows), "disciplinas_concluidas": len(done), "unidade": u, "rota_cgd": cu,
-        "rota_frequencia_cgd": frequrl, "rota_cursos_individuais_cgd": course, "rota_horarios_individuais_cgd": schedule,
-        "rota_aluno_cgd": f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit" if sid else None,
-        "frequencia_detalhada": freq["registros"], "reposicoes_detalhadas": [r for r in reps if belongs(r, cid, sid, name)],
-        "disciplinas_detalhadas": rows, "disciplinas_concluidas_detalhadas": done,
-        "disciplinas_em_andamento_detalhadas": cur, "disciplinas_futuras_detalhadas": fut,
-        "disciplina_atual": point.get("disciplina") if point else None, "modulo_atual": point.get("modulo") if point else None,
-        "passo_atual": point.get("passo") if point else None, "data_ponto_atual": point.get("data") if point else None,
-        "progresso_atual": point.get("progresso") if point else None, "carga_horaria_atual": point.get("carga_horaria") if point else None,
-        "horarios_detalhados": st, "dados_aluno_detalhados": at,
+        "curso": None, "turma": None, "professor": None, "data_matricula": None, "data_inicio": None, "data_fim": None,
+        "unidade": u, "faltas": freq["faltas"], "presencas": freq["presencas"], "ultimo_acesso": None,
+        "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO", "cgd_url": cu,
+        "disciplinas": rows, "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
+        "progresso_atual": point, "horarios": st, "aluno_raw": at, "frequencia_raw": freq["registros"],
+        "reposicoes": [r for r in reps if belongs(r, cid, sid, name)], "capturado_em": datetime.utcnow().isoformat() + "Z"
     }
-    print(f"[{u}] CAPTURADO: contrato={cid} aluno={aluno['nome']!r} aluno_id={sid} faltas={freq['faltas']} disciplinas={len(rows)} concluidas={len(done)} andamento={len(cur)} futuras={len(fut)}")
     return aluno
-
-
-def global_reps(page, u):
-    open_page(page, CGD_URL, u, "inicio_reposicoes")
-    cs = [(t, h) for t, h in links(page) if "reposi" in low(t + " " + h) and "turmas/reposicao" not in h.lower()]
-    if not cs:
-        cs = [(t, h) for t, h in links(page) if "reposi" in low(t + " " + h)]
-    if not cs:
-        return []
-    print(f"[{u}] REPOSICAO REAL: {cs[0][0]!r} -> {cs[0][1]}")
-    if not open_page(page, cs[0][1], u, "individuais_reposicoes"):
-        return []
-    r = extract_replacements(page, u)
-    print(f"[{u}] REPOSICOES GLOBAIS CAPTURADAS: {len(r)}")
-    return r
 
 
 def detail_worker(args):
     u, cfg, cid, reps, storage_state, attempt = args
-    with sync_playwright() as pw:
-        browser = None
-        context = None
-        try:
-            browser = pw.chromium.launch(channel="msedge", headless=HEADLESS, args=["--disable-blink-features=AutomationControlled"])
-            context = browser.new_context(storage_state=storage_state, viewport={"width": 1440, "height": 1000})
+    profile = EDGE_PROFILE_BASE / f"{u}_{cid}_{attempt}"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+            context = browser.new_context(storage_state=storage_state)
             page = context.new_page()
-            page.set_default_timeout(PAGE_TIMEOUT_MS)
-            page.set_default_navigation_timeout(PAGE_TIMEOUT_MS)
-            if not same_host(page.url or CGD_URL):
-                page.goto(CGD_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
-            result = contract_bundle(page, cid, u, reps)
-            return {"ok": True, "aluno": result, "cid": cid, "attempt": attempt}
-        except Exception as e:
-            print(f"[{u}] ERRO CONTRATO {cid} tentativa={attempt}: {e}")
-            return {"ok": False, "cid": cid, "error": str(e), "attempt": attempt}
-        finally:
-            try:
-                if context:
-                    context.close()
-            except Exception:
-                pass
-            try:
-                if browser:
-                    browser.close()
-            except Exception:
-                pass
+            aluno = contract_bundle(page, cid, u, reps)
+            context.close(); browser.close()
+            return {"ok": True, "cid": cid, "aluno": aluno, "attempt": attempt}
+    except Exception as e:
+        return {"ok": False, "cid": cid, "error": repr(e), "attempt": attempt}
 
 
 def process_details(u, cfg, contracts, reps, storage_state):
@@ -455,7 +424,7 @@ def process_details(u, cfg, contracts, reps, storage_state):
         if not pending:
             break
         print(f"[{u}] LOTE DE DETALHAMENTO {round_no}: {len(pending)} contratos")
-        args = [(u, cfg, contract_id(cu), reps, storage_state, round_no) for cu in pending]
+        args = [(u, cfg, contract_id(c), reps, storage_state, round_no) for c in pending]
         pending_next = []
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(detail_worker, a) for a in args]
@@ -464,90 +433,76 @@ def process_details(u, cfg, contracts, reps, storage_state):
                     r = fut.result()
                 except Exception as e:
                     r = {"ok": False, "cid": "desconhecido", "error": str(e), "attempt": round_no}
-                if r.get("ok"):
+                if r.get("ok") and r.get("aluno"):
                     results.append(r["aluno"])
                 else:
-                    pending_next.append(r.get("cid"))
+                    cid = r.get("cid")
+                    if cid and cid != "desconhecido":
+                        pending_next.append(cid)
+                    print(f"[{u}] FALHA DETALHE {r.get('cid')}: {r.get('error')}")
                 if idx % max(1, workers) == 0 or idx == len(futures):
-                    print(f"[{u}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)} concluídos nesta rodada")
+                    print(f"[{u}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)}")
         pending = [contract_url(cid) for cid in pending_next if cid]
-        if pending:
-            print(f"[{u}] RETENTATIVA NECESSARIA: {len(pending)} contratos")
     failed = pending
     print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(failed)} de={len(contracts)}")
-    for cu in failed:
-        print(f"[{u}] CONTRATO NAO CAPTURADO APOS RETENTATIVA: {cu}")
     return results
+
+
+def get_replacements(page, u):
+    for _, h in links(page):
+        if "reposi" in low(h):
+            if open_page(page, h, u, "reposicoes"):
+                return extract_replacements(page, u)
+    for url in (f"{CGD_URL.rstrip('/')}/individuais/reposicao", f"{CGD_URL.rstrip('/')}/reposicoes"):
+        if open_page(page, url, u, "reposicoes_direta"):
+            out = extract_replacements(page, u)
+            if out:
+                return out
+    return []
 
 
 def run_unit(u, cfg, pw):
     profile = EDGE_PROFILE_BASE / u
     profile.mkdir(parents=True, exist_ok=True)
-    b = pw.chromium.launch_persistent_context(user_data_dir=str(profile), channel="msedge", headless=HEADLESS, viewport={"width": 1440, "height": 1000}, args=["--disable-blink-features=AutomationControlled"])
-    page = b.pages[0] if b.pages else b.new_page()
+    browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+    context = browser.new_context()
+    page = context.new_page()
     try:
-        page.set_default_timeout(PAGE_TIMEOUT_MS)
-        page.set_default_navigation_timeout(PAGE_TIMEOUT_MS)
         login(page, cfg["usuario"], cfg["senha"], u)
         contracts = discover_contracts(page, u, cfg["destino"])
-        reps = global_reps(page, u)
-        state = Path(f".cgd_storage_{u}.json")
-        b.storage_state(path=str(state))
-        b.close()
-        b = None
-        out = process_details(u, cfg, contracts, reps, str(state))
-        try:
-            state.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return out
-    finally:
-        try:
-            if b:
-                b.close()
-        except Exception:
-            pass
-
-
-def sync_supabase(alunos):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        print("SUPABASE: nao configurado; JSON salvo.")
-        return
-    columns = {"cgd_matricula_id", "nome", "contrato", "email", "telefone", "curso", "turma_nome", "professor_nome", "data_inicio", "meses_contrato_total", "ultima_aula", "ultimo_acesso", "faltas_totais", "faltas_mes_atual", "mes_referencia_faltas", "dias_em_curso", "criticidade", "tratativa_sugerida", "status_tratativa", "status_matricula", "bloqueado_automaticamente", "motivo_bloqueio", "total_disciplinas_grade", "disciplinas_concluidas", "unidade", "rota_cgd"}
-    try:
-        client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        payload = [{k: v for k, v in a.items() if k in columns} for a in alunos]
-        if payload:
-            client.table("alunos").upsert(payload, on_conflict="contrato,unidade").execute()
-            print(f"SUPABASE: {len(payload)} alunos sincronizados.")
+        reps = get_replacements(page, u)
+        print(f"[{u}] REPOSICOES GLOBAIS CAPTURADAS: {len(reps)}")
+        state = profile / "storage_state.json"
+        context.storage_state(path=str(state))
     except Exception as e:
-        print(f"SUPABASE: falha na sincronizacao: {e}")
+        print(f"[{u}] ERRO FATAL: {e}")
+        return []
+    finally:
+        context.close(); browser.close()
+    return process_details(u, cfg, contracts, reps, str(state))
 
 
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: descoberta real -> reposicoes -> detalhamento paralelo por contrato")
+    print("Fluxo: autenticacao real -> listagem real -> reposicoes -> detalhamento")
     print(f"Configuracao: workers={DETAIL_WORKERS}, page_wait_ms={PAGE_WAIT_MS}, timeout_ms={PAGE_TIMEOUT_MS}, diagnostico={DIAGNOSTICO}")
     print("=" * 80)
     all_alunos = []
     with sync_playwright() as pw:
         for u in ("matriz", "filial"):
-            try:
-                all_alunos += run_unit(u, CONFIG[u], pw)
-            except Exception as e:
-                print(f"[{u}] ERRO FATAL: {e}")
-    unique = {(a.get("unidade"), a.get("contrato")): a for a in all_alunos}
-    all_alunos = list(unique.values())
-    JSON_PATH.write_text(json.dumps(all_alunos, ensure_ascii=False, indent=2), encoding="utf-8")
+            all_alunos += run_unit(u, CONFIG[u], pw)
+    try:
+        JSON_PATH.write_text(json.dumps(all_alunos, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"ERRO gravando {JSON_PATH}: {e}")
     print("=" * 80)
     print(f"TOTAL GERAL DE ALUNOS CAPTURADOS: {len(all_alunos)}")
-    print(f"MATRIZ: {sum(a.get('unidade') == 'matriz' for a in all_alunos)}")
-    print(f"FILIAL: {sum(a.get('unidade') == 'filial' for a in all_alunos)}")
+    print(f"MATRIZ: {sum(1 for a in all_alunos if a.get('unidade') == 'matriz')}")
+    print(f"FILIAL: {sum(1 for a in all_alunos if a.get('unidade') == 'filial')}")
     print("=" * 80)
     if not all_alunos:
-        raise SystemExit("Nenhum aluno foi capturado pelo CGD.")
-    sync_supabase(all_alunos)
+        print("Nenhum aluno foi capturado pelo CGD.")
 
 
 if __name__ == "__main__":
