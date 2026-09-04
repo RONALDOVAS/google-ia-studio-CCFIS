@@ -1,267 +1,89 @@
-"""Executor CGD: paginas da listagem em workers persistentes + detalhes em paralelo.
-
-IMPORTANTE: a listagem NAO cria um processo/browser/login por pagina.
-Ela cria no maximo LISTING_WORKERS processos persistentes; cada processo faz
-login UMA vez e percorre um bloco de paginas. Assim 829 paginas nao viram
-829 logins nem 829 browsers.
-"""
-
+"""Executor CGD: paginação paralela com poucos browsers persistentes."""
 import os
-import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
-
 import scraper
 
-LISTING_PATHS = {
-    "/alunos",
-    "/relatorios/alunos",
-    "/relatorios/individuais/alunos-curso",
-}
+LISTING_WORKERS=max(1,int(os.getenv("CGD_LISTING_WORKERS","4")))
+LISTING_PAGES=max(1,int(os.getenv("CGD_LISTING_PAGES","829")))
+CHUNK=(LISTING_PAGES+LISTING_WORKERS-1)//LISTING_WORKERS
+LISTING_PATHS={"/alunos","/relatorios/alunos","/relatorios/individuais/alunos-curso"}
+NEXT_SELECTORS=['a[rel="next"]','button[rel="next"]','a[aria-label*="next" i]','button[aria-label*="next" i]','a[aria-label*="proxima" i]','button[aria-label*="proxima" i]','a:has-text("Próxima")','button:has-text("Próxima")','a:has-text("Proxima")','button:has-text("Proxima")','a:has-text("Next")','button:has-text("Next")','a:has-text("›")','button:has-text("›")']
 
-LISTING_WORKERS = max(1, int(os.getenv("CGD_LISTING_WORKERS", "12")))
-LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "829")))
+def _param(url):
+ q=parse_qs(urlparse(url).query,keep_blank_values=True)
+ for k,v in q.items():
+  if v and v[-1].isdigit() and k.lower() in {"page","pagina","p","page_number","pag","pageindex","page_index"}: return k
+ for k,v in q.items():
+  if v and v[-1].isdigit() and int(v[-1])>=1:return k
+ return None
 
-NEXT_SELECTORS = [
-    'a[rel="next"]', 'button[rel="next"]',
-    'a[aria-label*="next" i]', 'button[aria-label*="next" i]',
-    'a[aria-label*="proxima" i]', 'button[aria-label*="proxima" i]',
-    'a:has-text("Próxima")', 'button:has-text("Próxima")',
-    'a:has-text("Proxima")', 'button:has-text("Proxima")',
-    'a:has-text("Next")', 'button:has-text("Next")',
-    'a:has-text("›")', 'button:has-text("›")',
-]
+def _set(url,key,n):
+ p=urlparse(url);q=parse_qs(p.query,keep_blank_values=True);q[key]=[str(n)];return urlunparse(p._replace(query=urlencode(q,doseq=True)))
 
+def _learn(page):
+ try:
+  a=page.locator('a[href]')
+  for i in range(min(a.count(),3000)):
+   h=a.nth(i).get_attribute('href')
+   if h:
+    h=scraper.abs_url(page,h)
+    if scraper.same_host(h) and _param(h):return _param(h)
+ except Exception:pass
+ before=page.url
+ try:
+  old=scraper.body(page)[:10000]
+  for s in NEXT_SELECTORS:
+   loc=page.locator(s)
+   for i in range(loc.count()):
+    e=loc.nth(i)
+    if not e.is_visible() or (e.get_attribute('aria-disabled') or '').lower()=='true' or 'disabled' in (e.get_attribute('class') or '').lower():continue
+    e.click();page.wait_for_timeout(250)
+    if page.url!=before and _param(page.url):return _param(page.url)
+    if scraper.body(page)[:10000]!=old:return None
+ except Exception:pass
+ return None
 
-def _is_listing(url):
-    return urlparse(url).path.rstrip("/").lower() in LISTING_PATHS
-
-
-def _page_param_from_url(url):
-    q = parse_qs(urlparse(url).query, keep_blank_values=True)
-    preferred = {"page", "pagina", "p", "page_number", "pag", "pageindex", "page_index"}
-    for key, values in q.items():
-        if values and re.fullmatch(r"\d+", values[-1]) and int(values[-1]) >= 1 and key.lower() in preferred:
-            return key, int(values[-1])
-    for key, values in q.items():
-        if values and re.fullmatch(r"\d+", values[-1]) and int(values[-1]) >= 1:
-            return key, int(values[-1])
-    return None, None
-
-
-def _set_page(url, key, number):
-    parts = urlparse(url)
-    q = parse_qs(parts.query, keep_blank_values=True)
-    q[key] = [str(number)]
-    return urlunparse(parts._replace(query=urlencode(q, doseq=True)))
-
-
-def _next_click(page):
-    before_url = page.url
-    before_body = scraper.body(page)[:12000]
-    for selector in NEXT_SELECTORS:
-        try:
-            loc = page.locator(selector)
-            for i in range(loc.count()):
-                e = loc.nth(i)
-                if not e.is_visible():
-                    continue
-                if (e.get_attribute("aria-disabled") or "").lower() == "true":
-                    continue
-                if "disabled" in (e.get_attribute("class") or "").lower():
-                    continue
-                e.click()
-                page.wait_for_timeout(scraper.PAGE_WAIT_MS)
-                if page.url != before_url or scraper.body(page)[:12000] != before_body:
-                    return True
-        except Exception:
-            pass
-    return False
-
-
-def _pagination_pattern(page, base_url):
-    """Descobre o parametro de pagina sem iniciar qualquer varredura serial."""
-    candidates = []
+def _worker(args):
+ unidade,urls,user,password=args;found={};errors=0
+ try:
+  with scraper.sync_playwright() as pw:
+   browser=pw.chromium.launch(channel='msedge',headless=True)
+   context=browser.new_context();page=context.new_page();scraper.login(page,user,password,unidade)
+   for n,url in enumerate(urls,1):
     try:
-        anchors = page.locator("a[href]")
-        for i in range(min(anchors.count(), 3000)):
-            e = anchors.nth(i)
-            href = e.get_attribute("href")
-            if not href:
-                continue
-            target = scraper.abs_url(page, href)
-            if not target or not scraper.same_host(target):
-                continue
-            key, number = _page_param_from_url(target)
-            if key:
-                candidates.append((key, number))
-    except Exception:
-        pass
+     if scraper.open_page(page,url,unidade,f'pagina_{n}',100):scraper.collect_contracts(page,found)
+     else:errors+=1
+    except Exception as e:errors+=1;print(f'[{unidade}] WORKER_ERRO {url}: {e}')
+    if n==1 or n%10==0 or n==len(urls):print(f'[{unidade}] WORKER_PROG {n}/{len(urls)} contratos={len(found)} erros={errors}')
+   browser.close()
+ except Exception as e:return unidade,list(found.values()),errors+1,str(e)
+ return unidade,list(found.values()),errors,None
 
-    if candidates:
-        key = candidates[0][0]
-        nums = [n for k, n in candidates if k == key]
-        return key, max(nums) if nums else None
+def optimized_discover_contracts(page,unidade,destino):
+ user=scraper.CONFIG[unidade]['usuario'];password=scraper.CONFIG[unidade]['senha']
+ base=destino if destino and scraper.same_host(destino) and urlparse(destino).path.rstrip('/').lower() in LISTING_PATHS else None
+ if not base:
+  if not scraper.open_page(page,scraper.CGD_URL,unidade,'inicio',150):return []
+  for _,h in scraper.links(page):
+   if urlparse(h).path.rstrip('/').lower() in LISTING_PATHS:base=h;break
+ if not base or not scraper.open_page(page,base,unidade,'lista_base',150):return []
+ key=_learn(page)
+ if not key:raise RuntimeError(f'[{unidade}] PAGINACAO_NAO_URL: fallback serial bloqueado')
+ print(f'[{unidade}] PAGINACAO PARALELA REAL: paginas={LISTING_PAGES} workers={LISTING_WORKERS} parametro={key}')
+ urls=[_set(base,key,n) for n in range(1,LISTING_PAGES+1)]
+ chunks=[urls[i:i+CHUNK] for i in range(0,len(urls),CHUNK)]
+ found={};errors=0
+ with ProcessPoolExecutor(max_workers=LISTING_WORKERS) as pool:
+  fs=[pool.submit(_worker,(unidade,c,user,password)) for c in chunks]
+  for i,f in enumerate(as_completed(fs),1):
+   unit,contracts,err,exc=f.result();errors+=err
+   for c in contracts:
+    cid=scraper.contract_id(c)
+    if cid:found[cid]=scraper.contract_url(cid)
+   print(f'[{unit}] WORKER_FINALIZADO={i}/{len(fs)} contratos={len(found)} erros={errors}')
+ print(f'[{unidade}] PAGINACAO FINALIZADA paginas={LISTING_PAGES} contratos={len(found)} erros={errors}')
+ return list(found.values())[:scraper.MAX_CONTRACTS]
 
-    before = page.url
-    if _next_click(page):
-        after = page.url
-        key, number = _page_param_from_url(after)
-        if key:
-            return key, number
-        if after != before:
-            print(f"[PAGINACAO] NEXT mudou URL para {after}, parametro numerico nao identificado")
-
-    return None, None
-
-
-def _listing_chunk_worker(args):
-    """Um worker persistente: UMA sessao Edge/login para varias paginas."""
-    unidade, base_url, key, pages, user, password, worker_no = args
-    found = {}
-    browser = None
-    try:
-        with scraper.sync_playwright() as pw:
-            browser = pw.chromium.launch(channel="msedge", headless=True)
-            context = browser.new_context()
-            page = context.new_page()
-
-            scraper.login(page, user, password, unidade)
-            print(
-                f"[{unidade}] LISTING_WORKER={worker_no} LOGIN_OK "
-                f"paginas={pages[0]}-{pages[-1]} total={len(pages)}"
-            )
-
-            for pos, page_number in enumerate(pages, 1):
-                url = _set_page(base_url, key, page_number)
-                if scraper.open_page(page, url, unidade, f"lista_pagina_{page_number}", 50):
-                    scraper.collect_contracts(page, found)
-                else:
-                    print(
-                        f"[{unidade}] LISTING_WORKER={worker_no} "
-                        f"PAGINA_ERRO={page_number}"
-                    )
-
-                if pos == 1 or pos % 10 == 0 or pos == len(pages):
-                    print(
-                        f"[{unidade}] LISTING_WORKER={worker_no} "
-                        f"PROGRESSO={pos}/{len(pages)} CONTRATOS={len(found)}"
-                    )
-
-            return unidade, worker_no, list(found.values()), None
-    except Exception as exc:
-        return unidade, worker_no, [], str(exc)
-    finally:
-        try:
-            if browser:
-                browser.close()
-        except Exception:
-            pass
-
-
-def _split_pages(last, workers):
-    workers = min(max(1, workers), last)
-    chunks = [[] for _ in range(workers)]
-    for index, number in enumerate(range(1, last + 1)):
-        chunks[index % workers].append(number)
-    return [c for c in chunks if c]
-
-
-def _parallel_listing(page, unidade, base_url, user, password):
-    found = {}
-    scraper.collect_contracts(page, found)
-
-    key, discovered_last = _pagination_pattern(page, base_url)
-    if not key:
-        raise RuntimeError(
-            f"[{unidade}] PAGINACAO NAO IDENTIFICADA: execucao abortada. "
-            "Nao existe fallback sequencial."
-        )
-
-    # O CGD tem 829 paginas observadas. Links visiveis normalmente mostram
-    # apenas uma janela (ex.: 1..10), portanto nao usamos essa janela como
-    # total. O valor configurado pelo workflow e o teto autoritativo.
-    configured = LISTING_PAGES
-    last = configured
-    if discovered_last and discovered_last > configured:
-        last = discovered_last
-    last = min(last, max(1, scraper.MAX_PAGES))
-
-    chunks = _split_pages(last, LISTING_WORKERS)
-    print(
-        f"[{unidade}] PAGINACAO PARALELA REAL: parametro={key} paginas={last} "
-        f"workers={len(chunks)}"
-    )
-    print(
-        f"[{unidade}] MODO=WORKERS_PERSISTENTES: {len(chunks)} browsers/logins "
-        f"para {last} paginas; NAO 1 browser/login por pagina"
-    )
-
-    args = []
-    for worker_no, chunk in enumerate(chunks, 1):
-        args.append((unidade, base_url, key, chunk, user, password, worker_no))
-
-    errors = 0
-    with ProcessPoolExecutor(max_workers=len(chunks)) as pool:
-        futures = [pool.submit(_listing_chunk_worker, a) for a in args]
-        for future in as_completed(futures):
-            unit, worker_no, contracts, error = future.result()
-            if error:
-                errors += 1
-                print(
-                    f"[{unit}] LISTING_WORKER_ERRO worker={worker_no} erro={error}"
-                )
-                continue
-            for contract in contracts:
-                cid = scraper.contract_id(contract)
-                if cid:
-                    found[cid] = scraper.contract_url(cid)
-            print(
-                f"[{unit}] LISTING_WORKER_FINALIZADO worker={worker_no} "
-                f"CONTRATOS_ACUMULADOS={len(found)}"
-            )
-
-    print(
-        f"[{unidade}] PAGINACAO FINALIZADA: paginas={last} "
-        f"workers={len(chunks)} contratos={len(found)} erros={errors}"
-    )
-    return found
-
-
-def optimized_discover_contracts(page, unidade, destino):
-    scraper.PAGE_WAIT_MS = min(scraper.PAGE_WAIT_MS, 150)
-    user = scraper.CONFIG[unidade]["usuario"]
-    password = scraper.CONFIG[unidade]["senha"]
-
-    if destino and scraper.same_host(destino) and _is_listing(destino):
-        if scraper.open_page(page, destino, unidade, "rota_configurada", 150):
-            found = _parallel_listing(page, unidade, destino, user, password)
-            contracts = list(found.values())[:scraper.MAX_CONTRACTS]
-            print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: {len(contracts)}")
-            return contracts
-
-    if not scraper.open_page(page, scraper.CGD_URL, unidade, "inicio", 150):
-        return []
-
-    sources = []
-    for _, href in scraper.links(page):
-        if urlparse(href).path.rstrip("/").lower() in LISTING_PATHS:
-            sources.append(href)
-
-    for source in dict.fromkeys(sources):
-        if not scraper.open_page(page, source, unidade, "lista_alunos", 150):
-            continue
-        found = _parallel_listing(page, unidade, source, user, password)
-        if found:
-            contracts = list(found.values())[:scraper.MAX_CONTRACTS]
-            print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: {len(contracts)}")
-            return contracts
-
-    print(f"[{unidade}] CONTRATOS UNICOS DESCOBERTOS: 0")
-    return []
-
-
-scraper.discover_contracts = optimized_discover_contracts
-
-if __name__ == "__main__":
-    scraper.main()
+scraper.discover_contracts=optimized_discover_contracts
+if __name__=='__main__':scraper.main()
