@@ -57,7 +57,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - HTTP para paginação + detalhes paralelos
+      - name: Executar scraper CGD - HTTP para paginação + detalhamento controlado
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -75,8 +75,10 @@ jobs:
           CGD_MAX_CONTRACTS: '10000'
           CGD_PAGE_WAIT_MS: '100'
           CGD_LISTING_WAIT_MS: '100'
-          CGD_DETAIL_WORKERS: '4'
-          CGD_LISTING_WORKERS: '1'
+          CGD_LISTING_HTTP_WORKERS: '4'
+          CGD_DETAIL_WORKERS: '1'
+          CGD_DETAIL_TIMEOUT_S: '120'
+          CGD_DETAIL_RETRIES: '1'
           CGD_LISTING_PAGES: '829'
           CGD_HEADLESS: 'true'
         run: python scraper_runner.py
