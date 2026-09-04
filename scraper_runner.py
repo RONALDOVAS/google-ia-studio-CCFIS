@@ -3,17 +3,16 @@
 import multiprocessing as mp
 import os
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 import scraper
+from playwright.sync_api import sync_playwright
 
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "829")))
 LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "4")))
 LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
-DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "1")))
 DETAIL_TIMEOUT_S = max(30, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "120")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
@@ -101,85 +100,53 @@ def optimized_discover_contracts(page, unidade, destino):
     return list(found.values())[:MAX_CONTRACTS]
 
 
-def _detail_process_entry(args, queue):
-    try:
-        queue.put(scraper.detail_worker(args))
-    except BaseException as exc:
-        queue.put({"ok": False, "cid": args[2], "error": repr(exc), "attempt": args[5]})
-
-
-def _run_detail_batch(u, cfg, contracts, reps, storage_state, attempt):
-    ctx = mp.get_context("spawn")
+def _persistent_detail_round(u, cfg, contracts, reps, storage_state, attempt):
+    """Processa todos os contratos da unidade usando UM unico navegador Edge."""
     results, failed = [], []
-    total = len(contracts)
-    workers = min(DETAIL_WORKERS, total)
-    print(f"[{u}] BATCH {attempt}: {total} contratos / {workers} processos / timeout={DETAIL_TIMEOUT_S}s")
-    for start in range(0, total, workers):
-        chunk = contracts[start:start + workers]
-        queue = ctx.Queue()
-        running, started_at = [], {}
-        for cu in chunk:
-            cid = scraper.contract_id(cu)
-            proc = ctx.Process(target=_detail_process_entry, args=((u, cfg, cid, reps, storage_state, attempt), queue))
-            proc.start()
-            running.append((proc, cid))
-            started_at[cid] = time.monotonic()
-        pending = {cid: proc for proc, cid in running}
-        while pending:
-            try:
-                result = queue.get(timeout=1)
-                cid = result.get("cid")
-                proc = pending.pop(cid, None)
-                if proc is None:
-                    continue
-                if result.get("ok"):
-                    results.append(result["aluno"])
-                else:
-                    failed.append(cid)
-                    print(f"[{u}] FALHA CONTRATO {cid}: {result.get('error', 'erro desconhecido')}")
-                proc.join(timeout=2)
-                if proc.is_alive():
-                    proc.terminate()
-                    proc.join(timeout=2)
-            except Exception:
-                pass
-            now = time.monotonic()
-            for cid, proc in list(pending.items()):
-                if now - started_at[cid] >= DETAIL_TIMEOUT_S:
-                    print(f"[{u}] TIMEOUT CONTRATO {cid} apos {DETAIL_TIMEOUT_S}s; encerrando processo")
-                    if proc.is_alive():
-                        proc.terminate()
-                    proc.join(timeout=5)
-                    failed.append(cid)
-                    pending.pop(cid, None)
-        for proc, _ in running:
-            if proc.is_alive():
-                proc.terminate()
-            proc.join(timeout=2)
+    if not contracts:
+        return results, failed
+    print(f"[{u}] DETALHAMENTO_PERSISTENTE: {len(contracts)} contratos / 1 Edge / timeout={DETAIL_TIMEOUT_S}s")
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(channel="msedge", headless=scraper.HEADLESS)
+        context = browser.new_context(storage_state=storage_state)
+        page = context.new_page()
         try:
-            queue.close(); queue.join_thread()
-        except Exception:
-            pass
-        print(f"[{u}] PROGRESSO DETALHAMENTO: {min(start + workers, total)}/{total} contratos processados")
+            for index, contract in enumerate(contracts, 1):
+                cid = scraper.contract_id(contract)
+                if not cid:
+                    continue
+                try:
+                    result = scraper.contract_bundle(page, cid, u, reps)
+                    results.append(result)
+                    print(f"[{u}] CONTRATO_OK {index}/{len(contracts)} cid={cid}")
+                except Exception as exc:
+                    failed.append(cid)
+                    print(f"[{u}] CONTRATO_ERRO {index}/{len(contracts)} cid={cid}: {exc}")
+        finally:
+            try:
+                context.close()
+            finally:
+                browser.close()
     return results, failed
 
 
 def safe_process_details(u, cfg, contracts, reps, storage_state):
     if not contracts:
         return []
-    pending, results = list(contracts), []
+    pending = list(contracts)
+    results = []
     for attempt in range(1, DETAIL_RETRIES + 2):
         if not pending:
             break
-        print(f"[{u}] INICIO DETALHAMENTO PROTEGIDO: rodada={attempt} pendentes={len(pending)} workers={DETAIL_WORKERS}")
-        batch_results, failed_ids = _run_detail_batch(u, cfg, pending, reps, storage_state, attempt)
+        print(f"[{u}] INICIO DETALHAMENTO: rodada={attempt} pendentes={len(pending)}")
+        batch_results, failed_ids = _persistent_detail_round(u, cfg, pending, reps, storage_state, attempt)
         results.extend(batch_results)
         pending = [scraper.contract_url(cid) for cid in failed_ids if cid]
         if pending and attempt <= DETAIL_RETRIES:
             print(f"[{u}] RETENTATIVA: {len(pending)} contratos")
     print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(contracts)}")
     for cu in pending:
-        print(f"[{u}] CONTRATO NAO CAPTURADO: {cu}")
+        print(f"[{u}] CONTRATO_NAO_CAPTURADO: {cu}")
     return results
 
 
