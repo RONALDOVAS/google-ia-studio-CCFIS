@@ -1,5 +1,6 @@
-"""Runner CGD: listagem HTTP direta e detalhamento protegido com baixo consumo de recursos."""
+"""Runner CGD: listagem HTTP direta e detalhamento isolado por contrato com timeout real."""
 
+import multiprocessing as mp
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -99,34 +100,73 @@ def optimized_discover_contracts(page, unidade, destino):
     return list(found.values())[:MAX_CONTRACTS]
 
 
+def _detail_child(queue, u, cid, reps, storage_state):
+    """Executa UM contrato em processo isolado. O processo pai pode encerrá-lo à força."""
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(channel="msedge", headless=True)
+            context = browser.new_context(storage_state=storage_state)
+            page = context.new_page()
+            try:
+                # Proteção adicional: nenhum goto/espera individual pode exceder o limite global.
+                page.set_default_timeout(30000)
+                page.set_default_navigation_timeout(30000)
+                aluno = scraper.contract_bundle(page, cid, u, reps)
+                queue.put({"ok": True, "cid": cid, "aluno": aluno})
+            finally:
+                context.close()
+                browser.close()
+    except Exception as exc:
+        try:
+            queue.put({"ok": False, "cid": cid, "error": repr(exc)})
+        except Exception:
+            pass
+
+
+def _run_one_contract(u, cid, reps, storage_state):
+    """Watchdog real: encerra o processo do contrato quando DETAIL_TIMEOUT_S expira."""
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    proc = ctx.Process(target=_detail_child, args=(queue, u, cid, reps, storage_state), daemon=True)
+    proc.start()
+    proc.join(DETAIL_TIMEOUT_S)
+    if proc.is_alive():
+        print(f"[{u}] CONTRATO_TIMEOUT cid={cid} limite={DETAIL_TIMEOUT_S}s -> processo encerrado")
+        proc.terminate()
+        proc.join(10)
+        if proc.is_alive() and hasattr(proc, "kill"):
+            proc.kill()
+            proc.join(5)
+        queue.close()
+        queue.join_thread()
+        return {"ok": False, "cid": cid, "error": f"DETAIL_TIMEOUT_{DETAIL_TIMEOUT_S}s"}
+    try:
+        if not queue.empty():
+            return queue.get_nowait()
+    except Exception as exc:
+        return {"ok": False, "cid": cid, "error": f"RESULTADO_INDISPONIVEL: {exc}"}
+    return {"ok": False, "cid": cid, "error": f"PROCESSO_DETALHE_TERMINOU_SEM_RESULTADO exitcode={proc.exitcode}"}
+
+
 def _persistent_detail_round(u, cfg, contracts, reps, storage_state, attempt):
-    """Processa todos os contratos da unidade usando UM unico navegador Edge em modo headless."""
+    """Processa contratos sequencialmente com isolamento e watchdog real por contrato."""
     results, failed = [], []
     if not contracts:
         return results, failed
-    print(f"[{u}] DETALHAMENTO_PERSISTENTE: {len(contracts)} contratos / 1 Edge / timeout={DETAIL_TIMEOUT_S}s")
-    with sync_playwright() as pw:
-        # Forca headless=True para impedir abertura de janela no runner Windows.
-        browser = pw.chromium.launch(channel="msedge", headless=True)
-        context = browser.new_context(storage_state=storage_state)
-        page = context.new_page()
-        try:
-            for index, contract in enumerate(contracts, 1):
-                cid = scraper.contract_id(contract)
-                if not cid:
-                    continue
-                try:
-                    result = scraper.contract_bundle(page, cid, u, reps)
-                    results.append(result)
-                    print(f"[{u}] CONTRATO_OK {index}/{len(contracts)} cid={cid}")
-                except Exception as exc:
-                    failed.append(cid)
-                    print(f"[{u}] CONTRATO_ERRO {index}/{len(contracts)} cid={cid}: {exc}")
-        finally:
-            try:
-                context.close()
-            finally:
-                browser.close()
+    print(f"[{u}] DETALHAMENTO_ISOLADO: {len(contracts)} contratos / watchdog={DETAIL_TIMEOUT_S}s / tentativa={attempt}")
+    for index, contract in enumerate(contracts, 1):
+        cid = scraper.contract_id(contract)
+        if not cid:
+            continue
+        result = _run_one_contract(u, cid, reps, storage_state)
+        if result.get("ok") and result.get("aluno"):
+            results.append(result["aluno"])
+            print(f"[{u}] CONTRATO_OK {index}/{len(contracts)} cid={cid}")
+        else:
+            failed.append(cid)
+            print(f"[{u}] CONTRATO_ERRO {index}/{len(contracts)} cid={cid}: {result.get('error')}")
+        if index % 5 == 0 or index == len(contracts):
+            print(f"[{u}] PROGRESSO_DETALHAMENTO {index}/{len(contracts)} sucesso={len(results)} falhas={len(failed)}")
     return results, failed
 
 
@@ -154,4 +194,5 @@ scraper.discover_contracts = optimized_discover_contracts
 scraper.process_details = safe_process_details
 
 if __name__ == "__main__":
+    mp.freeze_support()
     scraper.main()
