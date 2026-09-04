@@ -62,7 +62,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - descoberta paralela + detalhes paralelos
+      - name: Executar scraper CGD - paginação paralela + detalhes paralelos
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -78,10 +78,11 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
-          CGD_PAGE_WAIT_MS: '150'
+          CGD_PAGE_WAIT_MS: '100'
           CGD_DETAIL_WORKERS: '4'
-          CGD_LISTING_WORKERS: '12'
+          CGD_LISTING_WORKERS: '2'
           CGD_LISTING_PAGES: '829'
+          CGD_HEADLESS: 'true'
         run: python scraper_runner.py
 
       - name: Validar captura real de alunos
