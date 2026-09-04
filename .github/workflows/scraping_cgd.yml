@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
-  push:
-    paths:
-      - 'scraper.py'
-      - 'scraper_runner.py'
-      - '.github/workflows/scraping_cgd.yml'
 
 permissions:
   contents: write
@@ -62,7 +57,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - listagem segura + detalhes paralelos
+      - name: Executar scraper CGD - HTTP para paginação + detalhes paralelos
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
