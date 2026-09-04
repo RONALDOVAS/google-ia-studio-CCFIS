@@ -2,12 +2,16 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing as mp
+import os
+import time
+from urllib.parse import urlparse
 
 import scraper
 import scraper_runner
 
 
 _original_contract_bundle = scraper.contract_bundle
+_original_strict_open_page = scraper_runner._strict_open_page
 
 
 _FALTA_TOKENS = {
@@ -67,12 +71,81 @@ def _contract_bundle_preservado(page, cid, u, reps):
     return aluno
 
 
-# O fluxo de navegação/captura continua sendo o mesmo do Run #171.
 scraper.contract_bundle = _contract_bundle_preservado
 
 
+def _tem_dados_dinamicos(page, etapa):
+    """Detecta se o conteudo AJAX relevante da etapa ja apareceu no DOM."""
+    try:
+        tabelas = scraper.table_data(page)
+        if any(rows for _, rows in tabelas):
+            return True
+    except Exception:
+        pass
+
+    texto = scraper.body(page)
+    if not texto:
+        return False
+
+    low_text = scraper.low(texto)
+    if "carregando..." in low_text:
+        return False
+
+    if etapa.startswith("frequencia"):
+        return "resumo da frequencia" in low_text or "frequencia de cursos individuais" in low_text
+
+    return True
+
+
+def _strict_open_page_com_espera_dinamica(page, url, u, name, wait=None):
+    """Abre a pagina e espera a renderizacao AJAX antes da extracao."""
+    page.goto(url, wait_until="domcontentloaded", timeout=scraper_runner.DETAIL_TIMEOUT_S * 1000)
+
+    base_wait_ms = scraper.PAGE_WAIT_MS if wait is None else wait
+    if base_wait_ms:
+        page.wait_for_timeout(base_wait_ms)
+
+    max_wait_s = max(5, int(os.getenv("CGD_AJAX_WAIT_S", "12")))
+    deadline = time.monotonic() + max_wait_s
+    ultimo_log = 0.0
+
+    while time.monotonic() < deadline:
+        if _tem_dados_dinamicos(page, name):
+            break
+        agora = time.monotonic()
+        if agora - ultimo_log >= 2.0:
+            print(f"[{u}] AGUARDANDO_AJAX etapa={name} url={page.url}")
+            ultimo_log = agora
+        page.wait_for_timeout(500)
+
+    path = urlparse(page.url).path.rstrip("/").lower()
+    if path == "/login" or path.startswith("/login/"):
+        raise scraper_runner.SessionExpired(
+            f"[{u}] SESSAO_EXPIRADA_NO_DETALHE etapa={name} url={url} final={page.url}"
+        )
+    if urlparse(page.url).netloc != urlparse(scraper.CGD_URL).netloc:
+        raise RuntimeError(f"[{u}] DETALHE_SAIU_DO_HOST etapa={name}: {page.url}")
+
+    if name.startswith("frequencia"):
+        tabelas = scraper.table_data(page)
+        registros = sum(len(rows) for _, rows in tabelas)
+        print(f"[{u}] FREQUENCIA_DOM_PRONTA registros_tabela={registros} url={page.url}")
+
+    print(f"[{u}] {name}: {page.url}")
+    try:
+        scraper.dump(page, u, name)
+    except Exception:
+        pass
+    return True
+
+
 def _run_details_in_thread(u, cfg, contracts, reps, storage_state):
-    return scraper_runner.safe_process_details(u, cfg, contracts, reps, storage_state)
+    previous_strict = scraper_runner._strict_open_page
+    scraper_runner._strict_open_page = _strict_open_page_com_espera_dinamica
+    try:
+        return scraper_runner.safe_process_details(u, cfg, contracts, reps, storage_state)
+    finally:
+        scraper_runner._strict_open_page = previous_strict
 
 
 def threaded_process_details(u, cfg, contracts, reps, storage_state):
