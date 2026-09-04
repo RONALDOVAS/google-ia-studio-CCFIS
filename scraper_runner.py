@@ -1,10 +1,9 @@
-"""Executor CGD: listagem e detalhamento HTTP com a mesma sessao autenticada.
+"""Executor CGD: listagem HTTP e detalhamento em sessao Edge persistente.
 
-A autenticacao continua sendo feita uma vez pelo Edge. Depois disso:
-1) a sessao autenticada e convertida para requests;
-2) a listagem percorre as paginas do CGD por HTTP;
-3) os detalhes de cada contrato tambem sao buscados por HTTP;
-4) nenhum Edge e aberto por aluno.
+A autenticacao continua sendo feita uma vez pelo Edge. A listagem usa HTTP com
+os cookies autenticados. O detalhamento usa UMA unica sessao Edge persistente,
+porque as telas de curso/horarios/frequencia podem depender de JavaScript e
+a abertura de um navegador/processo por aluno provocava perda de sessao.
 """
 
 import json
@@ -16,6 +15,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 import scraper
 
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
@@ -24,6 +24,7 @@ LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
 DETAIL_HTTP_WORKERS = max(1, int(os.getenv("CGD_DETAIL_HTTP_WORKERS", os.getenv("CGD_DETAIL_WORKERS", "4"))))
 DETAIL_TIMEOUT_S = max(10, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "60")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
+DETAIL_LIMIT = max(0, int(os.getenv("CGD_DETAIL_LIMIT", "0")))
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
 LISTING_SOURCE = "https://app.cgd.com.br/alunos"
 
@@ -76,7 +77,7 @@ class _Locator:
 
 
 class HTTPPage:
-    """Adaptador minimo para reutilizar as funcoes de extracao do scraper.py."""
+    """Adaptador minimo para reutilizar funcoes de extracao no modo HTTP."""
 
     def __init__(self, session):
         self.session = session
@@ -216,82 +217,100 @@ def _strict_open_page(page, url, u, name, wait=None):
         raise SessionExpired(f"[{u}] SESSAO_EXPIRADA_NO_DETALHE etapa={name} url={url} final={page.url}")
     if urlparse(page.url).netloc != urlparse(scraper.CGD_URL).netloc:
         raise RuntimeError(f"[{u}] DETALHE_SAIU_DO_HOST etapa={name}: {page.url}")
+    print(f"[{u}] {name}: {page.url}")
+    try:
+        scraper.dump(page, u, name)
+    except Exception:
+        pass
     return True
 
 
 def _http_contract_bundle(session, cid, u, reps):
-    """Coleta o contrato inteiro via HTTP, reutilizando os cookies autenticados."""
+    """Mantido apenas como fallback tecnico; o detalhe principal usa Edge."""
     page = HTTPPage(session)
     aluno = scraper.contract_bundle(page, cid, u, reps)
     if not aluno:
         raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
-    if not aluno.get("nome") or aluno.get("nome") == f"Contrato {cid}":
-        raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
-    if not aluno.get("frequencia_raw") and aluno.get("faltas", 0) == 0 and aluno.get("presencas", 0) == 0:
-        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
     return aluno
 
 
-def _detail_http_worker(args):
-    u, cid, reps, cookies, headers, attempt = args
-    session = requests.Session()
-    session.cookies.update(cookies)
-    session.headers.update(headers)
-    try:
-        aluno = _http_contract_bundle(session, cid, u, reps)
-        return {"ok": True, "cid": cid, "aluno": aluno, "attempt": attempt}
-    except Exception as exc:
-        return {"ok": False, "cid": cid, "error": repr(exc), "attempt": attempt}
-
-
-def _storage_state_session(storage_state):
-    session = _session_from_storage_state(storage_state)
-    r = session.get(LISTING_SOURCE, timeout=LISTING_TIMEOUT_S, allow_redirects=True)
-    path = urlparse(r.url).path.rstrip("/").lower()
-    if path == "/login" or path.startswith("/login/"):
-        raise SessionExpired(f"SESSAO_INVALIDA_ANTES_DOS_DETALHES: {r.url}")
-    r.raise_for_status()
-    return session
+def _validate_real_detail(aluno, cid, u):
+    if not aluno:
+        raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
+    nome = str(aluno.get("nome") or "").strip()
+    if not nome or nome == f"Contrato {cid}":
+        raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
+    freq = aluno.get("frequencia_raw") or []
+    if not freq:
+        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
+    return aluno
 
 
 def safe_process_details(u, cfg, contracts, reps, storage_state):
     if not contracts:
         return []
-    base = _storage_state_session(storage_state)
-    cookies = {c.name: c.value for c in base.cookies}
-    headers = dict(base.headers)
-    pending = list(contracts)
+    targets = list(contracts[:DETAIL_LIMIT] if DETAIL_LIMIT else contracts)
+    print(f"[{u}] INICIO DETALHAMENTO_EDGE_PERSISTENTE: contratos={len(targets)} de={len(contracts)}")
+    if DETAIL_LIMIT:
+        print(f"[{u}] LIMITE_CONTROLADO_DETALHE: {DETAIL_LIMIT}")
     results = []
-    previous_open_page = scraper.open_page
-    scraper.open_page = _strict_open_page
-    try:
-        for attempt in range(1, DETAIL_RETRIES + 2):
-            if not pending:
-                break
-            print(f"[{u}] INICIO DETALHAMENTO_HTTP: rodada={attempt} pendentes={len(pending)} workers={DETAIL_HTTP_WORKERS}")
-            pending_next = []
-            args = [(u, scraper.contract_id(c), reps, cookies, headers, attempt) for c in pending]
-            with ThreadPoolExecutor(max_workers=DETAIL_HTTP_WORKERS) as pool:
-                futures = [pool.submit(_detail_http_worker, a) for a in args]
-                for idx, future in enumerate(as_completed(futures), 1):
+    pending = list(targets)
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+        context = browser.new_context(storage_state=storage_state)
+        page = context.new_page()
+        previous_open_page = scraper.open_page
+        scraper.open_page = _strict_open_page
+        try:
+            if not scraper.same_host(page.url) and page.url == "about:blank":
+                pass
+            for attempt in range(1, DETAIL_RETRIES + 2):
+                if not pending:
+                    break
+                print(f"[{u}] RODADA_DETALHE_EDGE={attempt} pendentes={len(pending)}")
+                pending_next = []
+                for idx, contract in enumerate(pending, 1):
+                    cid = scraper.contract_id(contract)
+                    if not cid:
+                        print(f"[{u}] CONTRATO_INVALIDO: {contract}")
+                        continue
                     try:
-                        result = future.result()
-                    except Exception as exc:
-                        result = {"ok": False, "cid": "desconhecido", "error": repr(exc), "attempt": attempt}
-                    if result.get("ok") and result.get("aluno"):
-                        results.append(result["aluno"])
-                        print(f"[{u}] CONTRATO_OK {idx}/{len(futures)} cid={result['cid']}")
-                    else:
-                        cid = result.get("cid")
-                        if cid and cid != "desconhecido":
+                        print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
+                        aluno = scraper.contract_bundle(page, cid, u, reps)
+                        aluno = _validate_real_detail(aluno, cid, u)
+                        results.append(aluno)
+                        print(f"[{u}] CONTRATO_OK {idx}/{len(pending)} cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}")
+                    except SessionExpired as exc:
+                        print(f"[{u}] SESSAO_EXPIRADA cid={cid}: {exc}")
+                        try:
+                            scraper.login(page, cfg["usuario"], cfg["senha"], u)
+                            print(f"[{u}] RELOGIN_OK antes de repetir cid={cid}")
+                            aluno = scraper.contract_bundle(page, cid, u, reps)
+                            aluno = _validate_real_detail(aluno, cid, u)
+                            results.append(aluno)
+                            print(f"[{u}] CONTRATO_OK_APOS_RELOGIN cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')}")
+                        except Exception as exc2:
                             pending_next.append(cid)
-                        print(f"[{u}] CONTRATO_ERRO {idx}/{len(futures)} cid={cid}: {result.get('error')}")
-                    if idx % max(1, DETAIL_HTTP_WORKERS) == 0 or idx == len(futures):
-                        print(f"[{u}] PROGRESSO_DETALHAMENTO_HTTP {idx}/{len(futures)} sucesso={len(results)} falhas={len(pending_next)}")
-            pending = [scraper.contract_url(cid) for cid in pending_next if cid]
-    finally:
-        scraper.open_page = previous_open_page
-    print(f"[{u}] DETALHAMENTO_HTTP_FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(contracts)}")
+                            print(f"[{u}] CONTRATO_ERRO_APOS_RELOGIN cid={cid}: {exc2!r}")
+                            try:
+                                scraper.dump(page, u, f"falha_{cid}")
+                            except Exception:
+                                pass
+                    except Exception as exc:
+                        pending_next.append(cid)
+                        print(f"[{u}] CONTRATO_ERRO cid={cid}: {exc!r}")
+                        try:
+                            scraper.dump(page, u, f"falha_{cid}")
+                        except Exception:
+                            pass
+                    if idx % 10 == 0 or idx == len(pending):
+                        print(f"[{u}] PROGRESSO_DETALHAMENTO_EDGE {idx}/{len(pending)} sucesso_total={len(results)} falhas_rodada={len(pending_next)}")
+                pending = [scraper.contract_url(cid) for cid in pending_next if cid]
+        finally:
+            scraper.open_page = previous_open_page
+            context.close()
+            browser.close()
+    print(f"[{u}] DETALHAMENTO_EDGE_FINALIZADO: sucesso={len(results)} falhas={len(pending)} de_processados={len(targets)} total_disponivel={len(contracts)}")
     for cu in pending:
         print(f"[{u}] CONTRATO_NAO_CAPTURADO: {cu}")
     return results
