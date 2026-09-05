@@ -1,4 +1,10 @@
-"""Gera dados_reposicoes.json usando as reposicoes já associadas aos alunos capturados."""
+"""Gera dados_reposicoes.json usando os dados reais capturados nos alunos.
+
+A fonte principal continua sendo aluno.reposicoes. Como o CGD tambem registra
+reposicoes dentro da tabela de frequencia individual, essas linhas sao usadas
+como segunda fonte para evitar perder reposicoes quando a tabela global nao
+consegue fazer o vinculo pelo contrato/nome.
+"""
 
 import hashlib
 import json
@@ -12,6 +18,10 @@ OUT = Path("dados_reposicoes.json")
 
 def norm(value):
     return " ".join(str(value or "").replace("\xa0", " ").split())
+
+
+def low(value):
+    return norm(value).lower()
 
 
 def parse_date(value):
@@ -28,6 +38,33 @@ def parse_times(value):
     return re.findall(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b", value)
 
 
+def is_replacement_raw(raw):
+    cells = [norm(x) for x in raw.get("valores", [])]
+    joined = low(" | ".join(cells))
+    return any(token in joined for token in ("reposição", "reposicao", "reposição-faltou", "reposicao-faltou"))
+
+
+def collect_replacements(aluno):
+    out = []
+    seen = set()
+
+    for raw in aluno.get("reposicoes") or []:
+        if isinstance(raw, dict):
+            key = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                out.append(raw)
+
+    for raw in aluno.get("frequencia_raw") or []:
+        if isinstance(raw, dict) and is_replacement_raw(raw):
+            key = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                out.append(raw)
+
+    return out
+
+
 def transform(aluno, raw, index):
     heads = raw.get("cabecalhos") or []
     cells = [norm(x) for x in raw.get("valores", [])]
@@ -38,8 +75,8 @@ def transform(aluno, raw, index):
     end = times[1] if len(times) > 1 else None
     discipline = "Módulo Geral"
     for cell in cells:
-        low = cell.lower()
-        if any(k in low for k in ("informática", "informatica", "módulo", "modulo", "disciplina")):
+        low_cell = low(cell)
+        if any(k in low_cell for k in ("informática", "informatica", "módulo", "modulo", "disciplina", "excel", "word", "powerpoint")):
             discipline = cell
             break
     key = "|".join([
@@ -78,8 +115,11 @@ def main():
         raise SystemExit("dados_alunos.json não encontrado")
     alunos = json.loads(IN.read_text(encoding="utf-8"))
     out = {}
+    total_fontes = 0
     for aluno in alunos:
-        for index, raw in enumerate(aluno.get("reposicoes") or []):
+        raws = collect_replacements(aluno)
+        total_fontes += len(raws)
+        for index, raw in enumerate(raws):
             record = transform(aluno, raw, index)
             out[record["id"]] = record
     payload = {
@@ -88,6 +128,7 @@ def main():
         "records": list(out.values()),
     }
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"FONTES DE REPOSICAO ENCONTRADAS: {total_fontes}")
     print(f"REPOSICOES A PARTIR DOS ALUNOS: {len(payload['records'])}")
 
 
