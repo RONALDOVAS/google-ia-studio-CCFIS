@@ -66,7 +66,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - HTTP para listagem e detalhe; Edge somente como fallback
+      - name: Executar scraper CGD - HTTP para listagem; Edge persistente para detalhes
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -93,7 +93,7 @@ jobs:
           CGD_LISTING_PAGES: '831'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
-        run: python scraper_runner_http.py
+        run: python scraper_runner.py
 
       - name: Validar captura real de alunos
         shell: powershell
