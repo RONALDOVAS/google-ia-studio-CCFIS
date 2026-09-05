@@ -17,6 +17,11 @@ DETAIL_LIMIT = max(0, int(os.getenv("CGD_DETAIL_LIMIT", "0")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 
 
+def _http_one(cid, u, reps, storage_state):
+    session = scraper_runner._session_from_storage_state(storage_state)
+    return scraper_runner._http_contract_bundle(session, cid, u, reps)
+
+
 def _http_process(u, cfg, contracts, reps, storage_state):
     targets = list(contracts[:DETAIL_LIMIT] if DETAIL_LIMIT else contracts)
     ids = [scraper.contract_id(c) for c in targets if scraper.contract_id(c)]
@@ -33,20 +38,20 @@ def _http_process(u, cfg, contracts, reps, storage_state):
         next_pending = []
         with ThreadPoolExecutor(max_workers=DETAIL_HTTP_WORKERS) as pool:
             futures = {
-                pool.submit(scraper_runner._http_contract_bundle, (u, cid, reps, storage_state, attempt)): cid
+                pool.submit(_http_one, cid, u, reps, storage_state): cid
                 for cid in pending
             }
             for idx, future in enumerate(as_completed(futures), 1):
                 cid = futures[future]
                 try:
-                    r = future.result()
+                    aluno = future.result()
+                    if aluno:
+                        results[str(cid)] = aluno
+                    else:
+                        raise RuntimeError("CONTRATO_SEM_RESULTADO")
                 except Exception as exc:
-                    r = {"ok": False, "cid": cid, "error": repr(exc)}
-                if r.get("ok") and r.get("aluno"):
-                    results[str(cid)] = r["aluno"]
-                else:
                     next_pending.append(str(cid))
-                    print(f"[{u}] HTTP_FALHA cid={cid}: {r.get('error')}")
+                    print(f"[{u}] HTTP_FALHA cid={cid}: {exc!r}")
                 if idx % max(1, DETAIL_HTTP_WORKERS * 10) == 0 or idx == len(futures):
                     print(f"[{u}] PROGRESSO_HTTP: {idx}/{len(futures)} sucesso={len(results)} pendentes={len(next_pending)}")
         pending = list(dict.fromkeys(next_pending))
