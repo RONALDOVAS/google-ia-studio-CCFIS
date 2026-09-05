@@ -66,7 +66,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - HTTP para paginação + Edge persistente no detalhe
+      - name: Executar scraper CGD - HTTP para listagem e detalhe; Edge somente como fallback
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -85,14 +85,15 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_LISTING_WAIT_MS: '100'
           CGD_LISTING_HTTP_WORKERS: '4'
-          CGD_DETAIL_WORKERS: '1'
+          CGD_DETAIL_HTTP_WORKERS: '4'
+          CGD_DETAIL_WORKERS: '4'
           CGD_DETAIL_TIMEOUT_S: '120'
           CGD_DETAIL_RETRIES: '1'
-          CGD_DETAIL_LIMIT: '10'
+          CGD_DETAIL_LIMIT: '0'
           CGD_LISTING_PAGES: '831'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
-        run: python scraper_runner_threaded.py
+        run: python scraper_runner_http.py
 
       - name: Validar captura real de alunos
         shell: powershell
@@ -100,7 +101,7 @@ jobs:
           if (-not (Test-Path 'dados_alunos.json')) {
             throw 'Falha: dados_alunos.json não foi gerado.'
           }
-          $dados = Get-Content 'dados_alunos.json' -Raw | ConvertFrom-Json
+          $dados = @(Get-Content 'dados_alunos.json' -Raw | ConvertFrom-Json)
           if ($dados.Count -eq 0) {
             throw 'Falha: scraper terminou sem alunos. A execução NÃO será considerada sucesso.'
           }
@@ -108,8 +109,13 @@ jobs:
           if ($comFreq -eq 0) {
             throw 'Falha: nenhum aluno possui frequência real capturada.'
           }
+          $semFreq = $dados.Count - $comFreq
           Write-Host "ALUNOS CAPTURADOS: $($dados.Count)"
           Write-Host "ALUNOS COM FREQUENCIA REAL: $comFreq"
+          Write-Host "ALUNOS SEM FREQUENCIA: $semFreq"
+          if ($semFreq -gt 0) {
+            throw "Falha: existem $semFreq alunos sem frequência real. A execução NÃO será considerada sucesso."
+          }
 
       - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
