@@ -1,12 +1,13 @@
 """Executor CGD: listagem HTTP rapida + detalhamento Edge na mesma sessao.
 
 A listagem usa requests autenticado para percorrer as paginas sem abrir um
-navegador por pagina. O detalhamento usa a mesma instancia Playwright criada
-pelo main, evitando criar sync_playwright dentro de outro sync_playwright.
+navegador por pagina. O detalhamento usa uma instancia Playwright dedicada,
+sem criar sync_playwright dentro de outra instancia.
 """
 
 import os
 import re
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -118,8 +119,17 @@ def optimized_discover_contracts(page, unidade, destino):
 
 def _strict_open_page(page, url, unidade, name, wait=None):
     page.goto(url, wait_until="domcontentloaded", timeout=DETAIL_TIMEOUT_S * 1000)
-    if wait:
-        page.wait_for_timeout(wait)
+    # O CGD entrega algumas telas imediatamente e outras terminam de montar
+    # a tabela apos DOMContentLoaded. Sem esta espera, a pagina de frequencia
+    # pode estar visualmente aberta, mas ainda sem as linhas que o parser le.
+    stable_wait = max(1000, int(getattr(scraper, "PAGE_WAIT_MS", 500)))
+    if wait is not None:
+        stable_wait = max(stable_wait, int(wait))
+    page.wait_for_timeout(stable_wait)
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
     path = urlparse(page.url).path.rstrip("/").lower()
     if path == "/login" or path.startswith("/login/"):
         raise SessionExpired(f"[{unidade}] SESSAO_EXPIRADA_NO_DETALHE etapa={name} url={url} final={page.url}")
@@ -219,8 +229,7 @@ def run_unit(unidade, cfg, pw):
         context.close(); browser.close()
         raise
     finally:
-        context.close()
-        browser.close()
+        context.close(); browser.close()
     return process_details_with_browser(pw, unidade, cfg, contracts, reps)
 
 
@@ -237,7 +246,7 @@ def main():
                 all_alunos += run_unit(unidade, scraper.CONFIG[unidade], pw)
             except Exception as exc:
                 print(f"[{unidade}] UNIDADE_ABORTADA: {exc!r}")
-    scraper.JSON_PATH.write_text(__import__("json").dumps(all_alunos, ensure_ascii=False, indent=2), encoding="utf-8")
+    scraper.JSON_PATH.write_text(json.dumps(all_alunos, ensure_ascii=False, indent=2), encoding="utf-8")
     print("=" * 80)
     print(f"TOTAL GERAL DE ALUNOS CAPTURADOS: {len(all_alunos)}")
     print(f"MATRIZ: {sum(1 for a in all_alunos if a.get('unidade') == 'matriz')}")
