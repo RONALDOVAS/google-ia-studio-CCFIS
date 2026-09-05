@@ -3,6 +3,9 @@ name: Execução Automática Scraping CGD
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'dados_alunos.json'
+      - 'dados_reposicoes.json'
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
@@ -101,19 +104,25 @@ jobs:
           if ($dados.Count -eq 0) {
             throw 'Falha: scraper terminou sem alunos. A execução NÃO será considerada sucesso.'
           }
+          $comFreq = @($dados | Where-Object { $_.frequencia_raw -and $_.frequencia_raw.Count -gt 0 }).Count
+          if ($comFreq -eq 0) {
+            throw 'Falha: nenhum aluno possui frequência real capturada.'
+          }
           Write-Host "ALUNOS CAPTURADOS: $($dados.Count)"
+          Write-Host "ALUNOS COM FREQUENCIA REAL: $comFreq"
 
-      - name: Sincronizar reposições reais do CGD
+      - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
-        env:
-          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
-          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
-          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
-          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
-          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
-          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
-          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
-        run: python sync_cgd_reposicoes.py
+        run: python build_reposicoes_from_alunos.py
+
+      - name: Validar reposições capturadas
+        shell: powershell
+        run: |
+          if (-not (Test-Path 'dados_reposicoes.json')) {
+            throw 'Falha: dados_reposicoes.json não foi gerado.'
+          }
+          $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
+          Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
 
       - name: Salvar diagnósticos
         if: always()
