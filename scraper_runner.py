@@ -1,8 +1,9 @@
-"""Executor CGD: listagem HTTP rapida + detalhamento paralelo.
+"""Executor CGD: listagem HTTP rapida + detalhamento paralelo em lotes.
 
 A listagem usa requests autenticado para percorrer as paginas sem abrir um
-navegador por pagina. O detalhamento reutiliza o coletor paralelo existente
-em scraper.py, com uma sessao autenticada persistida por unidade.
+navegador por pagina. O detalhamento usa varios workers Edge independentes,
+mas cada worker mantem um navegador aberto para processar varios contratos.
+Isso evita abrir/fechar um Edge inteiro para cada aluno.
 """
 
 import os
@@ -115,14 +116,77 @@ def optimized_discover_contracts(page, unidade, destino):
     return list(found.values())[:MAX_CONTRACTS]
 
 
-def process_details_with_existing_parallel_collector(unidade, cfg, contracts, reps, storage_state):
+def _detail_batch(args):
+    """Um worker abre um Edge uma unica vez e processa seu lote inteiro."""
+    unidade, cfg, contracts, reps, storage_state, round_no, worker_no = args
+    results = []
+    failures = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+        context = browser.new_context(storage_state=storage_state)
+        page = context.new_page()
+        try:
+            print(f"[{unidade}] WORKER_DETALHE {worker_no}: inicio lote={len(contracts)} tentativa={round_no}")
+            for url in contracts:
+                cid = scraper.contract_id(url)
+                if not cid:
+                    failures.append((url, "CONTRATO_ID_INVALIDO"))
+                    continue
+                try:
+                    aluno = scraper.contract_bundle(page, cid, unidade, reps)
+                    aluno = scraper.validate_real_detail(aluno, cid, unidade)
+                    results.append(aluno)
+                    print(f"[{unidade}] CONTRATO_OK cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}")
+                except Exception as exc:
+                    failures.append((url, repr(exc)))
+                    print(f"[{unidade}] FALHA DETALHE cid={cid}: {exc!r}")
+        finally:
+            context.close()
+            browser.close()
+    return results, failures
+
+
+def _make_batches(items, workers):
+    workers = max(1, min(workers, len(items)))
+    batches = [[] for _ in range(workers)]
+    for i, item in enumerate(items):
+        batches[i % workers].append(item)
+    return [b for b in batches if b]
+
+
+def process_details_fast(unidade, cfg, contracts, reps, storage_state):
     if not contracts:
         return []
     targets = list(contracts[:DETAIL_LIMIT] if DETAIL_LIMIT else contracts)
-    print(f"[{unidade}] INICIO DETALHAMENTO PARALELO: contratos={len(targets)} de={len(contracts)} workers={scraper.DETAIL_WORKERS}")
+    workers = min(max(1, scraper.DETAIL_WORKERS), len(targets))
+    print(f"[{unidade}] INICIO DETALHAMENTO RAPIDO: {len(targets)} contratos / {workers} Edge workers persistentes")
     if DETAIL_LIMIT:
         print(f"[{unidade}] LIMITE_CONTROLADO_DETALHE: {DETAIL_LIMIT}")
-    return scraper.process_details(unidade, cfg, targets, reps, storage_state)
+
+    pending = targets
+    results = []
+    for round_no in (1, 2):
+        if not pending:
+            break
+        batches = _make_batches(pending, workers)
+        print(f"[{unidade}] LOTE_DETALHE {round_no}: contratos={len(pending)} batches={len(batches)}")
+        next_pending = []
+        with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+            futures = [pool.submit(_detail_batch, (unidade, cfg, batch, reps, storage_state, round_no, i + 1)) for i, batch in enumerate(batches)]
+            for fut in as_completed(futures):
+                try:
+                    ok, failed = fut.result()
+                    results.extend(ok)
+                    next_pending.extend(url for url, _ in failed)
+                except Exception as exc:
+                    print(f"[{unidade}] WORKER_DETALHE_ERRO: {exc!r}")
+        print(f"[{unidade}] PROGRESSO DETALHAMENTO: sucesso_total={len(results)} falhas_para_retry={len(next_pending)}")
+        pending = next_pending
+
+    print(f"[{unidade}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(targets)}")
+    for contract in pending:
+        print(f"[{unidade}] CONTRATO_NAO_CAPTURADO: {contract}")
+    return results
 
 
 def run_unit(unidade, cfg, pw):
@@ -144,15 +208,15 @@ def run_unit(unidade, cfg, pw):
     finally:
         context.close()
         browser.close()
-    return process_details_with_existing_parallel_collector(unidade, cfg, contracts, reps, str(state))
+    return process_details_fast(unidade, cfg, contracts, reps, str(state))
 
 
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: autenticacao real -> listagem HTTP -> reposicoes -> detalhamento paralelo")
+    print("Fluxo: autenticacao real -> listagem HTTP -> reposicoes -> detalhamento Edge em lotes paralelos")
     print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_workers={scraper.DETAIL_WORKERS}, detail_limit={DETAIL_LIMIT}, page_wait_ms={scraper.PAGE_WAIT_MS}, timeout_ms={scraper.PAGE_TIMEOUT_MS}, diagnostico={scraper.DIAGNOSTICO}")
-    print("=" * 80)
+    print("=")
     all_alunos = []
     with sync_playwright() as pw:
         for unidade in ("matriz", "filial"):
