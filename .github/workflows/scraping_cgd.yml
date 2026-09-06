@@ -8,6 +8,7 @@ on:
       - 'dados_reposicoes.json'
       - 'dados_dashboard_cgd.json'
       - 'dados_pacotes_cursos.json'
+      - 'dados_frequencias_a_registrar.json'
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
@@ -89,7 +90,7 @@ jobs:
         run: |
           Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 831 paginas | detalhe 1 sessao ==='
           python -u scraper_runner_threaded.py
-      - name: Auditar e atualizar base real dos 100 contratos
+      - name: Auditar frequencias reais, ultimo acesso e Frequencias a Registrar
         shell: powershell
         env:
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
@@ -106,51 +107,46 @@ jobs:
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== AUDITORIA: frequencia + sem frequencia + campanha + pacote + dashboard ==='
-          python -u auditar_base_cgd.py
+          Write-Host '=== AUDITORIA DE FREQUENCIA: registros = presencas + faltas | ultimo acesso | a registrar ==='
+          python -u auditar_frequencias_cgd.py
       - name: Validar captura real e base auditada
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
           if (-not (Test-Path 'dados_dashboard_cgd.json')) { throw 'Falha: dados_dashboard_cgd.json não foi gerado.' }
           if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
+          if (-not (Test-Path 'dados_frequencias_a_registrar.json')) { throw 'Falha: snapshot de Frequencias a Registrar não foi gerado.' }
           @'
           import json
           from pathlib import Path
           dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
           dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
           pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
+          pend = json.loads(Path('dados_frequencias_a_registrar.json').read_text(encoding='utf-8'))
           if not isinstance(dados, list) or not dados:
               raise SystemExit('Falha: base de alunos vazia/inválida.')
-          com_freq = [a for a in dados if a.get('frequencia_raw')]
-          sem_freq = [a for a in dados if not a.get('frequencia_raw')]
-          valid_status = ('SEM_FREQUENCIA_AGUARDANDO_INICIO','SEM_FREQUENCIA_CONTRATO_ENCERRADO','SEM_FREQUENCIA_A_INVESTIGAR')
-          sem_class = [a for a in sem_freq if a.get('frequencia_status') in valid_status]
+          sem_freq = [a for a in dados if not a.get('frequencia_registrada', 0)]
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
           duplicados = len(contratos) - len(set(contratos))
-          campanhas = [a for a in dados if str(a.get('campanha') or '').strip()]
-          pacotes = [a for a in dados if str(a.get('pacote') or '').strip()]
-          freq_validacao = [a for a in dados if isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('ok')]
+          freq_ok = [a for a in dados if isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok')]
+          ultimo = [a for a in dados if a.get('ultimo_acesso')]
           dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
+          pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALUNOS NA BASE: {len(dados)}')
-          print(f'FREQUENCIA REAL: {len(com_freq)}')
-          print(f'SEM FREQUENCIA: {len(sem_freq)}')
-          print(f'SEM FREQUENCIA CLASSIFICADOS: {len(sem_class)}')
+          print(f'FREQUENCIA COM MATEMATICA VALIDA: {len(freq_ok)}')
+          print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
+          print(f'ALUNOS SEM FREQUENCIA REGISTRADA: {len(sem_freq)}')
           print(f'MATRIZ: {len(matriz)}')
           print(f'FILIAL: {len(filial)}')
-          print(f'CAMPAÑA PREENCHIDA: {len(campanhas)}')
-          print(f'PACOTE PREENCHIDO: {len(pacotes)}')
-          print(f'FREQUENCIA COM VALIDACAO INTERNA: {len(freq_validacao)}')
           print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
           print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
+          print(f'FREQUENCIAS A REGISTRAR CAPTURADAS: {len(pend_ok)}/2')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
-          if len(sem_freq) != len(sem_class):
-              raise SystemExit('Falha: aluno sem frequência sem classificação semântica.')
-          if len(freq_validacao) != len(dados):
-              raise SystemExit('Falha: existem registros de frequência sem validação interna.')
+          if len(freq_ok) != len(dados):
+              raise SystemExit('Falha: existe aluno com matematica de frequencia invalida.')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
           if len(matriz) != 50 or len(filial) != 50 or len(dados) != 100:
@@ -181,6 +177,7 @@ jobs:
             dados_reposicoes.json
             dados_dashboard_cgd.json
             dados_pacotes_cursos.json
+            dados_frequencias_a_registrar.json
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push dos dados públicos
@@ -189,6 +186,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json
+          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json dados_frequencias_a_registrar.json
           if (git diff --cached --quiet) { Write-Host 'Nenhuma alteração nos dados sincronizados.' }
           else { git commit -m 'Auto-update: dados reais CGD'; git push }
