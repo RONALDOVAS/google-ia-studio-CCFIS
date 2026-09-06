@@ -12,8 +12,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 13,
-    "presencas": 54,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -1365,7 +1365,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T13:24:48.866993Z"
+    "capturado_em": "2026-09-06T13:24:48.866993Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "551904",
@@ -1380,8 +1392,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 17,
-    "presencas": 45,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -2633,7 +2645,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T13:25:20.998826Z"
+    "capturado_em": "2026-09-06T13:25:20.998826Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "243363",
@@ -2648,8 +2672,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 17,
-    "presencas": 27,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -3545,7 +3569,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T13:25:48.743816Z"
+    "capturado_em": "2026-09-06T13:25:48.743816Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "832412",
@@ -3560,8 +3596,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 9,
-    "presencas": 20,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -4157,7 +4193,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T13:26:34.421995Z"
+    "capturado_em": "2026-09-06T13:26:34.421995Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "576312",
@@ -4172,8 +4220,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 19,
-    "presencas": 14,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -4841,7 +4889,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T13:26:59.325960Z"
+    "capturado_em": "2026-09-06T13:26:59.325960Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "623091",
@@ -4856,8 +4916,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 2,
-    "presencas": 1,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -4933,7 +4993,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T13:27:20.183821Z"
+    "capturado_em": "2026-09-06T13:27:20.183821Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "909190",
@@ -4949,7 +5021,7 @@
     "data_fim": null,
     "unidade": "matriz",
     "faltas": 0,
-    "presencas": 1,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -4985,7 +5057,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:45:37.635458Z"
+    "capturado_em": "2026-09-06T15:45:37.635458Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "728020",
@@ -5000,8 +5084,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 10,
-    "presencas": 1,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -5237,7 +5321,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:45:58.940481Z"
+    "capturado_em": "2026-09-06T15:45:58.940481Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "728313",
@@ -5252,8 +5348,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 34,
-    "presencas": 48,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -6909,7 +7005,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:46:37.886573Z"
+    "capturado_em": "2026-09-06T15:46:37.886573Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "284105",
@@ -6924,8 +7032,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 12,
-    "presencas": 45,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -8081,7 +8189,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:47:08.456075Z"
+    "capturado_em": "2026-09-06T15:47:08.456075Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "293579",
@@ -8096,8 +8216,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 13,
-    "presencas": 6,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -8493,7 +8613,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:47:31.068046Z"
+    "capturado_em": "2026-09-06T15:47:31.068046Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "742696",
@@ -8508,8 +8640,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 23,
-    "presencas": 42,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -9825,7 +9957,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:48:02.870633Z"
+    "capturado_em": "2026-09-06T15:48:02.870633Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "431595",
@@ -9840,8 +9984,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 9,
-    "presencas": 71,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -11457,7 +11601,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:48:38.805423Z"
+    "capturado_em": "2026-09-06T15:48:38.805423Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "615001",
@@ -11472,8 +11628,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 33,
-    "presencas": 13,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -12369,7 +12525,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:49:24.698645Z"
+    "capturado_em": "2026-09-06T15:49:24.698645Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "665385",
@@ -12384,7 +12552,7 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 1,
+    "faltas": 0,
     "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
@@ -12417,7 +12585,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:49:43.440497Z"
+    "capturado_em": "2026-09-06T15:49:43.440497Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "602293",
@@ -12432,8 +12612,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 13,
-    "presencas": 7,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -12849,7 +13029,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:50:06.075490Z"
+    "capturado_em": "2026-09-06T15:50:06.075490Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "503496",
@@ -12864,8 +13056,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 20,
-    "presencas": 18,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -13621,7 +13813,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:50:32.487606Z"
+    "capturado_em": "2026-09-06T15:50:32.487606Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "594668",
@@ -13636,8 +13840,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 13,
-    "presencas": 12,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -14153,7 +14357,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:50:56.164084Z"
+    "capturado_em": "2026-09-06T15:50:56.164084Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "792372",
@@ -14168,8 +14384,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 24,
-    "presencas": 23,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -15125,7 +15341,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:51:24.519818Z"
+    "capturado_em": "2026-09-06T15:51:24.519818Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "439883",
@@ -15140,8 +15368,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "filial",
-    "faltas": 25,
-    "presencas": 53,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -16717,7 +16945,19 @@
       }
     ],
     "reposicoes": [],
-    "capturado_em": "2026-09-06T15:51:59.366721Z"
+    "capturado_em": "2026-09-06T15:51:59.366721Z",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    },
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
   },
   {
     "cgd_matricula_id": "665219",
@@ -16749,7 +16989,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:38:21.586912Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "833423",
@@ -16781,7 +17032,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:38:29.764145Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "554749",
@@ -16813,7 +17075,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:38:38.085294Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "824527",
@@ -16828,8 +17101,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 1,
-    "presencas": 29,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -17446,7 +17719,18 @@
     ],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:38:53.000807Z",
-    "frequencia_status": "COM_FREQUENCIA_REAL"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "347372",
@@ -17478,7 +17762,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:39:00.885810Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "537194",
@@ -17510,7 +17805,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:39:08.976304Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "372250",
@@ -17525,8 +17831,8 @@
     "data_inicio": null,
     "data_fim": null,
     "unidade": "matriz",
-    "faltas": 5,
-    "presencas": 52,
+    "faltas": 0,
+    "presencas": 0,
     "ultimo_acesso": null,
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
@@ -18683,7 +18989,18 @@
     ],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:39:30.896769Z",
-    "frequencia_status": "COM_FREQUENCIA_REAL"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "832946",
@@ -18715,7 +19032,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:39:39.353000Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "298798",
@@ -18747,7 +19075,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:39:47.914279Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "870251",
@@ -18779,7 +19118,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:39:56.461360Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "85371",
@@ -18811,7 +19161,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:04.950421Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "308328",
@@ -18843,7 +19204,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:13.584764Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "282656",
@@ -18875,7 +19247,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:22.662341Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "264646",
@@ -18907,7 +19290,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:31.183713Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "54598",
@@ -18939,7 +19333,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:40.794967Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "674434",
@@ -18971,7 +19376,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:49.410442Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "115310",
@@ -19003,7 +19419,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:40:58.389681Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "736450",
@@ -19035,7 +19462,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:06.980380Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "182295",
@@ -19067,7 +19505,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:15.249631Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "825033",
@@ -19099,7 +19548,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:23.820423Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "130218",
@@ -19131,7 +19591,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:32.444637Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "138703",
@@ -19163,7 +19634,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:40.681453Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "52431",
@@ -19195,7 +19677,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:49.629164Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "51686",
@@ -19227,7 +19720,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:41:58.685544Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "809221",
@@ -19259,7 +19763,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:07.033563Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "101471",
@@ -19291,7 +19806,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:15.400734Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "830123",
@@ -19323,7 +19849,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:23.773023Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "740172",
@@ -19355,7 +19892,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:32.498491Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "720010",
@@ -19387,7 +19935,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:41.193577Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "181803",
@@ -19419,7 +19978,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:49.626781Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "820516",
@@ -19451,7 +20021,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:42:58.309690Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "841428",
@@ -19483,7 +20064,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:07.065000Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "167691",
@@ -19515,7 +20107,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:15.947357Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "202476",
@@ -19547,7 +20150,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:24.158854Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "169542",
@@ -19579,7 +20193,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:32.887631Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "489214",
@@ -19611,7 +20236,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:41.504502Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "703490",
@@ -19643,7 +20279,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:50.082685Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "845054",
@@ -19675,7 +20322,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:43:58.878455Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "87077",
@@ -19707,7 +20365,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:44:07.239855Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "85200",
@@ -19739,7 +20408,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:44:15.488679Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "735033",
@@ -19771,7 +20451,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:48:22.347971Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "529574",
@@ -19803,7 +20494,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:48:30.507408Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "659079",
@@ -19835,7 +20537,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:48:38.729020Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "635367",
@@ -19867,7 +20580,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:48:46.563976Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "737284",
@@ -19899,7 +20623,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:48:54.926839Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "538640",
@@ -19931,7 +20666,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:03.046187Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "545202",
@@ -19963,7 +20709,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:11.242546Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "540646",
@@ -19995,7 +20752,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:19.429381Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "897380",
@@ -20027,7 +20795,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:27.699228Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "594538",
@@ -20059,7 +20838,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:35.802447Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "436653",
@@ -20091,7 +20881,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:44.056594Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "465411",
@@ -20123,7 +20924,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:49:52.070588Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "812475",
@@ -20155,7 +20967,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:00.379932Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "835858",
@@ -20187,7 +21010,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:08.897295Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "450722",
@@ -20219,7 +21053,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:17.008735Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "901025",
@@ -20251,7 +21096,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:25.089904Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "441630",
@@ -20283,7 +21139,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:36.337455Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "737213",
@@ -20315,7 +21182,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:44.546397Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "748909",
@@ -20347,7 +21225,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:50:52.822231Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "465407",
@@ -20379,7 +21268,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:00.950292Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "710568",
@@ -20411,7 +21311,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:09.067480Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "615858",
@@ -20443,7 +21354,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:17.068642Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "710016",
@@ -20475,7 +21397,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:25.423550Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "876594",
@@ -20507,7 +21440,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:33.501529Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "704149",
@@ -20539,7 +21483,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:41.926678Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "743351",
@@ -20571,7 +21526,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:50.198779Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "604539",
@@ -20603,7 +21569,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:51:58.505816Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "490276",
@@ -20635,7 +21612,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:06.718732Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "494630",
@@ -20667,7 +21655,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:14.922590Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "515229",
@@ -20699,7 +21698,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:23.068936Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "852058",
@@ -20731,7 +21741,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:31.289005Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "470432",
@@ -20763,7 +21784,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:39.415609Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "642444",
@@ -20795,7 +21827,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:47.881300Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "766065",
@@ -20827,7 +21870,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:52:56.066370Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "436231",
@@ -20859,7 +21913,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:53:04.233904Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "766515",
@@ -20891,7 +21956,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:53:12.333444Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "437979",
@@ -20923,7 +21999,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:53:20.461245Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "472268",
@@ -20955,7 +22042,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:53:28.813246Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "766269",
@@ -20987,7 +22085,18 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:53:37.331986Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   },
   {
     "cgd_matricula_id": "465183",
@@ -21019,6 +22128,17 @@
     "frequencia_raw": [],
     "reposicoes": [],
     "capturado_em": "2026-09-06T18:53:45.598583Z",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR"
+    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_registrada": 0,
+    "frequencia_reposicoes_cgd": 0,
+    "frequencia_validacao_interna": {
+      "registros_registrados": 0,
+      "presencas": 0,
+      "faltas": 0,
+      "reposicoes": 0,
+      "registros_status_desconhecido": 0,
+      "ultimo_acesso": null,
+      "matematica_ok": true
+    }
   }
 ]
