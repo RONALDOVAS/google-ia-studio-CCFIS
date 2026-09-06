@@ -174,7 +174,6 @@ def extract_name(page, fallback=None):
 
 
 def login(page, user, password, u):
-    # O login deve sempre começar na rota de autenticacao real.
     page.goto(CGD_LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
     page.wait_for_timeout(1500)
     us = page.locator('input[type="text"],input[type="email"],input[name*="user" i],input[name*="login" i],input[name*="email" i]')
@@ -202,7 +201,6 @@ def login(page, user, password, u):
     page.wait_for_timeout(2500)
     if not same_host(page.url):
         raise RuntimeError(f"[{u}] login saiu do host do CGD: {page.url}")
-    # Nao chamar de LOGIN OK enquanto ainda estivermos em /login.
     final_path = urlparse(page.url).path.rstrip("/").lower()
     if final_path == "/login" or final_path.startswith("/login/"):
         raise RuntimeError(f"[{u}] LOGIN_REJEITADO_OU_SESSAO_NAO_ESTABELECIDA: {page.url}")
@@ -397,6 +395,17 @@ def contract_bundle(page, cid, u, reps):
     return aluno
 
 
+def validate_real_detail(aluno, cid, u):
+    if not aluno:
+        raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
+    nome = norm(aluno.get("nome"))
+    if not nome or nome == f"Contrato {cid}":
+        raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
+    if not (aluno.get("frequencia_raw") or []):
+        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
+    return aluno
+
+
 def detail_worker(args):
     u, cfg, cid, reps, storage_state, attempt = args
     profile = EDGE_PROFILE_BASE / f"{u}_{cid}_{attempt}"
@@ -407,6 +416,7 @@ def detail_worker(args):
             context = browser.new_context(storage_state=storage_state)
             page = context.new_page()
             aluno = contract_bundle(page, cid, u, reps)
+            aluno = validate_real_detail(aluno, cid, u)
             context.close(); browser.close()
             return {"ok": True, "cid": cid, "aluno": aluno, "attempt": attempt}
     except Exception as e:
@@ -419,7 +429,7 @@ def process_details(u, cfg, contracts, reps, storage_state):
     workers = min(DETAIL_WORKERS, len(contracts))
     print(f"[{u}] INICIO DETALHAMENTO PARALELO: {len(contracts)} contratos / {workers} workers")
     pending = list(contracts)
-    results, failed = [], []
+    results = []
     for round_no in (1, 2):
         if not pending:
             break
@@ -435,16 +445,19 @@ def process_details(u, cfg, contracts, reps, storage_state):
                     r = {"ok": False, "cid": "desconhecido", "error": str(e), "attempt": round_no}
                 if r.get("ok") and r.get("aluno"):
                     results.append(r["aluno"])
+                    aluno = r["aluno"]
+                    print(f"[{u}] CONTRATO_OK cid={r.get('cid')} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}")
                 else:
                     cid = r.get("cid")
                     if cid and cid != "desconhecido":
                         pending_next.append(cid)
                     print(f"[{u}] FALHA DETALHE {r.get('cid')}: {r.get('error')}")
                 if idx % max(1, workers) == 0 or idx == len(futures):
-                    print(f"[{u}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)}")
+                    print(f"[{u}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)} sucesso_total={len(results)} falhas_rodada={len(pending_next)}")
         pending = [contract_url(cid) for cid in pending_next if cid]
-    failed = pending
-    print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(failed)} de={len(contracts)}")
+    print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(contracts)}")
+    for contract in pending:
+        print(f"[{u}] CONTRATO_NAO_CAPTURADO: {contract}")
     return results
 
 
@@ -485,7 +498,7 @@ def run_unit(u, cfg, pw):
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: autenticacao real -> listagem real -> reposicoes -> detalhamento")
+    print("Fluxo: autenticacao real -> listagem real -> reposicoes -> detalhamento paralelo")
     print(f"Configuracao: workers={DETAIL_WORKERS}, page_wait_ms={PAGE_WAIT_MS}, timeout_ms={PAGE_TIMEOUT_MS}, diagnostico={DIAGNOSTICO}")
     print("=" * 80)
     all_alunos = []
