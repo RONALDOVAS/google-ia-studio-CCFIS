@@ -18,9 +18,9 @@ from playwright.sync_api import sync_playwright
 import scraper
 
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
-LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "4")))
-LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
-DETAIL_HTTP_WORKERS = max(1, int(os.getenv("CGD_DETAIL_HTTP_WORKERS", os.getenv("CGD_DETAIL_WORKERS", "8"))))
+LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "12")))
+LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "20")))
+DETAIL_HTTP_WORKERS = max(1, int(os.getenv("CGD_DETAIL_HTTP_WORKERS", os.getenv("CGD_DETAIL_WORKERS", "12"))))
 DETAIL_TIMEOUT_S = max(10, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "45")))
 DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 DETAIL_LIMIT = max(0, int(os.getenv("CGD_DETAIL_LIMIT", "0")))
@@ -108,8 +108,7 @@ def optimized_discover_contracts(page, unidade, destino):
                     found[cid] = scraper.contract_url(cid)
                 completed += 1
                 page_number = parse_qs(urlparse(url).query).get("page", ["?"])[0]
-                if completed % 10 == 0 or page_number == str(LISTING_PAGES):
-                    print(f"[{unidade}] pagina_lista={page_number}/{LISTING_PAGES} contratos_acumulados={len(found)} novos={len(found)-before}")
+                print(f"[{unidade}] pagina_lista={page_number}/{LISTING_PAGES} contratos_acumulados={len(found)} novos={len(found)-before}")
             except Exception as exc:
                 completed += 1
                 errors += 1
@@ -185,23 +184,62 @@ def _extract_name_html(soup, fallback=None):
     return fallback
 
 
+def _cell_signal(cell):
+    if cell is None:
+        return ""
+    parts = [_norm(cell.get_text(" ", strip=True))]
+    for attr in ("class", "title", "aria-label", "data-status", "data-value", "data-presenca", "data-presenca-status"):
+        value = cell.get(attr)
+        if isinstance(value, list):
+            value = " ".join(value)
+        if value:
+            parts.append(str(value))
+    for child in cell.find_all(True):
+        for attr in ("title", "aria-label", "data-status", "data-value", "class"):
+            value = child.get(attr)
+            if isinstance(value, list):
+                value = " ".join(value)
+            if value:
+                parts.append(str(value))
+    return _low(" ".join(parts))
+
+
 def _extract_frequency_html(soup):
     rec, faltas, pres = [], 0, 0
-    for heads, rows in _html_tables(soup):
+    absence = ("falta", "faltou", "ausente", "não compareceu", "nao compareceu", "faixa-falta", "status-falta")
+    presence = ("presente", "presença", "presenca", "compareceu", "faixa-presenca", "status-presenca")
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        thead = table.find("thead")
+        head_cells = thead.find_all(["th", "td"]) if thead else rows[0].find_all(["th", "td"])
+        heads = [_norm(x.get_text(" ", strip=True)) for x in head_cells]
         si = _html_col(heads, "status", "situação", "situacao", "presença", "presenca", "frequência", "frequencia")
         di = _html_col(heads, "data", "dia")
         ai = _html_col(heads, "aluno", "nome", "estudante")
-        for row in rows:
-            s = _low(row[si]) if si is not None and si < len(row) else ""
-            if any(x in s for x in ("falta", "faltou", "ausente", "não compareceu", "nao compareceu")):
+        start = 1 if not thead else 0
+        for tr in rows[start:]:
+            cells = tr.find_all("td")
+            if not cells:
+                continue
+            values = [_norm(c.get_text(" ", strip=True)) for c in cells]
+            signals = [_cell_signal(c) for c in cells]
+            status = signals[si] if si is not None and si < len(signals) else ""
+            combined = _low(" ".join(signals))
+            kind = ""
+            if any(x in status for x in absence) or any(x in combined for x in absence):
                 faltas += 1
-            elif any(x in s for x in ("presente", "presença", "presenca", "compareceu")):
+                kind = "falta"
+            elif any(x in status for x in presence) or any(x in combined for x in presence):
                 pres += 1
+                kind = "presenca"
             rec.append({
-                "data": row[di] if di is not None and di < len(row) else None,
-                "status": row[si] if si is not None and si < len(row) else None,
-                "aluno": row[ai] if ai is not None and ai < len(row) else None,
-                "valores": row,
+                "data": values[di] if di is not None and di < len(values) else None,
+                "status": values[si] if si is not None and si < len(values) else None,
+                "aluno": values[ai] if ai is not None and ai < len(values) else None,
+                "classificacao": kind,
+                "valores": values,
                 "cabecalhos": heads,
             })
     return {"faltas": faltas, "presencas": pres, "registros": rec}
@@ -375,9 +413,26 @@ def run_unit(unidade, cfg, pw):
     state = profile / "storage_state.json"
     try:
         scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-        contracts, cookies, headers = optimized_discover_contracts(page, unidade, cfg["destino"])
+
+        # PRIMEIRO LOTE IMEDIATO: nao esperar as 831 paginas para comecar.
+        # O primeiro HTML ja contem contratos reais; eles sao detalhados agora.
+        if not scraper.open_page(page, LISTING_SOURCE, unidade, "lista_pagina_1_imediata", 300):
+            raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM_INICIAL: {page.url}")
+        first_ids = list(_extract_contract_ids(page.content()))
+        if not first_ids:
+            raise RuntimeError(f"[{unidade}] LISTAGEM_INICIAL_SEM_CONTRATOS: {page.url}")
+        session0 = _session_from_browser(page)
+        cookies0 = {c.name: c.value for c in session0.cookies}
+        headers0 = dict(session0.headers)
         reps = scraper.get_replacements(page, unidade)
-        print(f"[{unidade}] REPOSICOES GLOBAIS CAPTURADAS: {len(reps)}")
+        quick_count = min(len(first_ids), DETAIL_LIMIT if DETAIL_LIMIT else DETAIL_HTTP_WORKERS)
+        quick_contracts = [scraper.contract_url(cid) for cid in first_ids[:quick_count]]
+        print(f"[{unidade}] COLETA_IMEDIATA: pagina=1 contratos={len(first_ids)} iniciando_detalhes={quick_count}")
+        immediate = process_details_fast(unidade, quick_contracts, reps, cookies0, headers0)
+        immediate_ids = {str(a.get("contrato")) for a in immediate}
+
+        # Depois do primeiro lote, completa a descoberta das 831 paginas.
+        contracts, cookies, headers = optimized_discover_contracts(page, unidade, cfg["destino"])
         context.storage_state(path=str(state))
     except Exception as exc:
         print(f"[{unidade}] ERRO FATAL: {exc!r}")
@@ -385,13 +440,18 @@ def run_unit(unidade, cfg, pw):
     finally:
         context.close()
         browser.close()
-    return process_details_fast(unidade, contracts, reps, cookies, headers)
+
+    remaining = [u for u in contracts if scraper.contract_id(u) not in immediate_ids]
+    results = list(immediate)
+    if remaining:
+        results += process_details_fast(unidade, remaining, reps, cookies, headers)
+    return results
 
 
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: autenticacao real -> listagem HTTP -> reposicoes -> detalhamento HTTP paralelo")
+    print("Fluxo: autenticacao real -> primeira pagina -> detalhe imediato -> listagem HTTP -> restante dos detalhes")
     print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_http_workers={DETAIL_HTTP_WORKERS}, detail_limit={DETAIL_LIMIT}, timeout_s={DETAIL_TIMEOUT_S}, retries={DETAIL_RETRIES}")
     print("=" * 80)
     all_alunos = []
