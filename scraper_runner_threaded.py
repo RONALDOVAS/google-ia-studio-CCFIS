@@ -1,37 +1,29 @@
-"""Executor CGD: mesma sessao autenticada e captura incremental por contrato."""
+"""Executor CGD: listagem rapida e detalhamento paralelo por contrato."""
 
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import scraper
 import scraper_runner
 from playwright.sync_api import sync_playwright
 
-
-_original_contract_bundle = scraper.contract_bundle
 JSON_PATH = Path("dados_alunos.json")
 _FALTA_TOKENS = ("faltou", "falta", "ausente", "nao compareceu", "não compareceu")
 _PRESENTE_TOKENS = ("presente", "presenca", "presença", "compareceu")
-_CF_MARKERS = (
-    "verifying you are human",
-    "just a moment",
-    "checking your browser",
-    "cf-chl-",
-    "challenge-platform",
-)
+_CF_MARKERS = ("verifying you are human", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
+_original_contract_bundle = scraper.contract_bundle
 
 
 def _recalcular_frequencia(aluno):
-    registros = aluno.get("frequencia_raw") or []
-    faltas = 0
-    presencas = 0
-    for registro in registros:
+    faltas = presencas = 0
+    for registro in aluno.get("frequencia_raw") or []:
         valores = []
-        status = registro.get("status")
-        if status:
-            valores.append(scraper.low(status))
+        if registro.get("status"):
+            valores.append(scraper.low(registro["status"]))
         valores.extend(scraper.low(v) for v in (registro.get("valores") or []) if v is not None)
         texto = " | ".join(valores)
         if any(token in texto for token in _FALTA_TOKENS):
@@ -52,8 +44,7 @@ def _curso_modal_preservado(page, cid, aluno):
         page.wait_for_timeout(scraper.PAGE_WAIT_MS)
         deadline = time.monotonic() + max(5, int(os.getenv("CGD_AJAX_WAIT_S", "12")))
         while time.monotonic() < deadline:
-            dados = scraper.table_data(page)
-            if any(rows for _, rows in dados):
+            if any(rows for _, rows in scraper.table_data(page)):
                 break
             page.wait_for_timeout(500)
         rows = scraper.extract_disciplines(page, url)
@@ -63,14 +54,13 @@ def _curso_modal_preservado(page, cid, aluno):
             aluno["disciplinas_concluidas"] = done
             aluno["disciplinas_em_andamento"] = cur
             aluno["disciplinas_futuras"] = fut
-            print(f"[{aluno.get('unidade')}] CURSOS_MODAL_CAPTURADOS cid={cid} registros={len(rows)}", flush=True)
     except Exception as exc:
         print(f"[{aluno.get('unidade')}] CURSOS_MODAL_ERRO cid={cid}: {exc!r}", flush=True)
     return aluno
 
 
-def _contract_bundle_preservado(page, cid, u, reps):
-    aluno = _original_contract_bundle(page, cid, u, reps)
+def _contract_bundle_preservado(page, cid, unidade, reps):
+    aluno = _original_contract_bundle(page, cid, unidade, reps)
     if aluno:
         aluno = _recalcular_frequencia(aluno)
         aluno = _curso_modal_preservado(page, cid, aluno)
@@ -95,10 +85,8 @@ def _validar_sessao(page, unidade):
     for tentativa in range(1, 7):
         page.wait_for_timeout(1000)
         if not _pagina_protegida(page):
-            cookies = {c["name"] for c in page.context.cookies(scraper.CGD_URL)}
-            print(f"[{unidade}] SESSAO_CGD_VALIDADA tentativa={tentativa} cf_clearance={'cf_clearance' in cookies} cf_bm={'__cf_bm' in cookies} url={page.url}", flush=True)
+            print(f"[{unidade}] SESSAO_CGD_VALIDADA tentativa={tentativa} url={page.url}", flush=True)
             return
-        print(f"[{unidade}] CLOUDFLARE_AINDA_PRESENTE tentativa={tentativa} url={page.url}", flush=True)
         page.reload(wait_until="domcontentloaded", timeout=scraper_runner.DETAIL_TIMEOUT_S * 1000)
     raise RuntimeError(f"[{unidade}] CLOUDFLARE_SESSAO_NAO_VALIDADA")
 
@@ -111,7 +99,7 @@ def _frequencia_com_espera(page, cid):
         try:
             resultado = scraper_runner.robust_extract_frequency(page, cid)
             if resultado.get("registros"):
-                print(f"[FREQUENCIA_VALIDADA] cid={cid} tentativa={tentativa} registros={len(resultado['registros'])} faltas={resultado.get('faltas', 0)} presencas={resultado.get('presencas', 0)}", flush=True)
+                print(f"[FREQUENCIA_VALIDADA] cid={cid} tentativa={tentativa} registros={len(resultado['registros'])}", flush=True)
                 return resultado
             ultimo = RuntimeError("parser retornou zero registros")
         except Exception as exc:
@@ -124,92 +112,103 @@ def _frequencia_com_espera(page, cid):
 scraper.extract_frequency = _frequencia_com_espera
 
 
-def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids):
-    """Processa apenas contratos novos ate o alvo cumulativo da unidade."""
-    alvo = max(1, int(os.getenv("CGD_DETAIL_TARGET_PER_UNIT", "3")))
-    diagnostic = os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim")
-    candidatos = []
-    for contract in contracts:
-        cid = scraper.contract_id(contract)
-        if cid and cid not in existing_ids:
-            candidatos.append(contract)
+def _detalhar_worker(unidade, contratos, reps, storage_state, worker_id, cursor, lock, resultados, falhas):
+    """Cada worker possui seu proprio Edge/context/page e consome a fila de contratos."""
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(storage_state=storage_state)
+        page = context.new_page()
+        try:
+            while True:
+                with lock:
+                    if cursor[0] >= len(contratos):
+                        break
+                    index = cursor[0]
+                    cursor[0] += 1
+                contract = contratos[index]
+                cid = scraper.contract_id(contract)
+                if not cid:
+                    continue
+                try:
+                    print(f"[{unidade}] WORKER={worker_id} INICIO {index + 1}/{len(contratos)} cid={cid}", flush=True)
+                    aluno = scraper.contract_bundle(page, cid, unidade, reps)
+                    if not aluno or not (aluno.get("frequencia_raw") or []):
+                        raise RuntimeError(f"CONTRATO_SEM_FREQUENCIA cid={cid}")
+                    with lock:
+                        resultados.append(aluno)
+                    print(f"[{unidade}] WORKER={worker_id} OK {index + 1}/{len(contratos)} cid={cid} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')}", flush=True)
+                except Exception as exc:
+                    with lock:
+                        falhas.append(cid)
+                    print(f"[{unidade}] WORKER={worker_id} ERRO {index + 1}/{len(contratos)} cid={cid}: {exc!r}", flush=True)
+        finally:
+            context.close()
+            browser.close()
 
+
+def _capturar_detalhes_mesmo_contexto(page, unidade, contracts, reps, existing_ids):
+    alvo = max(1, int(os.getenv("CGD_DETAIL_TARGET_PER_UNIT", "3")))
+    workers = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "3")))
+    diagnostic = os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim")
+    candidatos = [c for c in contracts if scraper.contract_id(c) and scraper.contract_id(c) not in existing_ids]
     faltam = max(0, alvo - len(existing_ids))
     selecionados = candidatos[:faltam]
-    print(f"[{u}] INCREMENTAL_EXISTENTES={len(existing_ids)} ALVO_CUMULATIVO={alvo} NOVOS_NECESSARIOS={faltam} NOVOS_DISPONIVEIS={len(candidatos)} NOVOS_SELECIONADOS={len(selecionados)}", flush=True)
+    print(f"[{unidade}] INCREMENTAL_EXISTENTES={len(existing_ids)} ALVO_CUMULATIVO={alvo} NOVOS_NECESSARIOS={faltam} NOVOS_DISPONIVEIS={len(candidatos)} NOVOS_SELECIONADOS={len(selecionados)}", flush=True)
     if diagnostic:
-        print(f"[{u}] DIAGNOSTICO_INCREMENTAL_ATIVO alvo={alvo}; limite agora significa alvo cumulativo, nao refazer os primeiros contratos", flush=True)
+        print(f"[{unidade}] DIAGNOSTICO_INCREMENTAL_ATIVO alvo={alvo}; detalhamento paralelo workers={workers}", flush=True)
+    if not selecionados:
+        return []
 
-    resultados = []
-    falhas = []
-    for index, contract in enumerate(selecionados, 1):
-        cid = scraper.contract_id(contract)
-        try:
-            print(f"[{u}] CONTRATO_INICIO_NOVO {index}/{len(selecionados)} cid={cid}", flush=True)
-            aluno = scraper.contract_bundle(page, cid, u, reps)
-            if not aluno:
-                raise RuntimeError(f"CONTRATO_SEM_DADOS cid={cid}")
-            if not (aluno.get("frequencia_raw") or []):
-                raise RuntimeError(f"CONTRATO_SEM_FREQUENCIA cid={cid}")
-            resultados.append(aluno)
-            print(f"[{u}] CONTRATO_OK_NOVO {index}/{len(selecionados)} cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
-        except Exception as exc:
-            falhas.append(cid)
-            print(f"[{u}] CONTRATO_ERRO_NOVO {index}/{len(selecionados)} cid={cid}: {exc!r}", flush=True)
-
-    print(f"[{u}] DETALHAMENTO_INCREMENTAL_FINALIZADO novos_sucesso={len(resultados)} novos_falhas={len(falhas)} existentes_preservados={len(existing_ids)} alvo={alvo}", flush=True)
+    storage_state = page.context.storage_state()
+    resultados, falhas = [], []
+    cursor = [0]
+    lock = threading.Lock()
+    worker_count = min(workers, len(selecionados))
+    print(f"[{unidade}] DETALHAMENTO_PARALELO_INICIADO contratos={len(selecionados)} workers={worker_count}", flush=True)
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        futures = [pool.submit(_detalhar_worker, unidade, selecionados, reps, storage_state, wid, cursor, lock, resultados, falhas) for wid in range(1, worker_count + 1)]
+        for future in futures:
+            future.result()
+    print(f"[{unidade}] DETALHAMENTO_INCREMENTAL_FINALIZADO novos_sucesso={len(resultados)} novos_falhas={len(falhas)} existentes_preservados={len(existing_ids)} alvo={alvo}", flush=True)
     return resultados
 
 
-def _run_unit_mesma_sessao(u, cfg, pw, existing_ids):
+def _run_unit_mesma_sessao(unidade, cfg, pw, existing_ids):
     headless = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
-    print(f"[{u}] MODO_SESSAO_UNICA Edge headless={headless}", flush=True)
+    print(f"[{unidade}] MODO_SESSAO_UNICA Edge headless={headless}", flush=True)
     browser = pw.chromium.launch(channel="msedge", headless=headless)
     context = browser.new_context()
     page = context.new_page()
     try:
-        scraper.login(page, cfg["usuario"], cfg["senha"], u)
-        _validar_sessao(page, u)
-        contracts = scraper.discover_contracts(page, u, cfg["destino"])
-        print(f"[{u}] CONTRATOS_DISCOVERED={len(contracts)}", flush=True)
-        reps = scraper.get_replacements(page, u)
-        print(f"[{u}] REPOSICOES_GLOBAIS_CAPTURADAS={len(reps)}", flush=True)
-        _validar_sessao(page, u)
-        return _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids)
+        scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
+        _validar_sessao(page, unidade)
+        contracts = scraper.discover_contracts(page, unidade, cfg["destino"])
+        print(f"[{unidade}] CONTRATOS_DISCOVERED={len(contracts)}", flush=True)
+        reps = scraper.get_replacements(page, unidade)
+        print(f"[{unidade}] REPOSICOES_GLOBAIS_CAPTURADAS={len(reps)}", flush=True)
+        _validar_sessao(page, unidade)
+        return _capturar_detalhes_mesmo_contexto(page, unidade, contracts, reps, existing_ids)
     except Exception as exc:
-        print(f"[{u}] ERRO FATAL SESSAO_UNICA: {exc!r}", flush=True)
+        print(f"[{unidade}] ERRO FATAL SESSAO_UNICA: {exc!r}", flush=True)
         return []
     finally:
-        try:
-            context.close()
-        finally:
-            browser.close()
-
-
-def _run_unit_wrapper(u, cfg, pw, existing_ids):
-    return _run_unit_mesma_sessao(u, cfg, pw, existing_ids)
+        context.close()
+        browser.close()
 
 
 def _load_existing():
     if not JSON_PATH.exists():
         return []
-    try:
-        data = json.loads(JSON_PATH.read_text(encoding="utf-8"))
-        if not isinstance(data, list):
-            raise ValueError("dados_alunos.json nao possui raiz lista")
-        print(f"[INCREMENTAL] DADOS_EXISTENTES={len(data)}", flush=True)
-        return data
-    except Exception as exc:
-        raise RuntimeError(f"Falha lendo dados_alunos.json existente: {exc}") from exc
+    data = json.loads(JSON_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise RuntimeError("dados_alunos.json nao possui raiz lista")
+    print(f"[INCREMENTAL] DADOS_EXISTENTES={len(data)}", flush=True)
+    return data
 
 
 def _merge_incremental(existing, novos):
     merged = {}
-    for aluno in existing:
-        cid = str(aluno.get("contrato") or aluno.get("cgd_matricula_id") or "").strip()
-        if cid:
-            merged[cid] = aluno
-    for aluno in novos:
+    for aluno in existing + novos:
         cid = str(aluno.get("contrato") or aluno.get("cgd_matricula_id") or "").strip()
         if cid:
             merged[cid] = aluno
@@ -218,24 +217,23 @@ def _merge_incremental(existing, novos):
 
 def main_incremental():
     print("=" * 80, flush=True)
-    print("SCRAPER CGD - COLETA REAL INCREMENTAL POR CONTRATO / UNIDADE", flush=True)
-    print("Fluxo: autenticar -> descobrir contratos -> ignorar contratos ja persistidos -> capturar somente novos", flush=True)
+    print("SCRAPER CGD - COLETA REAL INCREMENTAL / DETALHAMENTO PARALELO", flush=True)
+    print("Fluxo: autenticar -> descobrir contratos -> ignorar persistidos -> detalhar somente novos", flush=True)
     print("Contagem do CGD tratada como dinamica; o alvo e cumulativo por unidade.", flush=True)
     print("=" * 80, flush=True)
-
     existing = _load_existing()
     novos = []
     with sync_playwright() as pw:
-        for u in ("matriz", "filial"):
-            existing_ids = {str(a.get("contrato") or a.get("cgd_matricula_id") or "").strip() for a in existing if a.get("unidade") == u}
+        for unidade in ("matriz", "filial"):
+            existing_ids = {str(a.get("contrato") or a.get("cgd_matricula_id") or "").strip() for a in existing if a.get("unidade") == unidade}
             existing_ids.discard("")
-            novos.extend(_run_unit_wrapper(u, scraper.CONFIG[u], pw, existing_ids))
-
+            novos.extend(_run_unit_mesma_sessao(unidade, scraper.CONFIG[unidade], pw, existing_ids))
     merged = _merge_incremental(existing, novos)
     JSON_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
-    por_unidade = {u: sum(1 for a in merged if a.get("unidade") == u) for u in ("matriz", "filial")}
+    matriz = sum(1 for a in merged if a.get("unidade") == "matriz")
+    filial = sum(1 for a in merged if a.get("unidade") == "filial")
     print(f"[INCREMENTAL] NOVOS_CAPTURADOS={len(novos)}", flush=True)
-    print(f"[INCREMENTAL] TOTAL_PERSISTIDO={len(merged)} matriz={por_unidade['matriz']} filial={por_unidade['filial']}", flush=True)
+    print(f"[INCREMENTAL] TOTAL_PERSISTIDO={len(merged)} matriz={matriz} filial={filial}", flush=True)
     print("=" * 80, flush=True)
 
 
