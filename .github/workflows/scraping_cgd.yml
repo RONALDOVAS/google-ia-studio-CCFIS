@@ -83,7 +83,8 @@ jobs:
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          python -u scraper_runner.py
+          Write-Host '=== CGD DIAGNOSTICO: executor THREAD-SAFE ==='
+          python -u scraper_runner_threaded.py
       - name: Validar captura real de alunos
         shell: powershell
         run: |
