@@ -54,7 +54,7 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-      - name: Executar scraper CGD - diagnóstico 3 + 3
+      - name: Executar scraper CGD - alvo incremental 10 + 10
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -77,15 +77,16 @@ jobs:
           CGD_DETAIL_WORKERS: '3'
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
-          CGD_DETAIL_LIMIT: '3'
+          CGD_DETAIL_LIMIT: '10'
+          CGD_DETAIL_TARGET_PER_UNIT: '10'
           CGD_LISTING_PAGES: '1'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD DIAGNOSTICO: executor THREAD-SAFE ==='
+          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 10 por unidade ==='
           python -u scraper_runner_threaded.py
-      - name: Validar captura real de alunos
+      - name: Validar captura real incremental de alunos
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
@@ -102,15 +103,20 @@ jobs:
           sem_freq = len(dados) - len(com_freq)
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
+          contratos = [str(a.get('contrato') or '') for a in dados]
+          duplicados = len(contratos) - len(set(contratos))
           print(f'ALUNOS CAPTURADOS: {len(dados)}')
           print(f'ALUNOS COM FREQUENCIA REAL: {len(com_freq)}')
           print(f'ALUNOS SEM FREQUENCIA: {sem_freq}')
           print(f'MATRIZ: {len(matriz)}')
           print(f'FILIAL: {len(filial)}')
+          print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if sem_freq:
               raise SystemExit(f'Falha: existem {sem_freq} alunos sem frequência real.')
-          if len(matriz) != 3 or len(filial) != 3:
-              raise SystemExit(f'Falha no diagnóstico: esperado 3 matriz + 3 filial; obtido {len(matriz)} + {len(filial)}.')
+          if duplicados:
+              raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
+          if len(matriz) != 10 or len(filial) != 10:
+              raise SystemExit(f'Falha incremental: esperado 10 matriz + 10 filial; obtido {len(matriz)} + {len(filial)}.')
           '@ | python -
       - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
