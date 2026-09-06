@@ -13,6 +13,13 @@ _original_contract_bundle = scraper.contract_bundle
 
 _FALTA_TOKENS = {"faltou", "falta", "ausente", "nao compareceu", "não compareceu"}
 _PRESENTE_TOKENS = {"presente", "presenca", "presença", "compareceu"}
+_CF_MARKERS = (
+    "verifying you are human",
+    "just a moment",
+    "checking your browser",
+    "cf-chl-",
+    "challenge-platform",
+)
 
 
 def _recalcular_frequencia(aluno):
@@ -73,10 +80,100 @@ def _contract_bundle_preservado(page, cid, u, reps):
 scraper.contract_bundle = _contract_bundle_preservado
 
 
+def _pagina_protegida(page):
+    try:
+        url = (page.url or "").lower()
+        texto = scraper.low(page.locator("body").inner_text())[:20000]
+        return "/cdn-cgi/challenge" in url or any(marker in texto for marker in _CF_MARKERS)
+    except Exception:
+        return False
+
+
+def _preflight_sessao(page, unidade):
+    """Valida a sessão autenticada/Cloudflare antes de consumir contratos."""
+    page.goto(scraper.CGD_URL, wait_until="domcontentloaded", timeout=scraper_runner.DETAIL_TIMEOUT_S * 1000)
+    for tentativa in range(1, 7):
+        page.wait_for_timeout(1000)
+        if not _pagina_protegida(page):
+            cookies = {c["name"] for c in page.context.cookies(scraper.CGD_URL)}
+            cf = "cf_clearance" in cookies
+            bm = "__cf_bm" in cookies
+            print(f"[{unidade}] SESSAO_CGD_VALIDADA tentativa={tentativa} cf_clearance={cf} cf_bm={bm} url={page.url}", flush=True)
+            return
+        print(f"[{unidade}] CLOUDFLARE_AINDA_PRESENTE tentativa={tentativa} url={page.url}", flush=True)
+        page.reload(wait_until="domcontentloaded", timeout=scraper_runner.DETAIL_TIMEOUT_S * 1000)
+    raise RuntimeError(f"[{unidade}] CLOUDFLARE_SESSAO_NAO_VALIDADA: a sessão autenticada não chegou ao CGD real")
+
+
+def _frequencia_com_espera(page, cid):
+    """Não aceita uma página vazia como frequência válida: aguarda o DOM/AJAX real."""
+    ultimo_erro = None
+    for tentativa, espera in enumerate((0, 750, 1500, 2500, 4000), 1):
+        if espera:
+            page.wait_for_timeout(espera)
+        try:
+            resultado = scraper_runner.robust_extract_frequency(page, cid)
+            if resultado.get("registros"):
+                print(f"[FREQUENCIA_VALIDADA] cid={cid} tentativa={tentativa} registros={len(resultado['registros'])} faltas={resultado.get('faltas', 0)} presencas={resultado.get('presencas', 0)}", flush=True)
+                return resultado
+            ultimo_erro = RuntimeError("parser retornou zero registros")
+        except Exception as exc:
+            ultimo_erro = exc
+        if tentativa < 5:
+            print(f"[FREQUENCIA_AGUARDANDO] cid={cid} tentativa={tentativa} aguardando conteúdo dinâmico", flush=True)
+    raise RuntimeError(f"FREQUENCIA_NAO_CAPTURADA_APOS_ESPERA cid={cid}: {ultimo_erro}")
+
+
+scraper.extract_frequency = _frequencia_com_espera
+
+
 def _run_details_in_thread(u, cfg, contracts, reps, storage_state):
-    # O Playwright Sync API fica inteiramente dentro desta thread dedicada.
-    # Não há monkey-patch de símbolos privados de scraper_runner.
+    """Playwright Sync exclusivamente nesta thread, com a sessão autenticada restaurada."""
     return scraper_runner.safe_process_details(u, cfg, contracts, reps, storage_state)
+
+
+def _persistent_detail_round_validated(u, cfg, contracts, reps, storage_state, attempt):
+    results, failed = [], []
+    if not contracts:
+        return results, failed
+
+    scraper_runner.progress.set_total(6 if os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim") else len(contracts) * 2)
+    headless = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
+    print(f"[{u}] DETALHAMENTO VALIDADO: {len(contracts)} contratos | Edge | headless={headless}", flush=True)
+
+    with scraper_runner.sync_playwright() as pw:
+        browser = pw.chromium.launch(channel="msedge", headless=headless)
+        context = browser.new_context(storage_state=storage_state)
+        page = context.new_page()
+        try:
+            _preflight_sessao(page, u)
+            for index, contract in enumerate(contracts, 1):
+                cid = scraper.contract_id(contract)
+                if not cid:
+                    continue
+                try:
+                    print(f"[{u}] CONTRATO_INICIO {index}/{len(contracts)} cid={cid}", flush=True)
+                    result = scraper.contract_bundle(page, cid, u, reps)
+                    if not result:
+                        raise RuntimeError(f"CONTRATO_SEM_DADOS cid={cid}")
+                    if not (result.get("frequencia_raw") or []):
+                        raise RuntimeError(f"CONTRATO_SEM_FREQUENCIA cid={cid}")
+                    results.append(result)
+                    scraper_runner.progress.update(True, f"{u} contrato={cid}")
+                    print(f"[{u}] CONTRATO_OK {index}/{len(contracts)} cid={cid} nome={result.get('nome')} faltas={result.get('faltas')} presencas={result.get('presencas')} freq_registros={len(result.get('frequencia_raw') or [])}", flush=True)
+                except Exception as exc:
+                    failed.append(cid)
+                    scraper_runner.progress.update(False, f"{u} contrato={cid} FALHA")
+                    print(f"[{u}] CONTRATO_ERRO {index}/{len(contracts)} cid={cid}: {exc!r}", flush=True)
+        finally:
+            context.close()
+            browser.close()
+    return results, failed
+
+
+# O safe_process_details original chama esta função por nome; substituímos somente
+# a rodada de detalhes para preservar listagem, autenticação e armazenamento existentes.
+scraper_runner._persistent_detail_round = _persistent_detail_round_validated
 
 
 def threaded_process_details(u, cfg, contracts, reps, storage_state):
