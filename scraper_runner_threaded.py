@@ -1,4 +1,4 @@
-"""Executor CGD: mesma sessao autenticada e captura incremental por contrato."""
+"""Executor CGD: mesma sessao autenticada, filtro de campanha e coleta incremental."""
 
 import json
 import os
@@ -9,18 +9,11 @@ import scraper
 import scraper_runner
 from playwright.sync_api import sync_playwright
 
-
 _original_contract_bundle = scraper.contract_bundle
 JSON_PATH = Path("dados_alunos.json")
 _FALTA_TOKENS = ("faltou", "falta", "ausente", "nao compareceu", "não compareceu")
 _PRESENTE_TOKENS = ("presente", "presenca", "presença", "compareceu")
-_CF_MARKERS = (
-    "verifying you are human",
-    "just a moment",
-    "checking your browser",
-    "cf-chl-",
-    "challenge-platform",
-)
+_CF_MARKERS = ("verifying you are human", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
 
 
 def _recalcular_frequencia(aluno):
@@ -125,7 +118,6 @@ scraper.extract_frequency = _frequencia_com_espera
 
 
 def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids):
-    """Processa apenas contratos novos ate o alvo cumulativo da unidade."""
     alvo = max(1, int(os.getenv("CGD_DETAIL_TARGET_PER_UNIT", "3")))
     diagnostic = os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim")
     candidatos = []
@@ -133,13 +125,11 @@ def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids):
         cid = scraper.contract_id(contract)
         if cid and cid not in existing_ids:
             candidatos.append(contract)
-
     faltam = max(0, alvo - len(existing_ids))
     selecionados = candidatos[:faltam]
-    print(f"[{u}] INCREMENTAL_EXISTENTES={len(existing_ids)} ALVO_CUMULATIVO={alvo} NOVOS_NECESSARIOS={faltam} NOVOS_DISPONIVEIS={len(candidatos)} NOVOS_SELECIONADOS={len(selecionados)}", flush=True)
+    print(f"[{u}] INCREMENTAL_EXISTENTES_INFORMATICA={len(existing_ids)} ALVO_CUMULATIVO={alvo} NOVOS_NECESSARIOS={faltam} NOVOS_DISPONIVEIS={len(candidatos)} NOVOS_SELECIONADOS={len(selecionados)}", flush=True)
     if diagnostic:
-        print(f"[{u}] DIAGNOSTICO_INCREMENTAL_ATIVO alvo={alvo}; limite agora significa alvo cumulativo, nao refazer os primeiros contratos", flush=True)
-
+        print(f"[{u}] DIAGNOSTICO_INCREMENTAL_ATIVO campanha=informatica alvo={alvo}; somente contratos novos da campanha", flush=True)
     resultados = []
     falhas = []
     for index, contract in enumerate(selecionados, 1):
@@ -151,13 +141,15 @@ def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids):
                 raise RuntimeError(f"CONTRATO_SEM_DADOS cid={cid}")
             if not (aluno.get("frequencia_raw") or []):
                 raise RuntimeError(f"CONTRATO_SEM_FREQUENCIA cid={cid}")
+            campanha = scraper_runner._extract_campaign_from_text(aluno.get("campanha") or "") if hasattr(scraper_runner, "_extract_campaign_from_text") else aluno.get("campanha")
+            if not campanha or "informatica" not in scraper_runner._norm_search(campanha):
+                raise RuntimeError(f"CONTRATO_FORA_DA_CAMPANHA_INFORMATICA cid={cid} campanha={aluno.get('campanha')!r}")
             resultados.append(aluno)
-            print(f"[{u}] CONTRATO_OK_NOVO {index}/{len(selecionados)} cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
+            print(f"[{u}] CONTRATO_OK_NOVO {index}/{len(selecionados)} cid={cid} campanha={aluno.get('campanha')} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
         except Exception as exc:
             falhas.append(cid)
             print(f"[{u}] CONTRATO_ERRO_NOVO {index}/{len(selecionados)} cid={cid}: {exc!r}", flush=True)
-
-    print(f"[{u}] DETALHAMENTO_INCREMENTAL_FINALIZADO novos_sucesso={len(resultados)} novos_falhas={len(falhas)} existentes_preservados={len(existing_ids)} alvo={alvo}", flush=True)
+    print(f"[{u}] DETALHAMENTO_INCREMENTAL_FINALIZADO novos_sucesso={len(resultados)} novos_falhas={len(falhas)} existentes_informatica_preservados={len(existing_ids)} alvo={alvo}", flush=True)
     return resultados
 
 
@@ -171,11 +163,12 @@ def _run_unit_mesma_sessao(u, cfg, pw, existing_ids):
         scraper.login(page, cfg["usuario"], cfg["senha"], u)
         _validar_sessao(page, u)
         contracts = scraper.discover_contracts(page, u, cfg["destino"])
-        print(f"[{u}] CONTRATOS_DISCOVERED={len(contracts)}", flush=True)
+        effective_existing = set(scraper_runner.LAST_CAMPAIGN_IDS_BY_UNIT.get(u, existing_ids))
+        print(f"[{u}] CONTRATOS_DISCOVERED_INFORMATICA={len(contracts)} EXISTENTES_INFORMATICA={len(effective_existing)}", flush=True)
         reps = scraper.get_replacements(page, u)
         print(f"[{u}] REPOSICOES_GLOBAIS_CAPTURADAS={len(reps)}", flush=True)
         _validar_sessao(page, u)
-        return _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids)
+        return _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, effective_existing)
     except Exception as exc:
         print(f"[{u}] ERRO FATAL SESSAO_UNICA: {exc!r}", flush=True)
         return []
@@ -218,11 +211,10 @@ def _merge_incremental(existing, novos):
 
 def main_incremental():
     print("=" * 80, flush=True)
-    print("SCRAPER CGD - COLETA REAL INCREMENTAL POR CONTRATO / UNIDADE", flush=True)
-    print("Fluxo: autenticar -> descobrir contratos -> ignorar contratos ja persistidos -> capturar somente novos", flush=True)
-    print("Contagem do CGD tratada como dinamica; o alvo e cumulativo por unidade.", flush=True)
+    print("SCRAPER CGD - COLETA REAL INCREMENTAL POR CONTRATO / CAMPANHA / UNIDADE", flush=True)
+    print("Fluxo: autenticar -> descobrir paginas pequenas -> validar campanha informatica -> ignorar persistidos -> capturar somente novos", flush=True)
+    print("Contagem do CGD tratada como dinamica; o alvo e cumulativo por unidade e somente campanha informatica.", flush=True)
     print("=" * 80, flush=True)
-
     existing = _load_existing()
     novos = []
     with sync_playwright() as pw:
@@ -230,12 +222,15 @@ def main_incremental():
             existing_ids = {str(a.get("contrato") or a.get("cgd_matricula_id") or "").strip() for a in existing if a.get("unidade") == u}
             existing_ids.discard("")
             novos.extend(_run_unit_wrapper(u, scraper.CONFIG[u], pw, existing_ids))
-
+            allowed = set(scraper_runner.LAST_CAMPAIGN_IDS_BY_UNIT.get(u, set()))
+            if allowed:
+                existing = [a for a in existing if a.get("unidade") != u or str(a.get("contrato") or a.get("cgd_matricula_id") or "").strip() in allowed]
+                print(f"[INCREMENTAL] FILTRO_EXISTENTE_{u.upper()}_INFORMATICA={len(allowed)}", flush=True)
     merged = _merge_incremental(existing, novos)
     JSON_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     por_unidade = {u: sum(1 for a in merged if a.get("unidade") == u) for u in ("matriz", "filial")}
     print(f"[INCREMENTAL] NOVOS_CAPTURADOS={len(novos)}", flush=True)
-    print(f"[INCREMENTAL] TOTAL_PERSISTIDO={len(merged)} matriz={por_unidade['matriz']} filial={por_unidade['filial']}", flush=True)
+    print(f"[INCREMENTAL] TOTAL_PERSISTIDO_INFORMATICA={len(merged)} matriz={por_unidade['matriz']} filial={por_unidade['filial']}", flush=True)
     print("=" * 80, flush=True)
 
 
