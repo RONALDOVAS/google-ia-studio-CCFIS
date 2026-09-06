@@ -1,8 +1,8 @@
-"""Executor CGD: listagem HTTP rapida + detalhamento Edge na mesma sessao.
+"""Executor CGD: listagem HTTP rapida + detalhamento paralelo.
 
 A listagem usa requests autenticado para percorrer as paginas sem abrir um
-navegador por pagina. O detalhamento usa uma instancia Playwright dedicada,
-sem criar sync_playwright dentro de outra instancia.
+navegador por pagina. O detalhamento reutiliza o coletor paralelo existente
+em scraper.py, com uma sessao autenticada persistida por unidade.
 """
 
 import os
@@ -18,12 +18,10 @@ import scraper
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
 LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "4")))
 LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
-DETAIL_TIMEOUT_S = max(10, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "120")))
-DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 DETAIL_LIMIT = max(0, int(os.getenv("CGD_DETAIL_LIMIT", "0")))
-HEADLESS = os.getenv("CGD_HEADLESS", "false").strip().lower() in {"1", "true", "yes", "on"}
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
 LISTING_SOURCE = "https://app.cgd.com.br/alunos"
+HEADLESS = os.getenv("CGD_HEADLESS", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class SessionExpired(RuntimeError):
@@ -117,127 +115,43 @@ def optimized_discover_contracts(page, unidade, destino):
     return list(found.values())[:MAX_CONTRACTS]
 
 
-def _strict_open_page(page, url, unidade, name, wait=None):
-    page.goto(url, wait_until="domcontentloaded", timeout=DETAIL_TIMEOUT_S * 1000)
-    # O CGD entrega algumas telas imediatamente e outras terminam de montar
-    # a tabela apos DOMContentLoaded. Sem esta espera, a pagina de frequencia
-    # pode estar visualmente aberta, mas ainda sem as linhas que o parser le.
-    stable_wait = max(1000, int(getattr(scraper, "PAGE_WAIT_MS", 500)))
-    if wait is not None:
-        stable_wait = max(stable_wait, int(wait))
-    page.wait_for_timeout(stable_wait)
-    try:
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        pass
-    path = urlparse(page.url).path.rstrip("/").lower()
-    if path == "/login" or path.startswith("/login/"):
-        raise SessionExpired(f"[{unidade}] SESSAO_EXPIRADA_NO_DETALHE etapa={name} url={url} final={page.url}")
-    if urlparse(page.url).netloc != urlparse(scraper.CGD_URL).netloc:
-        raise RuntimeError(f"[{unidade}] DETALHE_SAIU_DO_HOST etapa={name}: {page.url}")
-    print(f"[{unidade}] {name}: {page.url}")
-    try:
-        scraper.dump(page, unidade, name)
-    except Exception:
-        pass
-    return True
-
-
-def _validate_real_detail(aluno, cid, unidade):
-    if not aluno:
-        raise RuntimeError(f"[{unidade}] CONTRATO_SEM_RESULTADO cid={cid}")
-    nome = str(aluno.get("nome") or "").strip()
-    if not nome or nome == f"Contrato {cid}":
-        raise RuntimeError(f"[{unidade}] ALUNO_NAO_IDENTIFICADO cid={cid}")
-    if not (aluno.get("frequencia_raw") or []):
-        raise RuntimeError(f"[{unidade}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
-    return aluno
-
-
-def process_details_with_browser(pw, unidade, cfg, contracts, reps):
+def process_details_with_existing_parallel_collector(unidade, cfg, contracts, reps, storage_state):
     if not contracts:
         return []
     targets = list(contracts[:DETAIL_LIMIT] if DETAIL_LIMIT else contracts)
-    print(f"[{unidade}] INICIO DETALHAMENTO_EDGE_PERSISTENTE: contratos={len(targets)} de={len(contracts)}")
+    print(f"[{unidade}] INICIO DETALHAMENTO PARALELO: contratos={len(targets)} de={len(contracts)} workers={scraper.DETAIL_WORKERS}")
     if DETAIL_LIMIT:
         print(f"[{unidade}] LIMITE_CONTROLADO_DETALHE: {DETAIL_LIMIT}")
-
-    browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
-    context = browser.new_context()
-    page = context.new_page()
-    previous_open_page = scraper.open_page
-    scraper.open_page = _strict_open_page
-    results = []
-    pending = list(targets)
-
-    try:
-        for attempt in range(1, DETAIL_RETRIES + 2):
-            if not pending:
-                break
-            print(f"[{unidade}] RODADA_DETALHE_EDGE={attempt} pendentes={len(pending)}")
-            pending_next = []
-            for idx, contract in enumerate(pending, 1):
-                cid = scraper.contract_id(contract)
-                if not cid:
-                    print(f"[{unidade}] CONTRATO_INVALIDO: {contract}")
-                    continue
-                try:
-                    print(f"[{unidade}] >>> PROCESSANDO CONTRATO {cid}")
-                    aluno = scraper.contract_bundle(page, cid, unidade, reps)
-                    aluno = _validate_real_detail(aluno, cid, unidade)
-                    results.append(aluno)
-                    print(f"[{unidade}] CONTRATO_OK {idx}/{len(pending)} cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}")
-                except SessionExpired as exc:
-                    print(f"[{unidade}] SESSAO_EXPIRADA cid={cid}: {exc}")
-                    try:
-                        scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-                        aluno = scraper.contract_bundle(page, cid, unidade, reps)
-                        aluno = _validate_real_detail(aluno, cid, unidade)
-                        results.append(aluno)
-                        print(f"[{unidade}] CONTRATO_OK_APOS_RELOGIN cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')}")
-                    except Exception as exc2:
-                        pending_next.append(cid)
-                        print(f"[{unidade}] CONTRATO_ERRO_APOS_RELOGIN cid={cid}: {exc2!r}")
-                except Exception as exc:
-                    pending_next.append(cid)
-                    print(f"[{unidade}] CONTRATO_ERRO cid={cid}: {exc!r}")
-                if idx % 10 == 0 or idx == len(pending):
-                    print(f"[{unidade}] PROGRESSO_DETALHAMENTO_EDGE {idx}/{len(pending)} sucesso_total={len(results)} falhas_rodada={len(pending_next)}")
-            pending = [scraper.contract_url(cid) for cid in pending_next if cid]
-    finally:
-        scraper.open_page = previous_open_page
-        context.close()
-        browser.close()
-
-    print(f"[{unidade}] DETALHAMENTO_EDGE_FINALIZADO: sucesso={len(results)} falhas={len(pending)} de_processados={len(targets)} total_disponivel={len(contracts)}")
-    for contract in pending:
-        print(f"[{unidade}] CONTRATO_NAO_CAPTURADO: {contract}")
-    return results
+    return scraper.process_details(unidade, cfg, targets, reps, storage_state)
 
 
 def run_unit(unidade, cfg, pw):
+    profile = scraper.EDGE_PROFILE_BASE / unidade
+    profile.mkdir(parents=True, exist_ok=True)
     browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
     context = browser.new_context()
     page = context.new_page()
+    state = profile / "storage_state.json"
     try:
         scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
         contracts = optimized_discover_contracts(page, unidade, cfg["destino"])
         reps = scraper.get_replacements(page, unidade)
         print(f"[{unidade}] REPOSICOES GLOBAIS CAPTURADAS: {len(reps)}")
+        context.storage_state(path=str(state))
     except Exception as exc:
         print(f"[{unidade}] ERRO FATAL: {exc!r}")
-        context.close(); browser.close()
         raise
     finally:
-        context.close(); browser.close()
-    return process_details_with_browser(pw, unidade, cfg, contracts, reps)
+        context.close()
+        browser.close()
+    return process_details_with_existing_parallel_collector(unidade, cfg, contracts, reps, str(state))
 
 
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: autenticacao real -> listagem HTTP -> reposicoes -> Edge persistente")
-    print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_limit={DETAIL_LIMIT}, timeout_s={DETAIL_TIMEOUT_S}, diagnostico={scraper.DIAGNOSTICO}")
+    print("Fluxo: autenticacao real -> listagem HTTP -> reposicoes -> detalhamento paralelo")
+    print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_workers={scraper.DETAIL_WORKERS}, detail_limit={DETAIL_LIMIT}, page_wait_ms={scraper.PAGE_WAIT_MS}, timeout_ms={scraper.PAGE_TIMEOUT_MS}, diagnostico={scraper.DIAGNOSTICO}")
     print("=" * 80)
     all_alunos = []
     with sync_playwright() as pw:
