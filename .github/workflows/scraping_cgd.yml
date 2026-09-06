@@ -81,10 +81,10 @@ jobs:
           CGD_DETAIL_TARGET_PER_UNIT: '50'
           CGD_LISTING_PAGES: '831'
           CGD_HEADLESS: 'false'
-          CGD_DIAGNOSTICO: '1'
+          CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade; listagem completa 831 paginas ==='
+          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade; filtro campanha informatica; paginacao adaptativa ==='
           python -u scraper_runner_threaded.py
       - name: Validar captura real incremental de alunos
         shell: powershell
@@ -92,7 +92,11 @@ jobs:
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
           @'
           import json
+          import unicodedata
           from pathlib import Path
+          def norm(v):
+              s = ' '.join(str(v or '').replace('\xa0',' ').split()).lower()
+              return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
           p = Path('dados_alunos.json')
           dados = json.loads(p.read_text(encoding='utf-8'))
           if not isinstance(dados, list):
@@ -101,22 +105,28 @@ jobs:
               raise SystemExit('Falha: scraper terminou sem alunos.')
           com_freq = [a for a in dados if a.get('frequencia_raw')]
           sem_freq = len(dados) - len(com_freq)
-          matriz = [a for a in dados if a.get('unidade') == 'matriz']
-          filial = [a for a in dados if a.get('unidade') == 'filial']
+          campanha_info = [a for a in dados if 'informatica' in norm(a.get('campanha'))]
+          sem_campanha = len(dados) - len(campanha_info)
+          matriz = [a for a in campanha_info if a.get('unidade') == 'matriz']
+          filial = [a for a in campanha_info if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
           duplicados = len(contratos) - len(set(contratos))
           print(f'ALUNOS CAPTURADOS: {len(dados)}')
+          print(f'ALUNOS CAMPANHA INFORMATICA: {len(campanha_info)}')
+          print(f'ALUNOS FORA DA CAMPANHA: {sem_campanha}')
           print(f'ALUNOS COM FREQUENCIA REAL: {len(com_freq)}')
           print(f'ALUNOS SEM FREQUENCIA: {sem_freq}')
-          print(f'MATRIZ: {len(matriz)}')
-          print(f'FILIAL: {len(filial)}')
+          print(f'MATRIZ INFORMATICA: {len(matriz)}')
+          print(f'FILIAL INFORMATICA: {len(filial)}')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if sem_freq:
               raise SystemExit(f'Falha: existem {sem_freq} alunos sem frequência real.')
+          if sem_campanha:
+              raise SystemExit(f'Falha: existem {sem_campanha} alunos fora da campanha de informatica.')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
           if len(matriz) != 50 or len(filial) != 50:
-              raise SystemExit(f'Falha incremental: esperado 50 matriz + 50 filial; obtido {len(matriz)} + {len(filial)}.')
+              raise SystemExit(f'Falha incremental: esperado 50 matriz + 50 filial da campanha informatica; obtido {len(matriz)} + {len(filial)}.')
           '@ | python -
       - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
