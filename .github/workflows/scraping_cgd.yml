@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - 'dados_alunos.json'
       - 'dados_reposicoes.json'
+      - 'dados_dashboard_cgd.json'
+      - 'dados_pacotes_cursos.json'
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
@@ -87,44 +89,76 @@ jobs:
         run: |
           Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 831 paginas | detalhe 1 sessao ==='
           python -u scraper_runner_threaded.py
-      - name: Validar captura real incremental de alunos
+      - name: Auditar e atualizar base real dos 100 contratos
+        shell: powershell
+        env:
+          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
+          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
+          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CGD_DETAIL_TIMEOUT_S: '45'
+          CGD_PAGE_WAIT_MS: '100'
+          CGD_DIAGNOSTICO: '1'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          Write-Host '=== AUDITORIA: frequencia + sem frequencia + campanha + pacote + dashboard ==='
+          python -u auditar_base_cgd.py
+      - name: Validar captura real e base auditada
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
+          if (-not (Test-Path 'dados_dashboard_cgd.json')) { throw 'Falha: dados_dashboard_cgd.json não foi gerado.' }
+          if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
           @'
           import json
           from pathlib import Path
-          p = Path('dados_alunos.json')
-          dados = json.loads(p.read_text(encoding='utf-8'))
-          if not isinstance(dados, list):
-              raise SystemExit(f'Falha: raiz de dados_alunos.json não é lista: {type(dados).__name__}')
-          if len(dados) == 0:
-              raise SystemExit('Falha: scraper terminou sem alunos.')
+          dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
+          pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
+          if not isinstance(dados, list) or not dados:
+              raise SystemExit('Falha: base de alunos vazia/inválida.')
           com_freq = [a for a in dados if a.get('frequencia_raw')]
           sem_freq = [a for a in dados if not a.get('frequencia_raw')]
-          sem_freq_classificados = [a for a in sem_freq if a.get('frequencia_status') in ('SEM_FREQUENCIA_AGUARDANDO_INICIO','SEM_FREQUENCIA_A_INVESTIGAR')]
+          valid_status = ('SEM_FREQUENCIA_AGUARDANDO_INICIO','SEM_FREQUENCIA_CONTRATO_ENCERRADO','SEM_FREQUENCIA_A_INVESTIGAR')
+          sem_class = [a for a in sem_freq if a.get('frequencia_status') in valid_status]
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
           duplicados = len(contratos) - len(set(contratos))
-          campanhas_preenchidas = [a for a in dados if str(a.get('campanha') or '').strip()]
-          print(f'ALUNOS CAPTURADOS: {len(dados)}')
-          print(f'ALUNOS COM FREQUENCIA REAL: {len(com_freq)}')
-          print(f'ALUNOS SEM FREQUENCIA: {len(sem_freq)}')
-          print(f'SEM FREQUENCIA CLASSIFICADOS: {len(sem_freq_classificados)}')
+          campanhas = [a for a in dados if str(a.get('campanha') or '').strip()]
+          pacotes = [a for a in dados if str(a.get('pacote') or '').strip()]
+          freq_validacao = [a for a in dados if isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('ok')]
+          dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
+          pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
+          print(f'ALUNOS NA BASE: {len(dados)}')
+          print(f'FREQUENCIA REAL: {len(com_freq)}')
+          print(f'SEM FREQUENCIA: {len(sem_freq)}')
+          print(f'SEM FREQUENCIA CLASSIFICADOS: {len(sem_class)}')
           print(f'MATRIZ: {len(matriz)}')
           print(f'FILIAL: {len(filial)}')
-          print(f'ALUNOS COM CAMPO CAMPANHA PREENCHIDO: {len(campanhas_preenchidas)}')
-          print(f'ALUNOS SEM CAMPO CAMPANHA: {len(dados) - len(campanhas_preenchidas)}')
+          print(f'CAMPAÑA PREENCHIDA: {len(campanhas)}')
+          print(f'PACOTE PREENCHIDO: {len(pacotes)}')
+          print(f'FREQUENCIA COM VALIDACAO INTERNA: {len(freq_validacao)}')
+          print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
+          print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
-          if len(sem_freq) != len(sem_freq_classificados):
-              raise SystemExit('Falha: existe aluno sem frequência sem classificação de situação.')
+          if len(sem_freq) != len(sem_class):
+              raise SystemExit('Falha: aluno sem frequência sem classificação semântica.')
+          if len(freq_validacao) != len(dados):
+              raise SystemExit('Falha: existem registros de frequência sem validação interna.')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
-          if len(matriz) != 50 or len(filial) != 50:
-              raise SystemExit(f'Falha incremental: esperado 50 matriz + 50 filial; obtido {len(matriz)} + {len(filial)}.')
-          if len(dados) != 100:
-              raise SystemExit(f'Falha incremental: esperado total 100 alunos; obtido {len(dados)}.')
+          if len(matriz) != 50 or len(filial) != 50 or len(dados) != 100:
+              raise SystemExit(f'Falha: base incremental esperada 50+50, obtido {len(matriz)}+{len(filial)} total={len(dados)}.')
+          if len(dash_ok) != 2:
+              raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
+          if len(pac_ok) != 4:
+              raise SystemExit(f'Falha: fontes de pacote/relatório não capturadas: {len(pac_ok)}/4.')
           '@ | python -
       - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
@@ -135,6 +169,7 @@ jobs:
           if (-not (Test-Path 'dados_reposicoes.json')) { throw 'Falha: dados_reposicoes.json não foi gerado.' }
           $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
           Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
+          if ($rep.source -ne 'CGD') { throw 'Falha: fonte de reposições não é CGD.' }
       - name: Salvar diagnósticos
         if: always()
         uses: actions/upload-artifact@v4
@@ -144,6 +179,8 @@ jobs:
             diagnostico_scraping/
             dados_alunos.json
             dados_reposicoes.json
+            dados_dashboard_cgd.json
+            dados_pacotes_cursos.json
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push dos dados públicos
@@ -152,6 +189,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add dados_alunos.json dados_reposicoes.json
+          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json
           if (git diff --cached --quiet) { Write-Host 'Nenhuma alteração nos dados sincronizados.' }
           else { git commit -m 'Auto-update: dados reais CGD'; git push }
