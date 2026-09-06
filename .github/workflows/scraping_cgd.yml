@@ -66,7 +66,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - HTTP para listagem; Edge persistente para detalhes
+      - name: Executar scraper CGD - HTTP para listagem e detalhes; Edge somente para autenticação
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -85,8 +85,8 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_LISTING_WAIT_MS: '100'
           CGD_LISTING_HTTP_WORKERS: '4'
-          CGD_DETAIL_HTTP_WORKERS: '4'
-          CGD_DETAIL_WORKERS: '4'
+          CGD_DETAIL_HTTP_WORKERS: '12'
+          CGD_DETAIL_WORKERS: '12'
           CGD_DETAIL_TIMEOUT_S: '120'
           CGD_DETAIL_RETRIES: '1'
           CGD_DETAIL_LIMIT: '20'
