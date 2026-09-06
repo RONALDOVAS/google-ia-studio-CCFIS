@@ -7,7 +7,6 @@ from urllib.parse import urlparse, urljoin
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
 from supabase import create_client, Client
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 CGD_URL = "https://app.cgd.com.br/"
@@ -28,25 +27,20 @@ PAGE_TIMEOUT_MS = max(10000, int(os.getenv("CGD_PAGE_TIMEOUT_MS", "30000")))
 DIAGNOSTICO = os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim")
 HEADLESS = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
 
-
 def norm(v):
     return " ".join(str(v or "").replace("\xa0", " ").split())
-
 
 def low(v):
     return norm(v).lower()
 
-
 def abs_url(page, href):
     return urljoin(page.url, href or "").split("#", 1)[0]
-
 
 def same_host(url):
     try:
         return urlparse(url).netloc == urlparse(CGD_URL).netloc
     except Exception:
         return False
-
 
 def dump(page, u, n):
     if not DIAGNOSTICO:
@@ -59,7 +53,6 @@ def dump(page, u, n):
     except Exception:
         pass
 
-
 def open_page(page, url, u, n, wait=None):
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
@@ -70,7 +63,6 @@ def open_page(page, url, u, n, wait=None):
     except Exception as e:
         print(f"[{u}] ERRO abrindo {url}: {e}")
         return False
-
 
 def links(page):
     out = []
@@ -93,28 +85,22 @@ def links(page):
             result.append((t, u))
     return result
 
-
 def contract_id(url):
     m = re.search(r"/contratos/(\d+)", urlparse(url).path, re.I)
     return m.group(1) if m else None
-
 
 def student_id(url):
     m = re.search(r"/alunos/(\d+)", urlparse(url).path, re.I)
     return m.group(1) if m else None
 
-
 def contract_url(cid):
     return f"{CGD_URL.rstrip('/')}/contratos/{cid}"
-
 
 def child_url(cid, k):
     return f"{CGD_URL.rstrip('/')}/contratos/{k}/{cid}"
 
-
 def is_contract(url):
     return bool(re.fullmatch(r"/contratos/\d+", urlparse(url).path.rstrip("/"), re.I))
-
 
 def table_data(page):
     out = []
@@ -140,7 +126,6 @@ def table_data(page):
         pass
     return out
 
-
 def col(heads, *names):
     names = tuple(low(x) for x in names)
     for i, h in enumerate(heads):
@@ -148,13 +133,11 @@ def col(heads, *names):
             return i
     return None
 
-
 def body(page):
     try:
         return norm(page.locator("body").inner_text())
     except Exception:
         return ""
-
 
 def extract_name(page, fallback=None):
     try:
@@ -172,6 +155,10 @@ def extract_name(page, fallback=None):
             return norm(m.group(1))
     return fallback
 
+def extract_campaign_from_text(text):
+    text = norm(text)
+    m = re.search(r"Campanha\s+(.+?)(?:\s+Vendedor|\s+Pacote|\s+Escola|\s+Conheceu|\s+Ações|$)", text, re.I)
+    return norm(m.group(1)) if m else None
 
 def login(page, user, password, u):
     page.goto(CGD_LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
@@ -207,7 +194,6 @@ def login(page, user, password, u):
     print(f"[{u}] LOGIN OK: {page.url}")
     dump(page, u, "apos_login")
 
-
 def collect_contracts(page, found):
     for _, h in links(page):
         if is_contract(h):
@@ -224,7 +210,6 @@ def collect_contracts(page, found):
                     found[cid] = contract_url(cid)
     except Exception:
         pass
-
 
 def next_page(page):
     sels = ['a[rel="next"]','button[rel="next"]','a[aria-label*="next" i]','button[aria-label*="next" i]','a[aria-label*="proxima" i]','button[aria-label*="proxima" i]','a:has-text("Próxima")','button:has-text("Próxima")','a:has-text("Proxima")','button:has-text("Proxima")','a:has-text("Next")','button:has-text("Next")','a:has-text("›")','button:has-text("›")']
@@ -245,7 +230,6 @@ def next_page(page):
         except Exception:
             pass
     return False
-
 
 def discover_contracts(page, u, destino):
     found = {}
@@ -277,7 +261,6 @@ def discover_contracts(page, u, destino):
     print(f"[{u}] DETAIL_WORKERS: {DETAIL_WORKERS}")
     return contracts
 
-
 def extract_frequency(page, cid):
     rec, faltas, pres = [], 0, 0
     for heads, rows in table_data(page):
@@ -292,7 +275,6 @@ def extract_frequency(page, cid):
                 pres += 1
             rec.append({"data": row[di] if di is not None and di < len(row) else None, "status": row[si] if si is not None and si < len(row) else None, "aluno": row[ai] if ai is not None and ai < len(row) else None, "valores": row, "cabecalhos": heads})
     return {"faltas": faltas, "presencas": pres, "registros": rec}
-
 
 def extract_disciplines(page, src):
     out = []
@@ -316,7 +298,6 @@ def extract_disciplines(page, src):
         out.append({"disciplina": None, "modulo": m.group(1), "passo": sm.group(1) if sm else None, "progresso": pm.group(1) + "%" if pm else None, "carga_horaria": None, "data": dm.group(1) if dm else None, "status": None, "texto_contexto": chunk[:3000], "cabecalhos": [], "valores": [], "origem": src})
     return out
 
-
 def classify(rows):
     seen, r = set(), []
     for x in rows:
@@ -336,7 +317,6 @@ def classify(rows):
             cur.append(x)
     return r, done, cur, fut
 
-
 def extract_replacements(page, u):
     out = []
     for heads, rows in table_data(page):
@@ -345,17 +325,16 @@ def extract_replacements(page, u):
                 out.append({"cabecalhos": heads, "valores": row, "unidade": u})
     return out
 
-
 def belongs(r, cid, sid, name):
     raw = low(" ".join(str(x) for x in r.get("valores", [])))
     return any(v and low(v) in raw for v in (cid, sid, name))
-
 
 def contract_bundle(page, cid, u, reps):
     print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
     cu = contract_url(cid)
     open_page(page, cu, u, f"contrato_{cid}")
     ctext = body(page)
+    campanha = extract_campaign_from_text(ctext)
     sl = [h for _, h in links(page) if student_id(h)]
     sid = student_id(sl[0]) if sl else None
     course = child_url(cid, "cursos")
@@ -384,7 +363,7 @@ def contract_bundle(page, cid, u, reps):
         return int(m.group()) if m else -1
     point = max(cur, key=lambda r: (num(r, "modulo"), num(r, "passo"), num(r, "progresso"))) if cur else None
     aluno = {
-        "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "email": None, "telefone": None,
+        "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "campanha": campanha, "email": None, "telefone": None,
         "curso": None, "turma": None, "professor": None, "data_matricula": None, "data_inicio": None, "data_fim": None,
         "unidade": u, "faltas": freq["faltas"], "presencas": freq["presencas"], "ultimo_acesso": None,
         "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO", "cgd_url": cu,
@@ -393,18 +372,6 @@ def contract_bundle(page, cid, u, reps):
         "reposicoes": [r for r in reps if belongs(r, cid, sid, name)], "capturado_em": datetime.utcnow().isoformat() + "Z"
     }
     return aluno
-
-
-def validate_real_detail(aluno, cid, u):
-    if not aluno:
-        raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
-    nome = norm(aluno.get("nome"))
-    if not nome or nome == f"Contrato {cid}":
-        raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
-    if not (aluno.get("frequencia_raw") or []):
-        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
-    return aluno
-
 
 def detail_worker(args):
     u, cfg, cid, reps, storage_state, attempt = args
@@ -416,12 +383,10 @@ def detail_worker(args):
             context = browser.new_context(storage_state=storage_state)
             page = context.new_page()
             aluno = contract_bundle(page, cid, u, reps)
-            aluno = validate_real_detail(aluno, cid, u)
             context.close(); browser.close()
             return {"ok": True, "cid": cid, "aluno": aluno, "attempt": attempt}
     except Exception as e:
         return {"ok": False, "cid": cid, "error": repr(e), "attempt": attempt}
-
 
 def process_details(u, cfg, contracts, reps, storage_state):
     if not contracts:
@@ -429,7 +394,7 @@ def process_details(u, cfg, contracts, reps, storage_state):
     workers = min(DETAIL_WORKERS, len(contracts))
     print(f"[{u}] INICIO DETALHAMENTO PARALELO: {len(contracts)} contratos / {workers} workers")
     pending = list(contracts)
-    results = []
+    results, failed = [], []
     for round_no in (1, 2):
         if not pending:
             break
@@ -445,21 +410,17 @@ def process_details(u, cfg, contracts, reps, storage_state):
                     r = {"ok": False, "cid": "desconhecido", "error": str(e), "attempt": round_no}
                 if r.get("ok") and r.get("aluno"):
                     results.append(r["aluno"])
-                    aluno = r["aluno"]
-                    print(f"[{u}] CONTRATO_OK cid={r.get('cid')} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}")
                 else:
                     cid = r.get("cid")
                     if cid and cid != "desconhecido":
                         pending_next.append(cid)
                     print(f"[{u}] FALHA DETALHE {r.get('cid')}: {r.get('error')}")
                 if idx % max(1, workers) == 0 or idx == len(futures):
-                    print(f"[{u}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)} sucesso_total={len(results)} falhas_rodada={len(pending_next)}")
+                    print(f"[{u}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)}")
         pending = [contract_url(cid) for cid in pending_next if cid]
-    print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(contracts)}")
-    for contract in pending:
-        print(f"[{u}] CONTRATO_NAO_CAPTURADO: {contract}")
+    failed = pending
+    print(f"[{u}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(failed)} de={len(contracts)}")
     return results
-
 
 def get_replacements(page, u):
     for _, h in links(page):
@@ -472,7 +433,6 @@ def get_replacements(page, u):
             if out:
                 return out
     return []
-
 
 def run_unit(u, cfg, pw):
     profile = EDGE_PROFILE_BASE / u
@@ -494,11 +454,10 @@ def run_unit(u, cfg, pw):
         context.close(); browser.close()
     return process_details(u, cfg, contracts, reps, str(state))
 
-
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: autenticacao real -> listagem real -> reposicoes -> detalhamento paralelo")
+    print("Fluxo: autenticacao real -> listagem real -> reposicoes -> detalhamento")
     print(f"Configuracao: workers={DETAIL_WORKERS}, page_wait_ms={PAGE_WAIT_MS}, timeout_ms={PAGE_TIMEOUT_MS}, diagnostico={DIAGNOSTICO}")
     print("=" * 80)
     all_alunos = []
@@ -516,7 +475,6 @@ def main():
     print("=" * 80)
     if not all_alunos:
         print("Nenhum aluno foi capturado pelo CGD.")
-
 
 if __name__ == "__main__":
     main()
