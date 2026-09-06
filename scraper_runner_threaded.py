@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing as mp
 import os
 import time
-from urllib.parse import urlparse
 
 import scraper
 import scraper_runner
@@ -75,8 +74,8 @@ scraper.contract_bundle = _contract_bundle_preservado
 
 
 def _run_details_in_thread(u, cfg, contracts, reps, storage_state):
-    # O Playwright sync roda exclusivamente nesta thread, fora do fluxo que
-    # iniciou o scraper. Não fazemos monkey-patch de símbolos inexistentes.
+    # O Playwright Sync API fica inteiramente dentro desta thread dedicada.
+    # Não há monkey-patch de símbolos privados de scraper_runner.
     return scraper_runner.safe_process_details(u, cfg, contracts, reps, storage_state)
 
 
