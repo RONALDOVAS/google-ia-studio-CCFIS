@@ -100,7 +100,8 @@ jobs:
           $failed = 0
           $started = Get-Date
           Write-Host ''
-          Write-Host '================ PROGRESSO SCRAPER CGD ================'n          Write-Progress -Id 1 -Activity 'Scraping CGD' -Status 'Iniciando autenticação e coleta...' -PercentComplete 0
+          Write-Host '================ PROGRESSO SCRAPER CGD ================'
+          Write-Progress -Id 1 -Activity 'Scraping CGD' -Status 'Iniciando autenticação e coleta...' -PercentComplete 0
           & python -u scraper_runner.py 2>&1 | ForEach-Object {
             $line = $_.ToString()
             Write-Host $line
