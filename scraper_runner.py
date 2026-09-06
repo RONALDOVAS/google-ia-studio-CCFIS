@@ -412,28 +412,14 @@ def run_unit(unidade, cfg, pw):
     page = context.new_page()
     state = profile / "storage_state.json"
     try:
+        # Autenticacao continua sendo feita exclusivamente no Edge.
         scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-
-        # PRIMEIRO LOTE IMEDIATO: nao esperar as 831 paginas para comecar.
-        # O primeiro HTML ja contem contratos reais; eles sao detalhados agora.
-        if not scraper.open_page(page, LISTING_SOURCE, unidade, "lista_pagina_1_imediata", 300):
-            raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM_INICIAL: {page.url}")
-        first_ids = list(_extract_contract_ids(page.content()))
-        if not first_ids:
-            raise RuntimeError(f"[{unidade}] LISTAGEM_INICIAL_SEM_CONTRATOS: {page.url}")
-        session0 = _session_from_browser(page)
-        cookies0 = {c.name: c.value for c in session0.cookies}
-        headers0 = dict(session0.headers)
-        reps = scraper.get_replacements(page, unidade)
-        quick_count = min(len(first_ids), DETAIL_LIMIT if DETAIL_LIMIT else DETAIL_HTTP_WORKERS)
-        quick_contracts = [scraper.contract_url(cid) for cid in first_ids[:quick_count]]
-        print(f"[{unidade}] COLETA_IMEDIATA: pagina=1 contratos={len(first_ids)} iniciando_detalhes={quick_count}")
-        immediate = process_details_fast(unidade, quick_contracts, reps, cookies0, headers0)
-        immediate_ids = {str(a.get("contrato")) for a in immediate}
-
-        # Depois do primeiro lote, completa a descoberta das 831 paginas.
+        # Captura cookies autenticados e faz a descoberta das 831 paginas
+        # diretamente por HTTP. Nao existe mais um lote de detalhes bloqueando
+        # a paginacao logo no inicio.
         contracts, cookies, headers = optimized_discover_contracts(page, unidade, cfg["destino"])
         context.storage_state(path=str(state))
+        reps = scraper.get_replacements(page, unidade)
     except Exception as exc:
         print(f"[{unidade}] ERRO FATAL: {exc!r}")
         raise
@@ -441,17 +427,16 @@ def run_unit(unidade, cfg, pw):
         context.close()
         browser.close()
 
-    remaining = [u for u in contracts if scraper.contract_id(u) not in immediate_ids]
-    results = list(immediate)
-    if remaining:
-        results += process_details_fast(unidade, remaining, reps, cookies, headers)
-    return results
+    # Somente depois da listagem completa, os detalhes sao buscados em paralelo.
+    # Isso garante que a coleta das 831 paginas nao fique bloqueada por quatro
+    # requisicoes sequenciais por aluno.
+    return process_details_fast(unidade, contracts, reps, cookies, headers)
 
 
 def main():
     print("=" * 80)
     print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO")
-    print("Fluxo: autenticacao real -> primeira pagina -> detalhe imediato -> listagem HTTP -> restante dos detalhes")
+    print("Fluxo: autenticacao real -> listagem HTTP completa -> detalhes HTTP paralelos")
     print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_http_workers={DETAIL_HTTP_WORKERS}, detail_limit={DETAIL_LIMIT}, timeout_s={DETAIL_TIMEOUT_S}, retries={DETAIL_RETRIES}")
     print("=" * 80)
     all_alunos = []
