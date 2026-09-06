@@ -73,18 +73,19 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_LISTING_WAIT_MS: '100'
           CGD_LISTING_HTTP_WORKERS: '12'
-          CGD_DETAIL_HTTP_WORKERS: '3'
-          CGD_DETAIL_WORKERS: '3'
+          CGD_DETAIL_HTTP_WORKERS: '1'
+          CGD_DETAIL_WORKERS: '1'
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '50'
           CGD_DETAIL_TARGET_PER_UNIT: '50'
-          CGD_LISTING_PAGES: '5'
+          CGD_LISTING_PAGES: '10'
+          CGD_DETAIL_INTERVAL_MS: '1200'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 5 paginas ==='
+          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 10 paginas | detalhe 1 sessao ==='
           python -u scraper_runner_threaded.py
       - name: Validar captura real incremental de alunos
         shell: powershell
