@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+from datetime import datetime
 from pathlib import Path
 
 import scraper
@@ -21,7 +23,6 @@ _CF_MARKERS = (
 
 # Mantem o parser robusto de frequencia ja validado no runner.
 scraper.discover_contracts = scraper_runner.optimized_discover_contracts
-scraper.extract_frequency = scraper_runner.robust_extract_frequency
 _original_contract_bundle = scraper.contract_bundle
 
 
@@ -42,23 +43,76 @@ def _validar_sessao(page, unidade):
     print(f"[{unidade}] SESSAO_CGD_VALIDADA url={page.url}", flush=True)
 
 
+def _frequencia_tolerante(page, cid):
+    """Zero registros pode ser um estado real do aluno, nao falha de scraping."""
+    try:
+        return scraper_runner.robust_extract_frequency(page, cid)
+    except RuntimeError as exc:
+        if "FREQUENCIA_NAO_CAPTURADA" in str(exc):
+            print(f"[FREQUENCIA] cid={cid} SEM_REGISTROS_REAIS", flush=True)
+            return {"faltas": 0, "presencas": 0, "registros": []}
+        raise
+
+
+scraper.extract_frequency = _frequencia_tolerante
+
+
+def _parse_datas(texto):
+    datas = []
+    for m in re.finditer(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", texto or ""):
+        try:
+            d, mth, y = map(int, m.groups())
+            if y < 100:
+                y += 2000
+            datas.append(datetime(y, mth, d).date())
+        except ValueError:
+            pass
+    return datas
+
+
+def _classificar_sem_frequencia(aluno):
+    """Classifica zero frequencia sem confundir aluno novo com problema de atendimento."""
+    if aluno.get("frequencia_raw"):
+        return "COM_FREQUENCIA_REAL"
+
+    hoje = datetime.utcnow().date()
+    textos = " ".join(
+        str(aluno.get(k) or "")
+        for k in ("horarios", "aluno_raw", "disciplinas", "disciplinas_futuras")
+    )
+    datas = _parse_datas(textos)
+    futuras = [d for d in datas if d >= hoje]
+    if futuras:
+        return "SEM_FREQUENCIA_AGUARDANDO_INICIO"
+    return "SEM_FREQUENCIA_A_INVESTIGAR"
+
+
 def _detalhar_um(page, unidade, contract, reps, index, total):
     cid = scraper.contract_id(contract)
     if not cid:
         return None
     print(f"[{unidade}] DETALHE {index}/{total} INICIO cid={cid}", flush=True)
     aluno = _original_contract_bundle(page, cid, unidade, reps)
-    if not aluno or not (aluno.get("frequencia_raw") or []):
-        raise RuntimeError(f"[{unidade}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
+    if not aluno:
+        raise RuntimeError(f"[{unidade}] CONTRATO_SEM_RESULTADO cid={cid}")
     if _pagina_bloqueada(page):
         raise RuntimeError(f"[{unidade}] CLOUDFLARE_BLOQUEIO_DURANTE_DETALHE cid={cid}")
-    print(
-        f"[{unidade}] DETALHE {index}/{total} OK cid={cid} "
-        f"nome={aluno.get('nome')} faltas={aluno.get('faltas')} "
-        f"presencas={aluno.get('presencas')} "
-        f"freq_registros={len(aluno.get('frequencia_raw') or [])}",
-        flush=True,
-    )
+
+    aluno["frequencia_status"] = _classificar_sem_frequencia(aluno)
+    if not aluno.get("frequencia_raw"):
+        print(
+            f"[{unidade}] DETALHE {index}/{total} OK_SEM_FREQUENCIA "
+            f"cid={cid} nome={aluno.get('nome')} status={aluno['frequencia_status']}",
+            flush=True,
+        )
+    else:
+        print(
+            f"[{unidade}] DETALHE {index}/{total} OK cid={cid} "
+            f"nome={aluno.get('nome')} faltas={aluno.get('faltas')} "
+            f"presencas={aluno.get('presencas')} "
+            f"freq_registros={len(aluno.get('frequencia_raw') or [])}",
+            flush=True,
+        )
     return aluno
 
 
@@ -156,7 +210,7 @@ def main_incremental():
     print("=" * 80, flush=True)
     print("SCRAPER CGD - COLETA REAL INCREMENTAL / DETALHAMENTO PROTEGIDO", flush=True)
     print("Fluxo: autenticar -> listagem HTTP paralela -> ignorar persistidos -> detalhar em uma sessao", flush=True)
-    print("Detalhamento sequencial; candidatos sem frequencia sao pulados ate completar o alvo.", flush=True)
+    print("Detalhamento sequencial; zero frequencia e classificada, nao descartada automaticamente.", flush=True)
     print("=" * 80, flush=True)
     existing = _load_existing()
     novos = []
