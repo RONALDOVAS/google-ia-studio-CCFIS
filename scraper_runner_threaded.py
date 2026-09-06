@@ -88,18 +88,12 @@ def _pagina_protegida(page):
 
 
 def _validar_sessao(page, unidade):
-    """Valida Cloudflare e login sem trocar de BrowserContext."""
     page.goto(scraper.CGD_URL, wait_until="domcontentloaded", timeout=scraper_runner.DETAIL_TIMEOUT_S * 1000)
     for tentativa in range(1, 7):
         page.wait_for_timeout(1000)
         if not _pagina_protegida(page):
             cookies = {c["name"] for c in page.context.cookies(scraper.CGD_URL)}
-            print(
-                f"[{unidade}] SESSAO_CGD_VALIDADA tentativa={tentativa} "
-                f"cf_clearance={'cf_clearance' in cookies} "
-                f"cf_bm={'__cf_bm' in cookies} url={page.url}",
-                flush=True,
-            )
+            print(f"[{unidade}] SESSAO_CGD_VALIDADA tentativa={tentativa} cf_clearance={'cf_clearance' in cookies} cf_bm={'__cf_bm' in cookies} url={page.url}", flush=True)
             return
         print(f"[{unidade}] CLOUDFLARE_AINDA_PRESENTE tentativa={tentativa} url={page.url}", flush=True)
         page.reload(wait_until="domcontentloaded", timeout=scraper_runner.DETAIL_TIMEOUT_S * 1000)
@@ -107,7 +101,6 @@ def _validar_sessao(page, unidade):
 
 
 def _frequencia_com_espera(page, cid):
-    """Aguarda o conteúdo real da frequência antes de aceitar o contrato."""
     ultimo = None
     for tentativa, espera in enumerate((0, 750, 1500, 2500, 4000), 1):
         if espera:
@@ -115,12 +108,7 @@ def _frequencia_com_espera(page, cid):
         try:
             resultado = scraper_runner.robust_extract_frequency(page, cid)
             if resultado.get("registros"):
-                print(
-                    f"[FREQUENCIA_VALIDADA] cid={cid} tentativa={tentativa} "
-                    f"registros={len(resultado['registros'])} faltas={resultado.get('faltas', 0)} "
-                    f"presencas={resultado.get('presencas', 0)}",
-                    flush=True,
-                )
+                print(f"[FREQUENCIA_VALIDADA] cid={cid} tentativa={tentativa} registros={len(resultado['registros'])} faltas={resultado.get('faltas', 0)} presencas={resultado.get('presencas', 0)}", flush=True)
                 return resultado
             ultimo = RuntimeError("parser retornou zero registros")
         except Exception as exc:
@@ -134,6 +122,10 @@ scraper.extract_frequency = _frequencia_com_espera
 
 
 def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps):
+    limite = max(1, int(os.getenv("CGD_DETAIL_LIMIT", "3")))
+    if os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim"):
+        contracts = list(contracts)[:limite]
+        print(f"[{u}] DIAGNOSTICO_LIMIT_APLICADO={limite} contratos_selecionados={len(contracts)}", flush=True)
     resultados = []
     falhas = []
     for index, contract in enumerate(contracts, 1):
@@ -148,13 +140,7 @@ def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps):
             if not (aluno.get("frequencia_raw") or []):
                 raise RuntimeError(f"CONTRATO_SEM_FREQUENCIA cid={cid}")
             resultados.append(aluno)
-            print(
-                f"[{u}] CONTRATO_OK {index}/{len(contracts)} cid={cid} "
-                f"nome={aluno.get('nome')} faltas={aluno.get('faltas')} "
-                f"presencas={aluno.get('presencas')} "
-                f"freq_registros={len(aluno.get('frequencia_raw') or [])}",
-                flush=True,
-            )
+            print(f"[{u}] CONTRATO_OK {index}/{len(contracts)} cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
         except Exception as exc:
             falhas.append(cid)
             print(f"[{u}] CONTRATO_ERRO {index}/{len(contracts)} cid={cid}: {exc!r}", flush=True)
@@ -163,7 +149,6 @@ def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps):
 
 
 def _run_unit_mesma_sessao(u, cfg, pw):
-    """Login, listagem, reposições e detalhes no MESMO BrowserContext."""
     headless = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
     print(f"[{u}] MODO_SESSAO_UNICA Edge headless={headless}", flush=True)
     browser = pw.chromium.launch(channel="msedge", headless=headless)
@@ -172,13 +157,10 @@ def _run_unit_mesma_sessao(u, cfg, pw):
     try:
         scraper.login(page, cfg["usuario"], cfg["senha"], u)
         _validar_sessao(page, u)
-
         contracts = scraper.discover_contracts(page, u, cfg["destino"])
         print(f"[{u}] CONTRATOS_DISCOVERED={len(contracts)}", flush=True)
-
         reps = scraper.get_replacements(page, u)
         print(f"[{u}] REPOSICOES_GLOBAIS_CAPTURADAS={len(reps)}", flush=True)
-
         _validar_sessao(page, u)
         return _capturar_detalhes_mesmo_contexto(page, u, contracts, reps)
     except Exception as exc:
@@ -195,8 +177,6 @@ def _run_unit_wrapper(u, cfg, pw):
     return _run_unit_mesma_sessao(u, cfg, pw)
 
 
-# O main original passa por run_unit; mantemos a listagem HTTP rápida e
-# substituímos apenas a fronteira de execução por unidade para não trocar sessão.
 scraper.run_unit = _run_unit_wrapper
 
 if __name__ == "__main__":
