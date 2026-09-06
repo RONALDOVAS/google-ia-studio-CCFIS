@@ -2,7 +2,6 @@
 
 import json
 import os
-import time
 from pathlib import Path
 
 import scraper
@@ -70,41 +69,45 @@ def _capturar_detalhes(page, unidade, contracts, reps, existing_ids):
         if scraper.contract_id(c) and scraper.contract_id(c) not in existing_ids
     ]
     faltam = max(0, alvo - len(existing_ids))
-    selecionados = candidatos[:faltam]
     print(
         f"[{unidade}] INCREMENTAL_EXISTENTES={len(existing_ids)} "
         f"ALVO_CUMULATIVO={alvo} NOVOS_NECESSARIOS={faltam} "
         f"NOVOS_DISPONIVEIS={len(candidatos)} "
-        f"NOVOS_SELECIONADOS={len(selecionados)}",
+        f"ESTRATEGIA=continuar_ate_atingir_alvo",
         flush=True,
     )
-    if not selecionados:
+    if not candidatos or faltam == 0:
         return []
 
     resultados = []
     falhas = []
     intervalo = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "1200")))
-    for index, contract in enumerate(selecionados, 1):
+
+    for index, contract in enumerate(candidatos, 1):
+        if len(resultados) >= faltam:
+            break
+
         cid = scraper.contract_id(contract)
         try:
-            aluno = _detalhar_um(page, unidade, contract, reps, index, len(selecionados))
+            aluno = _detalhar_um(page, unidade, contract, reps, index, len(candidatos))
             if aluno:
                 resultados.append(aluno)
         except Exception as exc:
             falhas.append(cid)
-            print(f"[{unidade}] DETALHE {index}/{len(selecionados)} ERRO cid={cid}: {exc!r}", flush=True)
+            print(f"[{unidade}] DETALHE {index}/{len(candidatos)} ERRO cid={cid}: {exc!r}", flush=True)
             if _pagina_bloqueada(page):
                 raise RuntimeError(
                     f"[{unidade}] BLOQUEIO_CGD_ABORTANDO_PARA_NAO_ESCALAR: cid={cid}"
                 ) from exc
-        if index < len(selecionados) and intervalo:
+
+        if index < len(candidatos) and len(resultados) < faltam and intervalo:
             print(f"[{unidade}] PAUSA_PROTECAO {intervalo}ms", flush=True)
             page.wait_for_timeout(intervalo)
 
     print(
         f"[{unidade}] DETALHAMENTO_FINALIZADO novos_sucesso={len(resultados)} "
         f"novos_falhas={len(falhas)} existentes_preservados={len(existing_ids)} "
-        f"alvo={alvo}",
+        f"alvo={alvo} candidatos_tentados={min(len(candidatos), len(resultados) + len(falhas))}",
         flush=True,
     )
     return resultados
@@ -153,7 +156,7 @@ def main_incremental():
     print("=" * 80, flush=True)
     print("SCRAPER CGD - COLETA REAL INCREMENTAL / DETALHAMENTO PROTEGIDO", flush=True)
     print("Fluxo: autenticar -> listagem HTTP paralela -> ignorar persistidos -> detalhar em uma sessao", flush=True)
-    print("Detalhamento deliberadamente sequencial para nao repetir o bloqueio de seguranca observado.", flush=True)
+    print("Detalhamento sequencial; candidatos sem frequencia sao pulados ate completar o alvo.", flush=True)
     print("=" * 80, flush=True)
     existing = _load_existing()
     novos = []
@@ -169,7 +172,6 @@ def main_incremental():
                 novos.extend(_run_unit(unidade, scraper.CONFIG[unidade], pw, existing_ids))
             except Exception as exc:
                 print(f"[{unidade}] ERRO FATAL UNIDADE: {exc!r}", flush=True)
-                # Nao apaga o que ja foi capturado. A validacao do workflow decide se o alvo foi atingido.
 
     merged = _merge_incremental(existing, novos)
     JSON_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
