@@ -1,9 +1,10 @@
-"""Executor CGD: listagem HTTP rapida + detalhamento paralelo em lotes.
+"""Executor CGD: autenticacao Edge + listagem e detalhes via HTTP paralelo.
 
-A listagem usa requests autenticado para percorrer as paginas sem abrir um
-navegador por pagina. O detalhamento usa varios workers Edge independentes,
-mas cada worker mantem um navegador aberto para processar varios contratos.
-Isso evita abrir/fechar um Edge inteiro para cada aluno.
+O Edge e usado para autenticar e obter a sessao real. Depois disso, a coleta
+nao navega pagina por pagina no navegador: cada contrato e consultado por HTTP
+em paralelo. Isso elimina o gargalo de abrir quatro paginas do CGD para cada
+aluno e deixa o Edge livre/estavel enquanto a coleta trabalha em alta
+concorrencia.
 """
 
 import os
@@ -13,19 +14,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
+from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import scraper
 
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
-LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "4")))
-LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
+LISTING_HTTP_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "12")))
+LISTING_TIMEOUT_S = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "20")))
+DETAIL_HTTP_WORKERS = max(1, int(os.getenv("CGD_DETAIL_HTTP_WORKERS", os.getenv("CGD_DETAIL_WORKERS", "12"))))
+DETAIL_TIMEOUT_S = max(10, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "45")))
+DETAIL_RETRIES = max(0, int(os.getenv("CGD_DETAIL_RETRIES", "1")))
 DETAIL_LIMIT = max(0, int(os.getenv("CGD_DETAIL_LIMIT", "0")))
 MAX_CONTRACTS = scraper.MAX_CONTRACTS
 LISTING_SOURCE = "https://app.cgd.com.br/alunos"
-HEADLESS = os.getenv("CGD_HEADLESS", "false").strip().lower() in {"1", "true", "yes", "on"}
+
 
 class SessionExpired(RuntimeError):
     pass
+
 
 def _page_url(source, page_number):
     parsed = urlparse(source)
@@ -33,8 +39,6 @@ def _page_url(source, page_number):
     query["page"] = [str(page_number)]
     return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
-def _extract_contract_ids(html):
-    return set(re.findall(r"/contratos/(\d+)", html or "", flags=re.IGNORECASE))
 
 def _session_from_browser(page):
     session = requests.Session()
@@ -47,158 +51,317 @@ def _session_from_browser(page):
         session.headers["User-Agent"] = page.evaluate("() => navigator.userAgent")
     except Exception:
         pass
-    session.headers.update({"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8","Accept-Language":"pt-BR,pt;q=0.9,en;q=0.8","Cache-Control":"no-cache","Pragma":"no-cache"})
+    session.headers.update({
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    })
     return session
+
+
+def _fetch(session, url):
+    r = session.get(url, timeout=DETAIL_TIMEOUT_S, allow_redirects=True)
+    path = urlparse(r.url).path.rstrip("/").lower()
+    if path == "/login" or path.startswith("/login/"):
+        raise SessionExpired(f"SESSAO_EXPIRADA: {url} -> {r.url}")
+    r.raise_for_status()
+    return r.text
+
 
 def _fetch_listing(args):
     unidade, url, cookies, headers = args
-    session = requests.Session()
-    session.cookies.update(cookies)
-    session.headers.update(headers)
-    response = session.get(url, timeout=LISTING_TIMEOUT_S, allow_redirects=True)
-    path = urlparse(response.url).path.rstrip("/").lower()
+    s = requests.Session()
+    s.cookies.update(cookies)
+    s.headers.update(headers)
+    r = s.get(url, timeout=LISTING_TIMEOUT_S, allow_redirects=True)
+    path = urlparse(r.url).path.rstrip("/").lower()
     if path == "/login" or path.startswith("/login/"):
-        raise SessionExpired(f"[{unidade}] LISTAGEM_SESSAO_EXPIRADA: {url} -> {response.url}")
-    response.raise_for_status()
-    return url, _extract_contract_ids(response.text), len(response.text)
+        raise SessionExpired(f"[{unidade}] LISTAGEM_SESSAO_EXPIRADA: {url} -> {r.url}")
+    r.raise_for_status()
+    return url, _extract_contract_ids(r.text), len(r.text)
+
+
+def _extract_contract_ids(html):
+    return set(re.findall(r"/contratos/(\d+)", html or "", re.I))
+
 
 def optimized_discover_contracts(page, unidade, destino):
-    source = LISTING_SOURCE
-    print(f"[{unidade}] FONTE_LISTAGEM_FIXA: {source}", flush=True)
-    if not scraper.open_page(page, source, unidade, "lista_pagina_1", 300):
-        raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM: {source} final={page.url}")
-    first_ids = _extract_contract_ids(page.content())
-    print(f"[{unidade}] LISTAGEM REAL: {page.url} contratos_p1={len(first_ids)}", flush=True)
-    if not first_ids:
-        raise RuntimeError(f"[{unidade}] LISTAGEM_PAGINA_1_SEM_CONTRATOS: {page.url}")
+    if not scraper.open_page(page, LISTING_SOURCE, unidade, "lista_pagina_1", 300):
+        raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM: {page.url}")
+    first = _extract_contract_ids(page.content())
+    if not first:
+        raise RuntimeError(f"[{unidade}] LISTAGEM_PAGINA_1_SEM_CONTRATOS")
     session = _session_from_browser(page)
     cookies = {c.name: c.value for c in session.cookies}
     headers = dict(session.headers)
-    urls = [_page_url(source, n) for n in range(1, LISTING_PAGES + 1)]
-    found = {cid: scraper.contract_url(cid) for cid in first_ids}
-    print(f"[{unidade}] PAGINACAO_HTTP_DIRETA iniciado paginas=1..{LISTING_PAGES} workers={LISTING_HTTP_WORKERS} contratos_p1={len(first_ids)}", flush=True)
-    completed = 1
+    urls = [_page_url(LISTING_SOURCE, n) for n in range(1, LISTING_PAGES + 1)]
+    found = {cid: scraper.contract_url(cid) for cid in first}
+    print(f"[{unidade}] LISTAGEM HTTP: paginas=1..{LISTING_PAGES} workers={LISTING_HTTP_WORKERS} p1={len(first)}", flush=True)
     errors = 0
+    done = 1
     with ThreadPoolExecutor(max_workers=LISTING_HTTP_WORKERS) as pool:
-        futures = {pool.submit(_fetch_listing, (unidade, url, cookies, headers)): url for url in urls[1:]}
-        for future in as_completed(futures):
-            url = futures[future]
+        futures = {pool.submit(_fetch_listing, (unidade, u, cookies, headers)): u for u in urls[1:]}
+        for fut in as_completed(futures):
+            url = futures[fut]
             try:
-                _, ids, body_size = future.result()
+                _, ids, size = fut.result()
                 before = len(found)
                 for cid in ids:
                     found[cid] = scraper.contract_url(cid)
-                completed += 1
-                page_number = parse_qs(urlparse(url).query).get("page", ["?"])[0]
-                print(f"[{unidade}] pagina_lista={page_number}/{LISTING_PAGES} contratos_acumulados={len(found)} novos={len(found)-before} bytes={body_size}", flush=True)
+                done += 1
+                pn = parse_qs(urlparse(url).query).get("page", ["?"])[0]
+                print(f"[{unidade}] pagina_lista={pn}/{LISTING_PAGES} contratos={len(found)} novos={len(found)-before} bytes={size}", flush=True)
             except Exception as exc:
-                completed += 1
+                done += 1
                 errors += 1
-                print(f"[{unidade}] pagina_lista_ERRO url={url}: {exc}", flush=True)
-    print(f"[{unidade}] PAGINACAO_HTTP_FINAL paginas={completed}/{LISTING_PAGES} contratos={len(found)} erros={errors}", flush=True)
+                print(f"[{unidade}] pagina_lista_ERRO: {exc}", flush=True)
+    print(f"[{unidade}] LISTAGEM FINAL: {done}/{LISTING_PAGES} paginas, {len(found)} contratos, {errors} erros", flush=True)
     if errors >= max(1, LISTING_PAGES // 2):
-        raise RuntimeError(f"[{unidade}] LISTAGEM_HTTP_DEMASIADOS_ERROS: {errors}/{LISTING_PAGES}")
-    return list(found.values())[:MAX_CONTRACTS]
+        raise RuntimeError(f"[{unidade}] LISTAGEM_HTTP_DEMASIADOS_ERROS={errors}")
+    return list(found.values())[:MAX_CONTRACTS], cookies, headers
 
-def _detail_batch(args):
-    unidade, cfg, contracts, reps, storage_state, round_no, worker_no = args
-    results = []
-    failures = []
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
-        context = browser.new_context(storage_state=storage_state)
-        page = context.new_page()
-        try:
-            print(f"[{unidade}] WORKER_DETALHE {worker_no}: inicio lote={len(contracts)} tentativa={round_no}", flush=True)
-            for url in contracts:
-                cid = scraper.contract_id(url)
-                if not cid:
-                    failures.append((url, "CONTRATO_ID_INVALIDO"))
-                    continue
-                try:
-                    aluno = scraper.contract_bundle(page, cid, unidade, reps)
-                    aluno = scraper.validate_real_detail(aluno, cid, unidade)
-                    results.append(aluno)
-                    print(f"[{unidade}] CONTRATO_OK cid={cid} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
-                except Exception as exc:
-                    failures.append((url, repr(exc)))
-                    print(f"[{unidade}] FALHA DETALHE cid={cid}: {exc!r}", flush=True)
-        finally:
-            context.close()
-            browser.close()
-    return results, failures
 
-def _make_batches(items, workers):
-    workers = max(1, min(workers, len(items)))
-    batches = [[] for _ in range(workers)]
-    for i, item in enumerate(items):
-        batches[i % workers].append(item)
-    return [b for b in batches if b]
+def _norm(v):
+    return " ".join(str(v or "").replace("\xa0", " ").split())
 
-def process_details_fast(unidade, cfg, contracts, reps, storage_state):
-    if not contracts:
-        return []
+
+def _low(v):
+    return _norm(v).lower()
+
+
+def _soup(html):
+    return BeautifulSoup(html or "", "html.parser")
+
+
+def _tables(soup):
+    result = []
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        thead = table.find("thead")
+        hc = thead.find_all(["th", "td"]) if thead else rows[0].find_all(["th", "td"])
+        heads = [_norm(x.get_text(" ", strip=True)) for x in hc]
+        start = 0 if thead else (1 if rows[0].find_all("th") else 0)
+        data = []
+        for tr in rows[start:]:
+            cells = tr.find_all("td")
+            vals = [_norm(x.get_text(" ", strip=True)) for x in cells]
+            if vals:
+                data.append(vals)
+        result.append((heads, data))
+    return result
+
+
+def _col(heads, *names):
+    names = tuple(_low(x) for x in names)
+    for i, h in enumerate(heads):
+        if any(n in _low(h) for n in names):
+            return i
+    return None
+
+
+def _extract_name(soup, fallback=None):
+    for inp in soup.find_all("input"):
+        key = _low(inp.get("name") or inp.get("id"))
+        if "nome" in key:
+            value = _norm(inp.get("value"))
+            if len(value) >= 3 and len(value.split()) >= 2:
+                return value
+    text = soup.get_text("\n", strip=True)
+    for pat in (r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([^\n|]{4,150})", r"\bNome\s*[:\-]\s*([^\n|]{4,150})"):
+        m = re.search(pat, text, re.I)
+        if m:
+            return _norm(m.group(1))
+    return fallback
+
+
+def _extract_frequency(soup):
+    records = []
+    faltas = 0
+    presencas = 0
+    absence = ("faltou", "falta", "ausente", "não compareceu", "nao compareceu")
+    presence = ("presente", "presença", "presenca", "compareceu")
+    for heads, rows in _tables(soup):
+        si = _col(heads, "status", "situação", "situacao", "presença", "presenca", "frequência", "frequencia")
+        di = _col(heads, "data", "dia")
+        ai = _col(heads, "aluno", "nome", "estudante")
+        for row in rows:
+            status = _low(row[si]) if si is not None and si < len(row) else ""
+            kind = ""
+            if any(x == status or x in status for x in absence):
+                faltas += 1
+                kind = "falta"
+            elif any(x == status or x in status for x in presence):
+                presencas += 1
+                kind = "presenca"
+            records.append({
+                "data": row[di] if di is not None and di < len(row) else None,
+                "status": row[si] if si is not None and si < len(row) else None,
+                "aluno": row[ai] if ai is not None and ai < len(row) else None,
+                "classificacao": kind,
+                "valores": row,
+                "cabecalhos": heads,
+            })
+    return {"faltas": faltas, "presencas": presencas, "registros": records}
+
+
+def _extract_disciplines(soup, src):
+    rows_out = []
+    for heads, rows in _tables(soup):
+        joined = _low(" ".join(heads))
+        if not any(x in joined for x in ("disciplina", "módulo", "modulo", "passo", "etapa", "progresso", "carga horária", "carga horaria", "status")):
+            continue
+        mapping = {
+            "disciplina": ("disciplina",), "modulo": ("módulo", "modulo"), "passo": ("passo", "etapa"),
+            "progresso": ("progresso",), "carga_horaria": ("carga horária", "carga horaria", "carga"),
+            "data": ("data", "última", "ultima"), "status": ("status", "situação", "situacao", "estado")
+        }
+        for row in rows:
+            item = {"disciplina": None, "modulo": None, "passo": None, "progresso": None, "carga_horaria": None, "data": None, "status": None, "cabecalhos": heads, "valores": row, "origem": src}
+            for key, names in mapping.items():
+                i = _col(heads, *names)
+                if i is not None and i < len(row):
+                    item[key] = row[i]
+            rows_out.append(item)
+    text = soup.get_text(" ", strip=True)
+    matches = list(re.finditer(r"M[oó]dulo\s*(\d+)\b", text, re.I))
+    for i, m in enumerate(matches):
+        chunk = text[m.start():matches[i + 1].start() if i + 1 < len(matches) else min(len(text), m.end() + 1000)]
+        pm = re.search(r"(\d{1,3})\s*%", chunk)
+        sm = re.search(r"(?:Passo|Etapa)\s*(\d+)\b", chunk, re.I)
+        dm = re.search(r"\b(\d{1,2}/\d{1,2}/\d{2,4})\b", chunk)
+        rows_out.append({"disciplina": None, "modulo": m.group(1), "passo": sm.group(1) if sm else None, "progresso": pm.group(1) + "%" if pm else None, "carga_horaria": None, "data": dm.group(1) if dm else None, "status": None, "texto_contexto": chunk[:3000], "cabecalhos": [], "valores": [], "origem": src})
+    return rows_out
+
+
+def _belongs(r, cid, sid, name):
+    raw = _low(" ".join(str(x) for x in r.get("valores", [])))
+    return any(v and _low(v) in raw for v in (cid, sid, name))
+
+
+def _detail_http(args):
+    unidade, cid, reps, cookies, headers, attempt = args
+    session = requests.Session()
+    session.cookies.update(cookies)
+    session.headers.update(headers)
+    session.headers["Referer"] = scraper.contract_url(cid)
+    try:
+        contract_html = _fetch(session, scraper.contract_url(cid))
+        contract_soup = _soup(contract_html)
+        sid = None
+        for a in contract_soup.find_all("a", href=True):
+            m = re.search(r"/alunos/(\d+)", a.get("href", ""), re.I)
+            if m:
+                sid = m.group(1)
+                break
+        freq_html = _fetch(session, scraper.child_url(cid, "frequencias"))
+        freq_soup = _soup(freq_html)
+        freq = _extract_frequency(freq_soup)
+        name = _extract_name(freq_soup)
+        course_html = _fetch(session, scraper.child_url(cid, "cursos"))
+        schedule_html = _fetch(session, scraper.child_url(cid, "horarios"))
+        rows = _extract_disciplines(_soup(course_html), scraper.child_url(cid, "cursos"))
+        schedule_text = _norm(_soup(schedule_html).get_text(" ", strip=True))[:20000]
+        student_raw = ""
+        if sid:
+            student_html = _fetch(session, f"{scraper.CGD_URL.rstrip('/')}/alunos/{sid}/edit")
+            student_soup = _soup(student_html)
+            name = _extract_name(student_soup, name)
+            student_raw = _norm(student_soup.get_text(" ", strip=True))[:25000]
+        if not sid:
+            m = re.search(r"/alunos/(\d+)", contract_html, re.I)
+            sid = m.group(1) if m else None
+        rows, done, cur, fut = scraper.classify(rows)
+        def num(row, key):
+            m = re.search(r"\d+", str(row.get(key) or ""))
+            return int(m.group()) if m else -1
+        point = max(cur, key=lambda r: (num(r, "modulo"), num(r, "passo"), num(r, "progresso"))) if cur else None
+        aluno = {
+            "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid,
+            "email": None, "telefone": None, "curso": None, "turma": None, "professor": None,
+            "data_matricula": None, "data_inicio": None, "data_fim": None, "unidade": unidade,
+            "faltas": freq["faltas"], "presencas": freq["presencas"], "ultimo_acesso": None,
+            "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO",
+            "cgd_url": scraper.contract_url(cid), "disciplinas": rows, "disciplinas_concluidas": done,
+            "disciplinas_em_andamento": cur, "disciplinas_futuras": fut, "progresso_atual": point,
+            "horarios": schedule_text, "aluno_raw": student_raw, "frequencia_raw": freq["registros"],
+            "reposicoes": [r for r in reps if _belongs(r, cid, sid, name)],
+            "capturado_em": __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        }
+        aluno = scraper.validate_real_detail(aluno, cid, unidade)
+        return {"ok": True, "cid": cid, "aluno": aluno, "attempt": attempt}
+    except Exception as exc:
+        return {"ok": False, "cid": cid, "error": repr(exc), "attempt": attempt}
+
+
+def process_details_fast(unidade, contracts, reps, cookies, headers):
     targets = list(contracts[:DETAIL_LIMIT] if DETAIL_LIMIT else contracts)
-    workers = min(max(1, scraper.DETAIL_WORKERS), len(targets))
-    print(f"[{unidade}] INICIO DETALHAMENTO RAPIDO: {len(targets)} contratos / {workers} Edge workers persistentes", flush=True)
-    if DETAIL_LIMIT:
-        print(f"[{unidade}] LIMITE_CONTROLADO_DETALHE: {DETAIL_LIMIT}", flush=True)
-    pending = targets
+    if not targets:
+        return []
+    workers = min(DETAIL_HTTP_WORKERS, len(targets))
+    print(f"[{unidade}] INICIO DETALHAMENTO HTTP PARALELO: {len(targets)} contratos / {workers} workers", flush=True)
+    pending = [scraper.contract_id(c) for c in targets]
     results = []
-    for round_no in (1, 2):
+    for attempt in range(1, DETAIL_RETRIES + 2):
         if not pending:
             break
-        batches = _make_batches(pending, workers)
-        print(f"[{unidade}] LOTE_DETALHE {round_no}: contratos={len(pending)} batches={len(batches)}", flush=True)
+        print(f"[{unidade}] LOTE_DETALHE_HTTP tentativa={attempt} contratos={len(pending)}", flush=True)
         next_pending = []
-        with ThreadPoolExecutor(max_workers=len(batches)) as pool:
-            futures = [pool.submit(_detail_batch, (unidade, cfg, batch, reps, storage_state, round_no, i + 1)) for i, batch in enumerate(batches)]
-            for fut in as_completed(futures):
+        args = [(unidade, cid, reps, cookies, headers, attempt) for cid in pending if cid]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_detail_http, a) for a in args]
+            for i, fut in enumerate(as_completed(futures), 1):
                 try:
-                    ok, failed = fut.result()
-                    results.extend(ok)
-                    next_pending.extend(url for url, _ in failed)
+                    result = fut.result()
                 except Exception as exc:
-                    print(f"[{unidade}] WORKER_DETALHE_ERRO: {exc!r}", flush=True)
-        print(f"[{unidade}] PROGRESSO DETALHAMENTO: sucesso_total={len(results)} falhas_para_retry={len(next_pending)}", flush=True)
+                    result = {"ok": False, "cid": "desconhecido", "error": repr(exc)}
+                if result.get("ok"):
+                    aluno = result["aluno"]
+                    results.append(aluno)
+                    print(f"[{unidade}] CONTRATO_OK {i}/{len(args)} cid={result['cid']} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
+                else:
+                    cid = result.get("cid")
+                    if cid and cid != "desconhecido":
+                        next_pending.append(cid)
+                    print(f"[{unidade}] FALHA_DETALHE {cid}: {result.get('error')}", flush=True)
+        print(f"[{unidade}] PROGRESSO_DETALHAMENTO: sucesso={len(results)} pendentes_retry={len(next_pending)}", flush=True)
         pending = next_pending
-    print(f"[{unidade}] DETALHAMENTO FINALIZADO: sucesso={len(results)} falhas={len(pending)} de={len(targets)}", flush=True)
-    for contract in pending:
-        print(f"[{unidade}] CONTRATO_NAO_CAPTURADO: {contract}", flush=True)
+    print(f"[{unidade}] DETALHAMENTO_FINAL: sucesso={len(results)} falhas={len(pending)} de={len(targets)}", flush=True)
     return results
+
 
 def run_unit(unidade, cfg, pw):
     profile = scraper.EDGE_PROFILE_BASE / unidade
     profile.mkdir(parents=True, exist_ok=True)
-    browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+    browser = pw.chromium.launch(channel="msedge", headless=False)
     context = browser.new_context()
     page = context.new_page()
-    state = profile / "storage_state.json"
     try:
         scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-        contracts = optimized_discover_contracts(page, unidade, cfg["destino"])
+        contracts, cookies, headers = optimized_discover_contracts(page, unidade, cfg["destino"])
         reps = scraper.get_replacements(page, unidade)
         print(f"[{unidade}] REPOSICOES GLOBAIS CAPTURADAS: {len(reps)}", flush=True)
-        context.storage_state(path=str(state))
-    except Exception as exc:
-        print(f"[{unidade}] ERRO FATAL: {exc!r}", flush=True)
-        raise
+        # Mantem o Edge aberto mostrando a rota autenticada; a coleta pesada acontece fora dele.
+        print(f"[{unidade}] EDGE AUTENTICADO: coleta de detalhes iniciada sem navegacao sequencial do navegador", flush=True)
+        return process_details_fast(unidade, contracts, reps, cookies, headers)
     finally:
         context.close()
         browser.close()
-    return process_details_fast(unidade, cfg, contracts, reps, str(state))
+
 
 def main():
     print("=" * 80, flush=True)
-    print("SCRAPER CGD - COLETA REAL COMPLETA POR UNIDADE / ALUNO", flush=True)
-    print("Fluxo: autenticacao real -> listagem HTTP -> reposicoes -> detalhamento Edge em lotes paralelos", flush=True)
-    print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_workers={scraper.DETAIL_WORKERS}, detail_limit={DETAIL_LIMIT}, page_wait_ms={scraper.PAGE_WAIT_MS}, timeout_ms={scraper.PAGE_TIMEOUT_MS}, diagnostico={scraper.DIAGNOSTICO}", flush=True)
+    print("SCRAPER CGD - COLETA REAL RAPIDA POR UNIDADE / ALUNO", flush=True)
+    print("Fluxo: Edge autentica -> HTTP paralelo lista -> HTTP paralelo detalhes", flush=True)
+    print(f"Configuracao: listing_workers={LISTING_HTTP_WORKERS}, detail_workers={DETAIL_HTTP_WORKERS}, detail_limit_por_unidade={DETAIL_LIMIT}, detail_retries={DETAIL_RETRIES}", flush=True)
     print("=" * 80, flush=True)
     all_alunos = []
     with sync_playwright() as pw:
         for unidade in ("matriz", "filial"):
             try:
-                all_alunos += run_unit(unidade, scraper.CONFIG[unidade], pw)
+                all_alunos.extend(run_unit(unidade, scraper.CONFIG[unidade], pw))
             except Exception as exc:
                 print(f"[{unidade}] UNIDADE_ABORTADA: {exc!r}", flush=True)
     scraper.JSON_PATH.write_text(json.dumps(all_alunos, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -207,6 +370,7 @@ def main():
     print(f"MATRIZ: {sum(1 for a in all_alunos if a.get('unidade') == 'matriz')}", flush=True)
     print(f"FILIAL: {sum(1 for a in all_alunos if a.get('unidade') == 'filial')}", flush=True)
     print("=" * 80, flush=True)
+
 
 if __name__ == "__main__":
     main()
