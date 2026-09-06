@@ -1,0 +1,1 @@
+Baseline restaurado ao commit af33a0a4d9ab43db3d160b4ff4501459ce7001a0, último ponto confirmado como Succeeded antes da regressão posterior.
