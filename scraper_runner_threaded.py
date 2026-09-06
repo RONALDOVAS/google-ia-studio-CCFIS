@@ -75,6 +75,7 @@ def _contract_bundle_preservado(page, cid, u, reps):
 
 
 scraper.contract_bundle = _contract_bundle_preservado
+scraper.discover_contracts = scraper_runner.optimized_discover_contracts
 
 
 def _pagina_protegida(page):
@@ -178,8 +179,6 @@ def _run_unit_mesma_sessao(u, cfg, pw):
         reps = scraper.get_replacements(page, u)
         print(f"[{u}] REPOSICOES_GLOBAIS_CAPTURADAS={len(reps)}", flush=True)
 
-        # Não salva/fecha storage_state aqui. O clearance do Cloudflare e a sessão
-        # permanecem vivos no mesmo contexto até a última página de detalhes.
         _validar_sessao(page, u)
         return _capturar_detalhes_mesmo_contexto(page, u, contracts, reps)
     except Exception as exc:
@@ -196,8 +195,8 @@ def _run_unit_wrapper(u, cfg, pw):
     return _run_unit_mesma_sessao(u, cfg, pw)
 
 
-# O main original passa por run_unit; substituímos somente essa fronteira.
-# A descoberta rápida existente continua sendo usada dentro de discover_contracts.
+# O main original passa por run_unit; mantemos a listagem HTTP rápida e
+# substituímos apenas a fronteira de execução por unidade para não trocar sessão.
 scraper.run_unit = _run_unit_wrapper
 
 if __name__ == "__main__":
