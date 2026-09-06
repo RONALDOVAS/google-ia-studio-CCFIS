@@ -66,7 +66,7 @@ jobs:
             Write-Host "$name = OK"
           }
 
-      - name: Executar scraper CGD - teste mínimo 3 alunos por unidade
+      - name: Executar scraper CGD - teste mínimo 3 alunos por unidade + progresso
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -85,16 +85,43 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_LISTING_WAIT_MS: '100'
           CGD_LISTING_HTTP_WORKERS: '12'
-          CGD_DETAIL_HTTP_WORKERS: '12'
-          CGD_DETAIL_WORKERS: '12'
+          CGD_DETAIL_HTTP_WORKERS: '3'
+          CGD_DETAIL_WORKERS: '3'
           CGD_DETAIL_TIMEOUT_S: '45'
-          CGD_DETAIL_RETRIES: '1'
+          CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '3'
           CGD_LISTING_PAGES: '1'
           CGD_HEADLESS: 'false'
-          CGD_DIAGNOSTICO: '0'
+          CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
-        run: python -u scraper_runner.py
+        run: |
+          $total = 6
+          $done = 0
+          $failed = 0
+          $started = Get-Date
+          Write-Host ''
+          Write-Host '================ PROGRESSO SCRAPER CGD ================'n          Write-Progress -Id 1 -Activity 'Scraping CGD' -Status 'Iniciando autenticação e coleta...' -PercentComplete 0
+          & python -u scraper_runner.py 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            Write-Host $line
+            if ($line -match 'CONTRATO_OK\s+(\d+)\/\d+') {
+              $done++
+              $pct = [math]::Min(100, [math]::Round(($done / $total) * 100, 0))
+              $elapsed = (Get-Date) - $started
+              $rate = if ($elapsed.TotalSeconds -gt 0) { $done / $elapsed.TotalSeconds } else { 0 }
+              $eta = if ($rate -gt 0) { [TimeSpan]::FromSeconds(($total - $done) / $rate) } else { [TimeSpan]::Zero }
+              Write-Progress -Id 1 -Activity "Scraping CGD - $pct%" -Status "Alunos: $done/$total | Falhas: $failed | Decorrido: $($elapsed.ToString('hh\:mm\:ss')) | ETA: $($eta.ToString('hh\:mm\:ss'))" -PercentComplete $pct
+            } elseif ($line -match 'FALHA_DETALHE') {
+              $failed++
+              $pct = [math]::Min(100, [math]::Round((($done + $failed) / $total) * 100, 0))
+              $elapsed = (Get-Date) - $started
+              Write-Progress -Id 1 -Activity "Scraping CGD - $pct%" -Status "Alunos: $done/$total | Falhas: $failed | Decorrido: $($elapsed.ToString('hh\:mm\:ss'))" -PercentComplete $pct
+            }
+          }
+          $exitCode = $LASTEXITCODE
+          Write-Progress -Id 1 -Activity 'Scraping CGD' -Completed
+          Write-Host "================ FIM SCRAPER | exit=$exitCode | sucesso=$done | falhas=$failed ================"
+          if ($exitCode -ne 0) { exit $exitCode }
 
       - name: Validar captura real de alunos
         shell: powershell
