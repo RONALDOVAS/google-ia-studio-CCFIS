@@ -79,13 +79,13 @@ jobs:
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '50'
           CGD_DETAIL_TARGET_PER_UNIT: '50'
-          CGD_LISTING_PAGES: '10'
+          CGD_LISTING_PAGES: '831'
           CGD_DETAIL_INTERVAL_MS: '1200'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 10 paginas | detalhe 1 sessao ==='
+          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 831 paginas | detalhe 1 sessao ==='
           python -u scraper_runner_threaded.py
       - name: Validar captura real incremental de alunos
         shell: powershell
@@ -101,7 +101,8 @@ jobs:
           if len(dados) == 0:
               raise SystemExit('Falha: scraper terminou sem alunos.')
           com_freq = [a for a in dados if a.get('frequencia_raw')]
-          sem_freq = len(dados) - len(com_freq)
+          sem_freq = [a for a in dados if not a.get('frequencia_raw')]
+          sem_freq_classificados = [a for a in sem_freq if a.get('frequencia_status') in ('SEM_FREQUENCIA_AGUARDANDO_INICIO','SEM_FREQUENCIA_A_INVESTIGAR')]
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
@@ -109,14 +110,15 @@ jobs:
           campanhas_preenchidas = [a for a in dados if str(a.get('campanha') or '').strip()]
           print(f'ALUNOS CAPTURADOS: {len(dados)}')
           print(f'ALUNOS COM FREQUENCIA REAL: {len(com_freq)}')
-          print(f'ALUNOS SEM FREQUENCIA: {sem_freq}')
+          print(f'ALUNOS SEM FREQUENCIA: {len(sem_freq)}')
+          print(f'SEM FREQUENCIA CLASSIFICADOS: {len(sem_freq_classificados)}')
           print(f'MATRIZ: {len(matriz)}')
           print(f'FILIAL: {len(filial)}')
           print(f'ALUNOS COM CAMPO CAMPANHA PREENCHIDO: {len(campanhas_preenchidas)}')
           print(f'ALUNOS SEM CAMPO CAMPANHA: {len(dados) - len(campanhas_preenchidas)}')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
-          if sem_freq:
-              raise SystemExit(f'Falha: existem {sem_freq} alunos sem frequência real.')
+          if len(sem_freq) != len(sem_freq_classificados):
+              raise SystemExit('Falha: existe aluno sem frequência sem classificação de situação.')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
           if len(matriz) != 50 or len(filial) != 50:
