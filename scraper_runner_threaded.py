@@ -141,11 +141,11 @@ def _capturar_detalhes_mesmo_contexto(page, u, contracts, reps, existing_ids):
                 raise RuntimeError(f"CONTRATO_SEM_DADOS cid={cid}")
             if not (aluno.get("frequencia_raw") or []):
                 raise RuntimeError(f"CONTRATO_SEM_FREQUENCIA cid={cid}")
-            campanha = scraper_runner._extract_campaign_from_text(aluno.get("campanha") or "") if hasattr(scraper_runner, "_extract_campaign_from_text") else aluno.get("campanha")
-            if not campanha or "informatica" not in scraper_runner._norm_search(campanha):
-                raise RuntimeError(f"CONTRATO_FORA_DA_CAMPANHA_INFORMATICA cid={cid} campanha={aluno.get('campanha')!r}")
+            campanha = aluno.get("campanha") or ""
+            if "informatica" not in scraper_runner._norm_search(campanha):
+                raise RuntimeError(f"CONTRATO_FORA_DA_CAMPANHA_INFORMATICA cid={cid} campanha={campanha!r}")
             resultados.append(aluno)
-            print(f"[{u}] CONTRATO_OK_NOVO {index}/{len(selecionados)} cid={cid} campanha={aluno.get('campanha')} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
+            print(f"[{u}] CONTRATO_OK_NOVO {index}/{len(selecionados)} cid={cid} campanha={campanha} nome={aluno.get('nome')} faltas={aluno.get('faltas')} presencas={aluno.get('presencas')} freq_registros={len(aluno.get('frequencia_raw') or [])}", flush=True)
         except Exception as exc:
             falhas.append(cid)
             print(f"[{u}] CONTRATO_ERRO_NOVO {index}/{len(selecionados)} cid={cid}: {exc!r}", flush=True)
