@@ -84,7 +84,7 @@ jobs:
           CGD_MAX_CONTRACTS: '10000'
           CGD_PAGE_WAIT_MS: '100'
           CGD_LISTING_WAIT_MS: '100'
-          CGD_LISTING_HTTP_WORKERS: '4'
+          CGD_LISTING_HTTP_WORKERS: '12'
           CGD_DETAIL_HTTP_WORKERS: '12'
           CGD_DETAIL_WORKERS: '12'
           CGD_DETAIL_TIMEOUT_S: '120'
