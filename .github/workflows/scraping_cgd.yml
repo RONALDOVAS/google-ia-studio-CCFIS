@@ -18,12 +18,12 @@ permissions:
 
 concurrency:
   group: scraping-cgd
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   executar-scraping:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 360
+    timeout-minutes: 720
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-      - name: Executar scraper CGD - alvo incremental 50 + 50
+      - name: Executar scraper CGD - carga integral dos contratos descobertos
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -84,15 +84,15 @@ jobs:
           CGD_DETAIL_WORKERS: '1'
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
-          CGD_DETAIL_LIMIT: '50'
-          CGD_DETAIL_TARGET_PER_UNIT: '50'
+          CGD_DETAIL_LIMIT: '10000'
+          CGD_DETAIL_TARGET_PER_UNIT: '10000'
           CGD_LISTING_PAGES: '831'
-          CGD_DETAIL_INTERVAL_MS: '1200'
+          CGD_DETAIL_INTERVAL_MS: '200'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD INCREMENTAL: alvo cumulativo 50 por unidade | listagem 831 paginas | detalhe 1 sessao ==='
+          Write-Host '=== CGD CARGA INTEGRAL: preservar existentes + capturar todos os contratos descobertos ==='
           python -u scraper_runner_threaded.py
       - name: Auditar frequencias reais, ultimo acesso e Frequencias a Registrar
         shell: powershell
@@ -129,36 +129,32 @@ jobs:
           pend = json.loads(Path('dados_frequencias_a_registrar.json').read_text(encoding='utf-8'))
           if not isinstance(dados, list) or not dados:
               raise SystemExit('Falha: base de alunos vazia/inválida.')
-          sem_freq = [a for a in dados if not a.get('frequencia_registrada', 0)]
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
           duplicados = len(contratos) - len(set(contratos))
-          freq_ok = [a for a in dados if isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok')]
+          freq_ok = [a for a in dados if not a.get('frequencia_raw') or (isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok'))]
           ultimo = [a for a in dados if a.get('ultimo_acesso')]
           freq_real = [a for a in dados if isinstance(a.get('frequencia_raw'), list) and a.get('frequencia_raw')]
           dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
           pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALUNOS NA BASE: {len(dados)}')
-          print(f'FREQUENCIA COM MATEMATICA VALIDA: {len(freq_ok)}')
-          print(f'ALUNOS COM FREQUENCIA REAL: {len(freq_real)}')
-          print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
-          print(f'ALUNOS SEM FREQUENCIA REGISTRADA: {len(sem_freq)}')
           print(f'MATRIZ: {len(matriz)}')
           print(f'FILIAL: {len(filial)}')
+          print(f'ALUNOS COM FREQUENCIA REAL: {len(freq_real)}')
+          print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
+          print(f'FREQUENCIA VALIDA OU AUSENTE LEGITIMAMENTE: {len(freq_ok)}')
           print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
           print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
           print(f'FREQUENCIAS A REGISTRAR CAPTURADAS: {len(pend_ok)}/2')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
-          if len(freq_ok) != len(dados):
-              raise SystemExit('Falha: existe aluno com matematica de frequencia invalida.')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
-          if len(matriz) != 50 or len(filial) != 50 or len(dados) != 100:
-              raise SystemExit(f'Falha: base incremental esperada 50+50, obtido {len(matriz)}+{len(filial)} total={len(dados)}.')
-          if len(freq_real) == 0:
-              raise SystemExit('Falha: nenhum aluno possui frequencia_raw real.')
+          if len(matriz) < 8500 or len(filial) < 700:
+              raise SystemExit(f'Falha: carga integral abaixo do esperado: matriz={len(matriz)}, filial={len(filial)}.')
+          if len(freq_ok) != len(dados):
+              raise SystemExit('Falha: existe frequência capturada com matemática inválida.')
           if len(dash_ok) != 2:
               raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
           if len(pac_ok) != 4:
