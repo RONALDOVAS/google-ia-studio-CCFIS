@@ -173412,9 +173412,9 @@
     "data_inicio": null,
     "data_fim": "2023-07-10",
     "unidade": "filial",
-    "faltas": 0,
-    "presencas": 0,
-    "ultimo_acesso": null,
+    "faltas": 15,
+    "presencas": 20,
+    "ultimo_acesso": "2024-01-10",
     "criticidade": null,
     "dias_desde_ultimo_acesso": null,
     "status": "ATIVO",
@@ -173426,25 +173426,691 @@
     "progresso_atual": null,
     "horarios": "Ronaldo Vasconcelos Início Dashboard Alunos Interessados Cursos EAD Individuais Turmas Financeiro Relatórios Cadastros Área do Cliente Início Alunos Contrato Horários Ana Rosa Gonçalves Barbosa 62 anos Horários Adicionar horário HORAS NA SEMANA 00:00 QUANTIDADE DE HORÁRIOS 0 Nenhum horário encontrado",
     "aluno_raw": "Ronaldo Vasconcelos Início Dashboard Alunos Interessados Cursos EAD Individuais Turmas Financeiro Relatórios Cadastros Área do Cliente Início Alunos Editar aluno Cadastro do aluno Ana Rosa Gonçalves Barbosa 62 anos Clique na imagem para alterar a foto do aluno 51 Gerar novo contrato Arquivar cadastro Dados pessoais Endereço Responsável Resp. Financeiro Saúde Nome Data de nascimento CPF do aluno RG do aluno Nome da escola Período em que estuda Selecione... Manhã Tarde Noite Integral Contato E-mail E-mail #2 Novo telefone Telefone Responsável Operadora (91) 98211-9961 aluna(financeiro) Alterar Excluir Observações Salvar e continuar Salvar",
-    "frequencia_raw": [],
+    "frequencia_raw": [
+      {
+        "data": "01/02/2024",
+        "data_iso": "2024-02-01",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "01/02/2024 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "25/01/2024",
+        "data_iso": "2024-01-25",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "25/01/2024 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "18/01/2024",
+        "data_iso": "2024-01-18",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "18/01/2024 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "11/01/2024",
+        "data_iso": "2024-01-11",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "11/01/2024 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "10/01/2024",
+        "data_iso": "2024-01-10",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "10/01/2024 Quarta-feira 10:00 às 12:00 Laboratório 1 Informática para Adultos V4 Presente 18 112",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "21/12/2023",
+        "data_iso": "2023-12-21",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "21/12/2023 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "20/12/2023",
+        "data_iso": "2023-12-20",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "20/12/2023 Quarta-feira 10:00 às 12:00 Laboratório 1 Informática para Adultos V4 Presente 17 110",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "14/12/2023",
+        "data_iso": "2023-12-14",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "14/12/2023 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "14/12/2023",
+        "data_iso": "2023-12-14",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "14/12/2023 Quinta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 16 32",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "07/12/2023",
+        "data_iso": "2023-12-07",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "07/12/2023 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "30/11/2023",
+        "data_iso": "2023-11-30",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "30/11/2023 Quinta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 15 105",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "23/11/2023",
+        "data_iso": "2023-11-23",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "23/11/2023 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "22/11/2023",
+        "data_iso": "2023-11-22",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "22/11/2023 Quarta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 14 114",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "16/11/2023",
+        "data_iso": "2023-11-16",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "16/11/2023 Quinta-feira 16:00 às 18:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "09/11/2023",
+        "data_iso": "2023-11-09",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "09/11/2023 Quinta-feira 14:00 às 16:00 Laboratório 1 Informática para Adultos V4 Presente 14 2",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "09/11/2023",
+        "data_iso": "2023-11-09",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "09/11/2023 Quinta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 13 1",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "04/11/2023",
+        "data_iso": "2023-11-04",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "04/11/2023 Sábado 10:00 às 12:00 Laboratório 1 Informática para Adultos V4 Presente 12 46",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "26/10/2023",
+        "data_iso": "2023-10-26",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "26/10/2023 Quinta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 10 92",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "25/10/2023",
+        "data_iso": "2023-10-25",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "25/10/2023 Quarta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 9 110",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "19/10/2023",
+        "data_iso": "2023-10-19",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "19/10/2023 Quinta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 4 26",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "05/10/2023",
+        "data_iso": "2023-10-05",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "05/10/2023 Quinta-feira 16:00 às 18:00 Laboratório 1 Informática para Adultos V4 Presente 4 1",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "28/09/2023",
+        "data_iso": "2023-09-28",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "28/09/2023 Quinta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 2 25",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "21/09/2023",
+        "data_iso": "2023-09-21",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "21/09/2023 Quinta-feira 10:00 às 12:00 Laboratório 1 Informática para Adultos V4 Presente 1 101",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "08/09/2023",
+        "data_iso": "2023-09-08",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "08/09/2023 Sexta-feira 08:00 às 10:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "01/09/2023",
+        "data_iso": "2023-09-01",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "01/09/2023 Sexta-feira 08:00 às 10:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "25/08/2023",
+        "data_iso": "2023-08-25",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "25/08/2023 Sexta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 1 32",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "18/08/2023",
+        "data_iso": "2023-08-18",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "18/08/2023 Sexta-feira 08:00 às 10:00 Laboratório 1 Informática para Adultos V4 Presente 1 39",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "15/08/2023",
+        "data_iso": "2023-08-15",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "15/08/2023 Terça-feira 08:00 às 10:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "08/08/2023",
+        "data_iso": "2023-08-08",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "08/08/2023 Terça-feira 08:00 às 10:00 Laboratório 1 Digitação Presente 6 9",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "02/08/2023",
+        "data_iso": "2023-08-02",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "02/08/2023 Quarta-feira 16:00 às 18:00 Laboratório 1 Digitação Presente 5 13",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "01/08/2023",
+        "data_iso": "2023-08-01",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "01/08/2023 Terça-feira 08:00 às 10:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "25/07/2023",
+        "data_iso": "2023-07-25",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "25/07/2023 Terça-feira 08:00 às 10:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "18/07/2023",
+        "data_iso": "2023-07-18",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "18/07/2023 Terça-feira 10:00 às 12:00 Laboratório 1 Digitação Presente 3 35",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "18/07/2023",
+        "data_iso": "2023-07-18",
+        "status": "Faltou",
+        "classificacao": "falta",
+        "valores": "18/07/2023 Terça-feira 08:00 às 10:00 Laboratório 1 Faltou",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      },
+      {
+        "data": "11/07/2023",
+        "data_iso": "2023-07-11",
+        "status": "Presente",
+        "classificacao": "presenca",
+        "valores": "11/07/2023 Terça-feira 08:00 às 10:00 Laboratório 1 Introdução à Informática V3 Presente 2 71",
+        "cabecalhos": [
+          "Data",
+          "Horário",
+          "Sala",
+          "Curso",
+          "Aula",
+          "Conteúdo",
+          "Obs",
+          "Lição",
+          "Passo",
+          "Seq"
+        ]
+      }
+    ],
     "reposicoes": [],
     "capturado_em": "2026-09-07T18:38:42.863778Z",
     "campanha": "Informatica 2023 Vendedor Carla Dutra",
     "pacote": "de cursos Informática para Adultos Escola Laboratório 1 Conheceu - Ações do contrato: Ocorrências Imprimir CGD Cursos Tags Escolher Pendências Adicionar",
     "status_contrato": null,
     "contrato_raw": "Ronaldo Vasconcelos Início Dashboard Alunos Interessados Cursos EAD Individuais Turmas Financeiro Relatórios Cadastros Área do Cliente Início Alunos Contrato Contrato 51 Ana Rosa Gonçalves Barbosa 62 anos Este contrato foi desativado em 23/02/2024 Alterar encerramento Log Imprimir encerramento Reativar contrato Cursos Turmas Financeiro Cadastro Contrato: 51 Alterar Matrícula 10/07/2023 Início 11/07/2023 Final previsto 31/01/2024 Campanha Informatica 2023 Vendedor Carla Dutra Pacote de cursos Informática para Adultos Escola Laboratório 1 Conheceu - Ações do contrato: Ocorrências Imprimir CGD Cursos Tags Escolher Pendências Adicionar",
-    "frequencia_status": "SEM_FREQUENCIA_A_INVESTIGAR",
+    "frequencia_status": "COM_FREQUENCIA_REAL",
     "monitoramento_candidato": true,
     "selecao_populacao_status": "CANDIDATO_PRE_VALIDACAO",
-    "frequencia_registrada": 0,
+    "frequencia_registrada": 35,
     "frequencia_reposicoes_cgd": 0,
     "frequencia_validacao_interna": {
-      "registros_registrados": 0,
-      "presencas": 0,
-      "faltas": 0,
+      "registros_registrados": 35,
+      "presencas": 20,
+      "faltas": 15,
       "reposicoes": 0,
       "registros_status_desconhecido": 0,
-      "ultimo_acesso": null,
+      "ultimo_acesso": "2024-01-10",
       "matematica_ok": true
     }
   },
