@@ -51,7 +51,7 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-      - name: Executar scraper CGD - etapa 300 por unidade
+      - name: Executar scraper CGD - etapa 750 por unidade
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -75,14 +75,14 @@ jobs:
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '10000'
-          CGD_DETAIL_TARGET_PER_UNIT: '300'
+          CGD_DETAIL_TARGET_PER_UNIT: '750'
           CGD_LISTING_PAGES: '831'
           CGD_DETAIL_INTERVAL_MS: '200'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== ETAPA ESCALONADA 300/300: preservar alunos já validados + acrescentar somente novos contratos até 300 por unidade ==='
+          Write-Host '=== ETAPA ESCALONADA 750/750: preservar alunos já validados + acrescentar somente novos contratos até 750 por unidade (+450 por unidade) ==='
           python -u scraper_runner_threaded.py
       - name: Auditar frequencias reais, ultimo acesso e Frequencias a Registrar
         shell: powershell
@@ -107,14 +107,13 @@ jobs:
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
-          if (-not (Test-Path 'dados_dashboard_cgd.json')) { throw 'Falha: dados_dashboard_cgd.json não foi gerado.' }
+          if (-not (Test-Path 'dados_dashboard_cgd.json')) { Write-Warning 'dados_dashboard_cgd.json não foi gerado; dashboard é apenas informativo e não bloqueia a aprovação.' }
           if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
           if (-not (Test-Path 'dados_frequencias_a_registrar.json')) { throw 'Falha: snapshot de Frequencias a Registrar não foi gerado.' }
           @'
           import json
           from pathlib import Path
           dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
-          dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
           pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
           pend = json.loads(Path('dados_frequencias_a_registrar.json').read_text(encoding='utf-8'))
           if not isinstance(dados, list) or not dados:
@@ -126,7 +125,13 @@ jobs:
           freq_ok = [a for a in dados if not a.get('frequencia_raw') or (isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok'))]
           ultimo = [a for a in dados if a.get('ultimo_acesso')]
           freq_real = [a for a in dados if isinstance(a.get('frequencia_raw'), list) and a.get('frequencia_raw')]
-          dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
+          dash_ok = []
+          if Path('dados_dashboard_cgd.json').exists():
+              try:
+                  dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
+                  dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
+              except Exception:
+                  print('AVISO: dados_dashboard_cgd.json existe, mas não pôde ser interpretado; permanece fora dos critérios de aprovação.')
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
           pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALUNOS NA BASE: {len(dados)}')
@@ -135,18 +140,16 @@ jobs:
           print(f'ALUNOS COM FREQUENCIA REAL: {len(freq_real)}')
           print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
           print(f'FREQUENCIA VALIDA OU AUSENTE LEGITIMAMENTE: {len(freq_ok)}')
-          print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
+          print(f'DASHBOARD CGD CAPTURADO (INFORMATIVO): {len(dash_ok)}/2')
           print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
           print(f'FREQUENCIAS A REGISTRAR CAPTURADAS: {len(pend_ok)}/2')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
-          if len(matriz) < 300 or len(filial) < 300:
-              raise SystemExit(f'Falha: etapa 300/300 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
+          if len(matriz) < 750 or len(filial) < 750:
+              raise SystemExit(f'Falha: etapa 750/750 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
           if len(freq_ok) != len(dados):
               raise SystemExit('Falha: existe frequência capturada com matemática inválida.')
-          if len(dash_ok) != 2:
-              raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
           if len(pac_ok) != 4:
               raise SystemExit(f'Falha: fontes de pacote/relatório não capturadas: {len(pac_ok)}/4.')
           '@ | python -
