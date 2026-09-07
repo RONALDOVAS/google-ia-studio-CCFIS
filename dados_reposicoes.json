@@ -1,5 +1,37 @@
 {
-  "updated_at": "2026-09-07T17:52:39.328509+00:00",
+  "updated_at": "2026-09-07T19:04:16.291857+00:00",
   "source": "CGD",
-  "records": []
+  "records": [
+    {
+      "id": "cgd_rep_b5c249de8d3d64bab729a75f8099f068",
+      "aluno_id": "895246",
+      "aluno_nome": "CAIO FELIPE CARDOSO DA COSTA",
+      "contrato": "895246",
+      "unidade": "filial",
+      "data": "10/09/2026",
+      "horario_inicio": "10:00",
+      "horario_fim": "12:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "10/09/2026",
+        "CAIO FELIPE CARDOSO DA COSTA",
+        "Laboratório 1",
+        "Quinta-feira: 10:00 às 12:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-07T19:04:16.201287+00:00"
+    }
+  ]
 }
