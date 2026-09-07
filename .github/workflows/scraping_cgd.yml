@@ -38,6 +38,10 @@ jobs:
           pip install -r requirements.txt
           pip install playwright playwright-stealth
           python -m playwright install chromium
+      - name: Validar parser de frequência determinístico
+        shell: powershell
+        run: |
+          python -m unittest -v test_frequencia_parser_cgd.py
       - name: Validar Secrets obrigatórios
         shell: powershell
         env:
@@ -46,8 +50,6 @@ jobs:
           CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
           CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
           CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
-          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
-          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
@@ -132,11 +134,13 @@ jobs:
           duplicados = len(contratos) - len(set(contratos))
           freq_ok = [a for a in dados if isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok')]
           ultimo = [a for a in dados if a.get('ultimo_acesso')]
+          freq_real = [a for a in dados if isinstance(a.get('frequencia_raw'), list) and a.get('frequencia_raw')]
           dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
           pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALUNOS NA BASE: {len(dados)}')
           print(f'FREQUENCIA COM MATEMATICA VALIDA: {len(freq_ok)}')
+          print(f'ALUNOS COM FREQUENCIA REAL: {len(freq_real)}')
           print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
           print(f'ALUNOS SEM FREQUENCIA REGISTRADA: {len(sem_freq)}')
           print(f'MATRIZ: {len(matriz)}')
@@ -151,6 +155,8 @@ jobs:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
           if len(matriz) != 50 or len(filial) != 50 or len(dados) != 100:
               raise SystemExit(f'Falha: base incremental esperada 50+50, obtido {len(matriz)}+{len(filial)} total={len(dados)}.')
+          if len(freq_real) == 0:
+              raise SystemExit('Falha: nenhum aluno possui frequencia_raw real.')
           if len(dash_ok) != 2:
               raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
           if len(pac_ok) != 4:
