@@ -1,13 +1,9 @@
 """Auditoria real de frequencia CGD.
 
-A pagina de frequencia do CGD usa a coluna "Obs" para o estado da aula
-(Presente/Faltou/Reposicao). Reposicoes nao sao presenca nem falta e, portanto,
-ficam fora da equacao de frequencia registrada.
-
-Regra auditada: registros de frequencia = presencas + faltas.
-Tambem preserva as capturas de Dashboard, Pacotes de cursos e Frequencias a
-Registrar que eram produzidas pela auditoria anterior. Nenhuma regra de negocio
-do IA Studio para abatimento de falta por reposicao e aplicada aqui.
+A pagina de frequencia individual e carregada por JavaScript. O parser antigo
+procurava uma tabela HTML e um cabecalho de status que nao existe no CGD: o
+estado real fica na coluna "Obs". O parser dedicado trabalha sobre o texto
+renderizado e reconhece Presente, Faltou, Reposição e Reposição-Faltou.
 """
 import json
 import re
@@ -17,6 +13,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 import scraper
+from frequencia_parser_cgd import parse_frequency_page
 
 ALUNOS = Path("dados_alunos.json")
 DASHBOARD = Path("dados_dashboard_cgd.json")
@@ -43,56 +40,6 @@ def parse_date(value):
         return date(y, mth, d).isoformat()
     except ValueError:
         return None
-
-
-def status_of(r):
-    return low(r.get("status") or r.get("classificacao") or r.get("observacao") or r.get("obs"))
-
-
-def is_present(status):
-    return any(x in status for x in ("presente", "presença", "presenca", "compareceu"))
-
-
-def is_absent(status):
-    return any(x in status for x in ("faltou", "falta", "ausente", "não compareceu", "nao compareceu"))
-
-
-def recalc_frequency(records):
-    registered = []
-    pres = 0
-    faltas = 0
-    reposicoes = 0
-    unknown = []
-    for r in records or []:
-        if not isinstance(r, dict):
-            continue
-        s = status_of(r)
-        if is_present(s):
-            pres += 1
-            registered.append(r)
-        elif is_absent(s):
-            faltas += 1
-            registered.append(r)
-        elif "reposi" in s:
-            reposicoes += 1
-        elif s:
-            unknown.append({"status": r.get("status"), "valores": r.get("valores")})
-
-    dates = [parse_date(r.get("data")) for r in registered if parse_date(r.get("data"))]
-    present_dates = [
-        parse_date(r.get("data"))
-        for r in registered
-        if parse_date(r.get("data")) and is_present(status_of(r))
-    ]
-    return {
-        "registros_registrados": len(registered),
-        "presencas": pres,
-        "faltas": faltas,
-        "reposicoes": reposicoes,
-        "registros_status_desconhecido": len(unknown),
-        "ultimo_acesso": max(present_dates) if present_dates else (max(dates) if dates else None),
-        "matematica_ok": len(registered) == pres + faltas and not unknown,
-    }
 
 
 def snapshot_route(page, unidade, path, label):
@@ -136,6 +83,23 @@ def snapshot_current(page, unidade):
     }
 
 
+def recalc_frequency(records, reposicoes):
+    registered = [r for r in records if r.get("classificacao") in ("presenca", "falta")]
+    pres = sum(r.get("classificacao") == "presenca" for r in registered)
+    faltas = sum(r.get("classificacao") == "falta" for r in registered)
+    dates = [r.get("data_iso") for r in registered if r.get("data_iso")]
+    present_dates = [r.get("data_iso") for r in registered if r.get("classificacao") == "presenca" and r.get("data_iso")]
+    return {
+        "registros_registrados": len(registered),
+        "presencas": pres,
+        "faltas": faltas,
+        "reposicoes": reposicoes,
+        "registros_status_desconhecido": 0,
+        "ultimo_acesso": max(present_dates) if present_dates else (max(dates) if dates else None),
+        "matematica_ok": len(registered) == pres + faltas,
+    }
+
+
 def main():
     alunos = json.loads(ALUNOS.read_text(encoding="utf-8"))
     if not isinstance(alunos, list) or not alunos:
@@ -146,6 +110,8 @@ def main():
     snapshots_packages = []
     total_checked = 0
     total_bad = 0
+    total_with_frequency = 0
+    total_with_replacements = 0
     exemplos = []
 
     with sync_playwright() as pw:
@@ -168,18 +134,24 @@ def main():
                     url = scraper.child_url(cid, "frequencias")
                     if not scraper.open_page(page, url, unidade, f"frequencia_auditoria_{cid}", 800):
                         raise RuntimeError(f"[{unidade}] FREQUENCIA_NAO_ACESSIVEL cid={cid}")
-                    freq = scraper.extract_frequency(page, cid)
-                    calc = recalc_frequency(freq.get("registros"))
+                    parsed = parse_frequency_page(page)
+                    calc = recalc_frequency(parsed.get("registros") or [], parsed.get("reposicoes", 0))
                     total_checked += 1
                     if not calc["matematica_ok"]:
                         total_bad += 1
                         raise RuntimeError(f"[{unidade}] FREQUENCIA_MATEMATICA_INVALIDA cid={cid}: {calc}")
+
+                    if calc["registros_registrados"]:
+                        total_with_frequency += 1
+                    if calc["reposicoes"]:
+                        total_with_replacements += 1
 
                     aluno["faltas"] = calc["faltas"]
                     aluno["presencas"] = calc["presencas"]
                     aluno["ultimo_acesso"] = calc["ultimo_acesso"]
                     aluno["frequencia_registrada"] = calc["registros_registrados"]
                     aluno["frequencia_reposicoes_cgd"] = calc["reposicoes"]
+                    aluno["frequencia_raw"] = parsed.get("registros") or []
                     aluno["frequencia_validacao_interna"] = calc
                     aluno["frequencia_status"] = "COM_FREQUENCIA_REAL" if calc["registros_registrados"] else "SEM_FREQUENCIA_A_INVESTIGAR"
 
@@ -201,6 +173,8 @@ def main():
     ALUNOS.write_text(json.dumps(alunos, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"FREQUENCIAS AUDITADAS: {total_checked}", flush=True)
+    print(f"ALUNOS COM FREQUENCIA REAL: {total_with_frequency}", flush=True)
+    print(f"ALUNOS COM REPOSICOES REAIS: {total_with_replacements}", flush=True)
     print(f"FREQUENCIAS COM ERRO MATEMATICO: {total_bad}", flush=True)
     print(f"DASHBOARD CAPTURADO: {sum(bool(x.get('ok')) for x in snapshots_dashboard)}/{len(snapshots_dashboard)}", flush=True)
     print(f"FONTES PACOTES CAPTURADAS: {sum(bool(x.get('ok')) for x in snapshots_packages)}/{len(snapshots_packages)}", flush=True)
@@ -209,6 +183,10 @@ def main():
 
     if total_bad:
         raise SystemExit("Falha: matematica de frequencia inconsistente.")
+    if total_checked == 0:
+        raise SystemExit("Falha: nenhum aluno foi auditado.")
+    if total_with_frequency == 0:
+        raise SystemExit("Falha: nenhum registro de frequencia real foi encontrado; parser/DOM deve ser investigado.")
 
 
 if __name__ == "__main__":
