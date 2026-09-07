@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-07T19:04:16.291857+00:00",
+  "updated_at": "2026-09-07T20:25:36.806933+00:00",
   "source": "CGD",
   "records": [
     {
@@ -31,7 +31,38 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-07T19:04:16.201287+00:00"
+      "updated_at": "2026-09-07T20:25:36.549617+00:00"
+    },
+    {
+      "id": "cgd_rep_97e37e5911a6be4e0ffcfcc568879ebf",
+      "aluno_id": "832723",
+      "aluno_nome": "ALICE DA SILVA BARBOSA",
+      "contrato": "832723",
+      "unidade": "matriz",
+      "data": "09/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "09/09/2026",
+        "ALICE DA SILVA BARBOSA",
+        "LABORATÓRIO 1",
+        "Quarta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-07T20:25:36.702244+00:00"
     }
   ]
 }
