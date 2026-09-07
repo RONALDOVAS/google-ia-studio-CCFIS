@@ -51,7 +51,7 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-      - name: Executar scraper CGD - etapa 200 por unidade
+      - name: Executar scraper CGD - etapa 300 por unidade
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -75,14 +75,14 @@ jobs:
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '10000'
-          CGD_DETAIL_TARGET_PER_UNIT: '200'
+          CGD_DETAIL_TARGET_PER_UNIT: '300'
           CGD_LISTING_PAGES: '831'
           CGD_DETAIL_INTERVAL_MS: '200'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== ETAPA ESCALONADA 200/200: preservar dados existentes + acrescentar até 200 por unidade ==='
+          Write-Host '=== ETAPA ESCALONADA 300/300: preservar alunos já validados + acrescentar somente novos contratos até 300 por unidade ==='
           python -u scraper_runner_threaded.py
       - name: Auditar frequencias reais, ultimo acesso e Frequencias a Registrar
         shell: powershell
@@ -141,8 +141,8 @@ jobs:
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
-          if len(matriz) < 200 or len(filial) < 200:
-              raise SystemExit(f'Falha: etapa 200/200 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
+          if len(matriz) < 300 or len(filial) < 300:
+              raise SystemExit(f'Falha: etapa 300/300 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
           if len(freq_ok) != len(dados):
               raise SystemExit('Falha: existe frequência capturada com matemática inválida.')
           if len(dash_ok) != 2:
