@@ -1,16 +1,6 @@
-name: Execução Automática Scraping CGD
+name: Execução Manual Scraping CGD
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'dados_alunos.json'
-      - 'dados_reposicoes.json'
-      - 'dados_dashboard_cgd.json'
-      - 'dados_pacotes_cursos.json'
-      - 'dados_frequencias_a_registrar.json'
-  schedule:
-    - cron: '0 8 * * *'
   workflow_dispatch:
 
 permissions:
@@ -61,7 +51,7 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-      - name: Executar scraper CGD - etapa 100 por unidade
+      - name: Executar scraper CGD - etapa 200 por unidade
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -85,14 +75,14 @@ jobs:
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '10000'
-          CGD_DETAIL_TARGET_PER_UNIT: '100'
+          CGD_DETAIL_TARGET_PER_UNIT: '200'
           CGD_LISTING_PAGES: '831'
           CGD_DETAIL_INTERVAL_MS: '200'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== ETAPA ESCALONADA 100/100: preservar 50/50 + acrescentar até 100 por unidade ==='
+          Write-Host '=== ETAPA ESCALONADA 200/200: preservar dados existentes + acrescentar até 200 por unidade ==='
           python -u scraper_runner_threaded.py
       - name: Auditar frequencias reais, ultimo acesso e Frequencias a Registrar
         shell: powershell
@@ -151,8 +141,8 @@ jobs:
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
-          if len(matriz) < 100 or len(filial) < 100:
-              raise SystemExit(f'Falha: etapa 100/100 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
+          if len(matriz) < 200 or len(filial) < 200:
+              raise SystemExit(f'Falha: etapa 200/200 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
           if len(freq_ok) != len(dados):
               raise SystemExit('Falha: existe frequência capturada com matemática inválida.')
           if len(dash_ok) != 2:
