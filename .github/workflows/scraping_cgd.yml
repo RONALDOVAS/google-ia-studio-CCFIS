@@ -50,6 +50,8 @@ jobs:
           CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
           CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
           CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
