@@ -3,12 +3,28 @@
 import json
 import os
 import re
+import sys
 from datetime import datetime, date
 from pathlib import Path
 
 import scraper
 import scraper_runner
 from playwright.sync_api import sync_playwright
+
+# O runner Windows pode iniciar o stdout/stderr em CP1252. O CGD pode retornar
+# caracteres Unicode que nao existem nessa tabela, e um simples print() nao pode
+# derrubar toda a coleta. Forcamos UTF-8 e, como ultima defesa, substituimos apenas
+# caracteres impossiveis de representar no console.
+def _configurar_saida_unicode():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configurar_saida_unicode()
 
 JSON_PATH = Path("dados_alunos.json")
 _CF_MARKERS = (
