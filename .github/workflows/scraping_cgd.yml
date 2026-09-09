@@ -108,6 +108,7 @@ jobs:
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
+          if (-not (Test-Path 'dados_populacao_cgd.json')) { throw 'Falha: snapshot da população real do CGD não foi gerado.' }
           if (-not (Test-Path 'dados_dashboard_cgd.json')) { Write-Warning 'dados_dashboard_cgd.json não foi gerado; dashboard é apenas informativo e não bloqueia a aprovação.' }
           if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
           if (-not (Test-Path 'dados_frequencias_a_registrar.json')) { throw 'Falha: snapshot de Frequencias a Registrar não foi gerado.' }
@@ -115,10 +116,14 @@ jobs:
           import json
           from pathlib import Path
           dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          pop = json.loads(Path('dados_populacao_cgd.json').read_text(encoding='utf-8'))
           pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
           pend = json.loads(Path('dados_frequencias_a_registrar.json').read_text(encoding='utf-8'))
           if not isinstance(dados, list) or not dados:
               raise SystemExit('Falha: base de alunos vazia/inválida.')
+          unidades_pop = {x.get('unidade'): x for x in pop.get('unidades', []) if x.get('unidade')}
+          if set(unidades_pop) != {'matriz', 'filial'}:
+              raise SystemExit('Falha: população real do CGD não foi registrada para matriz e filial.')
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
@@ -136,8 +141,8 @@ jobs:
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
           pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALUNOS NA BASE: {len(dados)}')
-          print(f'MATRIZ: {len(matriz)}')
-          print(f'FILIAL: {len(filial)}')
+          print(f'MATRIZ: {len(matriz)} / alvo efetivo {unidades_pop["matriz"].get("alvo_efetivo")} / contratos descobertos {unidades_pop["matriz"].get("contratos_descobertos")}')
+          print(f'FILIAL: {len(filial)} / alvo efetivo {unidades_pop["filial"].get("alvo_efetivo")} / contratos descobertos {unidades_pop["filial"].get("contratos_descobertos")}')
           print(f'ALUNOS COM FREQUENCIA REAL: {len(freq_real)}')
           print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
           print(f'FREQUENCIA VALIDA OU AUSENTE LEGITIMAMENTE: {len(freq_ok)}')
@@ -147,8 +152,13 @@ jobs:
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
-          if len(matriz) < 750 or len(filial) < 750:
-              raise SystemExit(f'Falha: etapa 750/750 incompleta: matriz={len(matriz)}, filial={len(filial)}.')
+          for unidade, registros in (("matriz", matriz), ("filial", filial)):
+              alvo_efetivo = int(unidades_pop[unidade].get('alvo_efetivo') or 0)
+              descobertos = int(unidades_pop[unidade].get('contratos_descobertos') or 0)
+              if alvo_efetivo <= 0 or descobertos <= 0:
+                  raise SystemExit(f'Falha: população inválida para {unidade}: descobertos={descobertos}, alvo={alvo_efetivo}.')
+              if len(registros) < alvo_efetivo:
+                  raise SystemExit(f'Falha: etapa incompleta em {unidade}: persistidos={len(registros)}, alvo_efetivo={alvo_efetivo}.')
           if len(freq_ok) != len(dados):
               raise SystemExit('Falha: existe frequência capturada com matemática inválida.')
           if len(pac_ok) != 4:
@@ -176,6 +186,7 @@ jobs:
             dados_dashboard_cgd.json
             dados_pacotes_cursos.json
             dados_frequencias_a_registrar.json
+            dados_populacao_cgd.json
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push dos dados públicos
@@ -184,6 +195,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json dados_frequencias_a_registrar.json
+          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json dados_frequencias_a_registrar.json dados_populacao_cgd.json
           if (git diff --cached --quiet) { Write-Host 'Nenhuma alteração nos dados sincronizados.' }
           else { git commit -m 'Auto-update: dados reais CGD'; git push }
