@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  coletar-cgd:
+  executar-scraping:
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 720
     steps:
@@ -23,11 +23,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Instalar dependências e Chromium
+      - name: Instalar dependências Python e Playwright
         shell: powershell
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install playwright playwright-stealth
           python -m playwright install chromium
 
       - name: Validar parser de frequência determinístico
@@ -49,13 +50,12 @@ jobs:
         run: |
           $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
           foreach ($name in $required) {
-            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
-              throw "Secret obrigatório ausente: $name"
-            }
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
 
-      - name: Sincronizar universo inteiro CGD - Matriz + Filial
+      - name: Executar scraper CGD - avançar universo incremental
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -71,83 +71,120 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
-          CGD_PAGE_WAIT_MS: '0'
-          CGD_LISTING_WAIT_MS: '0'
+          CGD_PAGE_WAIT_MS: '100'
+          CGD_LISTING_WAIT_MS: '100'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_DETAIL_HTTP_WORKERS: '1'
           CGD_DETAIL_WORKERS: '1'
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_LIMIT: '10000'
-          CGD_HEADLESS: '1'
-          CGD_DIAGNOSTICO: '0'
+          CGD_DETAIL_TARGET_PER_UNIT: '750'
+          CGD_LISTING_PAGES: '831'
+          CGD_DETAIL_INTERVAL_MS: '200'
+          CGD_HEADLESS: 'false'
+          CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== SINCRONIZAÇÃO COMPLETA: universo real Matriz + Filial ==='
-          Write-Host '=== SEM LIMITE 20 | SEM LIMITE 750 | CHROMIUM HEADLESS ==='
+          Write-Host '=== AVANÇO INCREMENTAL 750/750: preservar alunos já validados + acrescentar somente novos contratos ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
-          python -u scraper_sync_robusto.py
+          python -u scraper_runner_threaded.py
+
+      - name: Auditar frequências reais, último acesso e Frequências a Registrar
+        shell: powershell
+        env:
+          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
+          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
+          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CGD_DETAIL_TIMEOUT_S: '45'
+          CGD_PAGE_WAIT_MS: '100'
+          CGD_DIAGNOSTICO: '1'
+          PYTHONUNBUFFERED: '1'
+        run: python -u auditar_frequencias_cgd.py
+
+      - name: Validar captura real e avanço da base
+        shell: powershell
+        env:
+          CGD_DETAIL_TARGET_PER_UNIT: '750'
+        run: |
+          if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
+          if (-not (Test-Path 'dados_dashboard_cgd.json')) { throw 'Falha: dados_dashboard_cgd.json não foi gerado.' }
+          if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
+          if (-not (Test-Path 'dados_frequencias_a_registrar.json')) { throw 'Falha: snapshot de Frequencias a Registrar não foi gerado.' }
+          @'
+          import json, os
+          from pathlib import Path
+          dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
+          pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
+          pend = json.loads(Path('dados_frequencias_a_registrar.json').read_text(encoding='utf-8'))
+          alvo = int(os.environ.get('CGD_DETAIL_TARGET_PER_UNIT', '750'))
+          if not isinstance(dados, list) or not dados:
+              raise SystemExit('Falha: base de alunos vazia/inválida.')
+          matriz = [a for a in dados if a.get('unidade') == 'matriz']
+          filial = [a for a in dados if a.get('unidade') == 'filial']
+          contratos = [str(a.get('contrato') or '') for a in dados]
+          contratos_validos = [c for c in contratos if c]
+          duplicados = len(contratos_validos) - len(set(contratos_validos))
+          freq_ok = [a for a in dados if not a.get('frequencia_raw') or (isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok'))]
+          ultimo = [a for a in dados if a.get('ultimo_acesso')]
+          freq_real = [a for a in dados if isinstance(a.get('frequencia_raw'), list) and a.get('frequencia_raw')]
+          dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
+          pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
+          pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
+          print(f'ALVO CUMULATIVO POR UNIDADE: {alvo}')
+          print(f'ALUNOS NA BASE: {len(dados)}')
+          print(f'MATRIZ: {len(matriz)}')
+          print(f'FILIAL: {len(filial)}')
+          print(f'ALUNOS COM FREQUENCIA REAL: {len(freq_real)}')
+          print(f'ALUNOS COM ULTIMO ACESSO REGISTRADO: {len(ultimo)}')
+          print(f'FREQUENCIA VALIDA OU AUSENTE LEGITIMAMENTE: {len(freq_ok)}')
+          print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
+          print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
+          print(f'FREQUENCIAS A REGISTRAR CAPTURADAS: {len(pend_ok)}/2')
+          print(f'CONTRATOS DUPLICADOS: {duplicados}')
+          if duplicados:
+              raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
+          if len(matriz) < alvo or len(filial) < alvo:
+              raise SystemExit(f'Falha: avanço {alvo}/{alvo} incompleto: matriz={len(matriz)}, filial={len(filial)}.')
+          if len(freq_ok) != len(dados):
+              raise SystemExit('Falha: existe frequência capturada com matemática inválida.')
+          if len(dash_ok) != 2:
+              raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
+          if len(pac_ok) != 4:
+              raise SystemExit(f'Falha: fontes de pacote/relatório não capturadas: {len(pac_ok)}/4.')
+          '@ | python -
 
       - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
         run: python build_reposicoes_from_alunos.py
 
-      - name: Validar coleta completa antes da publicação
+      - name: Validar reposições capturadas
         shell: powershell
-        env:
-          PYTHONUNBUFFERED: '1'
         run: |
-          @'
-          import json
-          from pathlib import Path
+          if (-not (Test-Path 'dados_reposicoes.json')) { throw 'Falha: dados_reposicoes.json não foi gerado.' }
+          $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
+          Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
+          if ($rep.source -ne 'CGD') { throw 'Falha: fonte de reposições não é CGD.' }
 
-          alunos = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
-          pop = json.loads(Path('dados_populacao_cgd.json').read_text(encoding='utf-8'))
-          reps = json.loads(Path('dados_reposicoes.json').read_text(encoding='utf-8'))
-
-          if not isinstance(alunos, list) or not alunos:
-              raise SystemExit('Falha: dados_alunos.json vazio ou inválido.')
-
-          unidades = {x.get('unidade'): x for x in pop.get('unidades', []) if x.get('unidade')}
-          if set(unidades) != {'matriz', 'filial'}:
-              raise SystemExit('Falha: população não contém Matriz e Filial.')
-
-          contratos = [str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip() for a in alunos]
-          contratos = [x for x in contratos if x]
-          if len(contratos) != len(set(contratos)):
-              raise SystemExit('Falha: existem contratos duplicados na base final.')
-
-          for unidade in ('matriz', 'filial'):
-              registros = [a for a in alunos if a.get('unidade') == unidade]
-              esperado = int(unidades[unidade].get('contratos_descobertos') or 0)
-              capturados = int(unidades[unidade].get('capturados') or 0)
-              falhas = int(unidades[unidade].get('falhas') or 0)
-              print(f'{unidade.upper()}: CGD={esperado} capturados={capturados} base={len(registros)} falhas={falhas}')
-              if esperado <= 0:
-                  raise SystemExit(f'Falha: universo {unidade} vazio.')
-              if capturados != esperado or len(registros) < esperado or falhas != 0:
-                  raise SystemExit(f'Falha: universo {unidade} incompleto.')
-
-          if reps.get('source') != 'CGD':
-              raise SystemExit('Falha: reposições não têm fonte CGD.')
-
-          print(f'TOTAL BASE: {len(alunos)}')
-          print('VALIDAÇÃO UNIVERSO: OK')
-          print('VALIDAÇÃO REPOSIÇÕES: OK')
-          '@ | python -
-
-      - name: Salvar coleta para auditoria
+      - name: Salvar diagnósticos
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cgd-coleta-${{ github.run_id }}
+          name: diagnostico-scraping-cgd-${{ github.run_id }}
           path: |
+            diagnostico_scraping/
             dados_alunos.json
             dados_reposicoes.json
             dados_dashboard_cgd.json
             dados_pacotes_cursos.json
             dados_frequencias_a_registrar.json
-            dados_populacao_cgd.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -157,10 +194,10 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json dados_frequencias_a_registrar.json dados_populacao_cgd.json
+          git add dados_alunos.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json dados_frequencias_a_registrar.json
           if (git diff --cached --quiet) {
             Write-Host 'Nenhuma alteração nos dados sincronizados.'
           } else {
-            git commit -m 'Auto-update: dados reais CGD - universo completo'
+            git commit -m 'Auto-update: dados reais CGD - avanço incremental validado'
             git push
           }
