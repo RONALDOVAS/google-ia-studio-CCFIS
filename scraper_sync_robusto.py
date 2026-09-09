@@ -1,8 +1,9 @@
 """Camada de sincronizacao incremental robusta sobre o executor CGD existente.
 
-Mantem a descoberta incremental de novos contratos, mas tambem revisita uma
-pequena janela rotativa de alunos ja persistidos. Assim, mudancas recentes no
-CGD podem chegar a base sem transformar cada execucao em uma coleta completa.
+Mantem a descoberta incremental de novos contratos, revisita uma janela rotativa
+de alunos persistidos e respeita o tamanho real da populacao descoberta em cada
+unidade. Assim, uma unidade com menos de 750 contratos nao reprova a execucao por
+uma meta artificialmente maior que a propria base.
 """
 
 import json
@@ -15,6 +16,7 @@ import scraper_runner_threaded as runner
 from playwright.sync_api import sync_playwright
 
 JSON_PATH = Path("dados_alunos.json")
+POPULATION_PATH = Path("dados_populacao_cgd.json")
 
 
 def _agora_iso():
@@ -100,16 +102,15 @@ def _merge(existing, novos, atualizados):
 def _run_unit(unidade, cfg, pw, existing):
     headless = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
     refresh_limit = max(0, int(os.getenv("CGD_REFRESH_PER_UNIT", "20")))
-    alvo = max(1, int(os.getenv("CGD_DETAIL_TARGET_PER_UNIT", "750")))
+    alvo_configurado = max(1, int(os.getenv("CGD_DETAIL_TARGET_PER_UNIT", "750")))
 
     existing_unit = [a for a in existing if a.get("unidade") == unidade and _contrato(a)]
     existing_ids = {_contrato(a) for a in existing_unit}
-    novos_necessarios = max(0, alvo - len(existing_unit))
     refresh_alunos = _selecionar_refresh(existing, unidade, refresh_limit)
 
     print(
         f"[{unidade}] ESTRATEGIA=INCREMENTAL_NOVOS+REFRESH_ROTATIVO "
-        f"existentes={len(existing_unit)} alvo={alvo} novos_necessarios={novos_necessarios} "
+        f"existentes={len(existing_unit)} alvo_configurado={alvo_configurado} "
         f"refresh_planejado={len(refresh_alunos)}",
         flush=True,
     )
@@ -121,22 +122,51 @@ def _run_unit(unidade, cfg, pw, existing):
         scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
         runner._validar_sessao(page, unidade)
         contracts = scraper.discover_contracts(page, unidade, cfg["destino"])
-        print(f"[{unidade}] CONTRATOS_DISCOVERED={len(contracts)}", flush=True)
+        contratos_validos = [c for c in contracts if scraper.contract_id(c)]
+        contratos_ids = {scraper.contract_id(c) for c in contratos_validos}
+        populacao_real = len(contratos_ids)
+        alvo_efetivo = min(alvo_configurado, populacao_real)
+        novos_necessarios = max(0, alvo_efetivo - len(existing_unit))
+        print(
+            f"[{unidade}] CONTRATOS_DISCOVERED={populacao_real} "
+            f"ALVO_EFETIVO={alvo_efetivo} NOVOS_NECESSARIOS={novos_necessarios}",
+            flush=True,
+        )
         reps = scraper.get_replacements(page, unidade)
         print(f"[{unidade}] REPOSICOES_GLOBAIS_CAPTURADAS={len(reps)}", flush=True)
         runner._validar_sessao(page, unidade)
 
-        candidatos = [c for c in contracts if scraper.contract_id(c) and scraper.contract_id(c) not in existing_ids]
+        candidatos = [c for c in contratos_validos if scraper.contract_id(c) not in existing_ids]
         novos = []
         if novos_necessarios:
-            novos = runner._capturar_detalhes(page, unidade, candidatos, reps, existing_ids)
+            # O executor legado usa o alvo cumulativo como argumento implícito.
+            # Ajustamos temporariamente a variável para o teto efetivo desta unidade.
+            alvo_anterior = os.environ.get("CGD_DETAIL_TARGET_PER_UNIT")
+            os.environ["CGD_DETAIL_TARGET_PER_UNIT"] = str(alvo_efetivo)
+            try:
+                novos = runner._capturar_detalhes(page, unidade, candidatos, reps, existing_ids)
+            finally:
+                if alvo_anterior is None:
+                    os.environ.pop("CGD_DETAIL_TARGET_PER_UNIT", None)
+                else:
+                    os.environ["CGD_DETAIL_TARGET_PER_UNIT"] = alvo_anterior
             agora = _agora_iso()
             for aluno in novos:
                 aluno["ultima_sincronizacao_cgd"] = agora
                 aluno.setdefault("primeira_captura_cgd", agora)
 
         atualizados = _atualizar_existentes(page, unidade, refresh_alunos, reps) if refresh_alunos else []
-        return novos, atualizados
+        return novos, atualizados, {
+            "unidade": unidade,
+            "contratos_descobertos": populacao_real,
+            "alvo_configurado": alvo_configurado,
+            "alvo_efetivo": alvo_efetivo,
+            "persistidos_antes": len(existing_unit),
+            "novos_necessarios": novos_necessarios,
+            "novos_capturados": len(novos),
+            "refresh_planejado": len(refresh_alunos),
+            "refresh_capturados": len(atualizados),
+        }
     finally:
         context.close()
         browser.close()
@@ -145,31 +175,43 @@ def _run_unit(unidade, cfg, pw, existing):
 def main():
     print("=" * 80, flush=True)
     print("SCRAPER CGD - INCREMENTAL ROBUSTO: NOVOS + REFRESH ROTATIVO", flush=True)
-    print("Dados existentes nao sao tratados como congelados; uma janela rotativa e sincronizada.", flush=True)
+    print("Meta de 750 e teto por unidade; nunca excede a populacao real descoberta.", flush=True)
+    print("Alunos persistidos nao sao tratados como congelados; uma janela rotativa e sincronizada.", flush=True)
     print("=" * 80, flush=True)
 
     existing = _load_existing()
     todos_novos = []
     todos_atualizados = []
+    populacoes = []
+    erros = []
 
     with sync_playwright() as pw:
         for unidade in ("matriz", "filial"):
             try:
-                novos, atualizados = _run_unit(unidade, scraper.CONFIG[unidade], pw, existing)
+                novos, atualizados, meta = _run_unit(unidade, scraper.CONFIG[unidade], pw, existing)
                 todos_novos.extend(novos)
                 todos_atualizados.extend(atualizados)
+                populacoes.append(meta)
                 print(f"[{unidade}] RESULTADO novos={len(novos)} refresh_ok={len(atualizados)}", flush=True)
             except Exception as exc:
+                erros.append({"unidade": unidade, "erro": repr(exc)})
                 print(f"[{unidade}] ERRO FATAL UNIDADE: {exc!r}", flush=True)
 
     merged = _merge(existing, todos_novos, todos_atualizados)
     JSON_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    POPULATION_PATH.write_text(
+        json.dumps({"gerado_em": _agora_iso(), "unidades": populacoes, "erros": erros}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     matriz = sum(1 for a in merged if a.get("unidade") == "matriz")
     filial = sum(1 for a in merged if a.get("unidade") == "filial")
     print(f"[INCREMENTAL_ROBUSTO] NOVOS_CAPTURADOS={len(todos_novos)}", flush=True)
     print(f"[INCREMENTAL_ROBUSTO] REFRESH_CAPTURADOS={len(todos_atualizados)}", flush=True)
     print(f"[INCREMENTAL_ROBUSTO] TOTAL_PERSISTIDO={len(merged)} matriz={matriz} filial={filial}", flush=True)
+    print(f"[INCREMENTAL_ROBUSTO] ERROS_UNIDADE={len(erros)}", flush=True)
+    if erros:
+        raise RuntimeError(f"Falha na sincronizacao de unidade(s): {erros}")
     print("=" * 80, flush=True)
 
 
