@@ -2,6 +2,9 @@ name: Execução Manual Scraping CGD
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/scraping_cgd.yml'
 
 permissions:
   contents: write
@@ -17,12 +20,10 @@ jobs:
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
-
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Instalar dependências Python e Playwright
         shell: powershell
         run: |
@@ -30,11 +31,9 @@ jobs:
           pip install -r requirements.txt
           pip install playwright playwright-stealth
           python -m playwright install chromium
-
       - name: Validar parser de frequência determinístico
         shell: powershell
         run: python -m unittest -v test_frequencia_parser_cgd.py
-
       - name: Validar Secrets obrigatórios
         shell: powershell
         env:
@@ -54,7 +53,6 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-
       - name: Executar scraper CGD - avançar universo incremental
         shell: powershell
         env:
@@ -89,7 +87,6 @@ jobs:
           Write-Host '=== AVANÇO INCREMENTAL 750/750: preservar alunos já validados + acrescentar somente novos contratos ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -u scraper_runner_threaded.py
-
       - name: Auditar frequências reais, último acesso e Frequências a Registrar
         shell: powershell
         env:
@@ -107,7 +104,6 @@ jobs:
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: python -u auditar_frequencias_cgd.py
-
       - name: Validar captura real e avanço da base
         shell: powershell
         env:
@@ -123,7 +119,6 @@ jobs:
           dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
           dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
           pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
-          pend = json.loads(Path('dados_frequencias_a_registrar.json').read_text(encoding='utf-8'))
           alvo = int(os.environ.get('CGD_DETAIL_TARGET_PER_UNIT', '750'))
           if not isinstance(dados, list) or not dados:
               raise SystemExit('Falha: base de alunos vazia/inválida.')
@@ -133,11 +128,10 @@ jobs:
           contratos_validos = [c for c in contratos if c]
           duplicados = len(contratos_validos) - len(set(contratos_validos))
           freq_ok = [a for a in dados if not a.get('frequencia_raw') or (isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok'))]
-          ultimo = [a for a in dados if a.get('ultimo_acesso')]
           freq_real = [a for a in dados if isinstance(a.get('frequencia_raw'), list) and a.get('frequencia_raw')]
+          ultimo = [a for a in dados if a.get('ultimo_acesso')]
           dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
-          pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALVO CUMULATIVO POR UNIDADE: {alvo}')
           print(f'ALUNOS NA BASE: {len(dados)}')
           print(f'MATRIZ: {len(matriz)}')
@@ -147,7 +141,6 @@ jobs:
           print(f'FREQUENCIA VALIDA OU AUSENTE LEGITIMAMENTE: {len(freq_ok)}')
           print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
           print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
-          print(f'FREQUENCIAS A REGISTRAR CAPTURADAS: {len(pend_ok)}/2')
           print(f'CONTRATOS DUPLICADOS: {duplicados}')
           if duplicados:
               raise SystemExit(f'Falha: existem {duplicados} contratos duplicados.')
@@ -159,12 +152,11 @@ jobs:
               raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
           if len(pac_ok) != 4:
               raise SystemExit(f'Falha: fontes de pacote/relatório não capturadas: {len(pac_ok)}/4.')
-          '@ | python -
-
+          print('VALIDAÇÃO DO AVANÇO: OK')
+          '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
         shell: powershell
         run: python build_reposicoes_from_alunos.py
-
       - name: Validar reposições capturadas
         shell: powershell
         run: |
@@ -172,7 +164,6 @@ jobs:
           $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
           Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
           if ($rep.source -ne 'CGD') { throw 'Falha: fonte de reposições não é CGD.' }
-
       - name: Salvar diagnósticos
         if: always()
         uses: actions/upload-artifact@v4
@@ -187,7 +178,6 @@ jobs:
             dados_frequencias_a_registrar.json
           if-no-files-found: warn
           retention-days: 7
-
       - name: Commit e Push dos dados públicos
         if: success()
         shell: powershell
