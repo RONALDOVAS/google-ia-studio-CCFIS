@@ -125,6 +125,15 @@ jobs:
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
+      - name: Configurar Python para validação
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verificar runtime Python da validação
+        shell: powershell
+        run: |
+          python --version
+          python -c "import sys; print('Python executável:', sys.executable)"
       - name: Baixar coleta do mesmo run
         uses: actions/download-artifact@v4
         with:
