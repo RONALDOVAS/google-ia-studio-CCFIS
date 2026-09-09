@@ -4,3 +4,4 @@ google-genai
 supabase
 playwright
 playwright-stealth
+-e .
