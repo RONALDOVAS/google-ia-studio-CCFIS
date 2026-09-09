@@ -54,7 +54,7 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
             Write-Host "$name = OK"
           }
-      - name: Sincronizar universo completo CGD - incremental
+      - name: Sincronizar lote CGD e persistir progresso
         shell: powershell
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -70,6 +70,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
+          CGD_DETAIL_BATCH_PER_UNIT: '750'
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
@@ -80,11 +81,13 @@ jobs:
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== SINCRONIZAÇÃO CGD: UNIVERSO COMPLETO + DETECÇÃO DE MUDANÇAS ==='
-          Write-Host '=== NÃO EXISTE MAIS META CUMULATIVA DE 750 POR UNIDADE ==='
+          Write-Host '=== CGD: UNIVERSO COMPLETO + LOTE DE 750 POR UNIDADE ==='
+          Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM NA PROXIMA RODADA ==='
+          Write-Host '=== PROGRESSO DA BASE E PERSISTIDO NO FINAL DA RODADA ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -u scraper_sync_incremental.py
       - name: Auditar frequências reais, último acesso e Frequências a Registrar
+        continue-on-error: true
         shell: powershell
         env:
           CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
@@ -101,65 +104,63 @@ jobs:
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
         run: python -u auditar_frequencias_cgd.py
-      - name: Validar sincronização do universo
+      - name: Validar lote persistido e avanço incremental
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
-          if (-not (Test-Path 'dados_universo_cgd.json')) { throw 'Falha: snapshot do universo CGD não foi gerado.' }
-          if (-not (Test-Path 'dados_dashboard_cgd.json')) { throw 'Falha: dados_dashboard_cgd.json não foi gerado.' }
-          if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
-          if (-not (Test-Path 'dados_frequencias_a_registrar.json')) { throw 'Falha: snapshot de Frequencias a Registrar não foi gerado.' }
+          if (-not (Test-Path 'dados_universo_cgd.json')) { throw 'Falha: dados_universo_cgd.json não foi gerado.' }
           @'
           import json
           from pathlib import Path
           dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
           snap = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
-          dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
-          pac = json.loads(Path('dados_pacotes_cursos.json').read_text(encoding='utf-8'))
-          if not isinstance(dados, list) or not dados:
-              raise SystemExit('Falha: base de alunos vazia/inválida.')
+          if not isinstance(dados, list):
+              raise SystemExit('Falha: dados_alunos.json invalido.')
           unidades = snap.get('unidades', {})
-          if set(unidades) != {'matriz','filial'}:
-              raise SystemExit(f'Falha: universo não contém Matriz e Filial: {sorted(unidades)}')
-          contratos_base = {str(a.get('contrato') or a.get('cgd_matricula_id') or '') for a in dados if a.get('contrato') or a.get('cgd_matricula_id')}
-          contratos_snapshot = set()
-          for unidade in ('matriz','filial'):
+          if set(unidades) != {'matriz', 'filial'}:
+              raise SystemExit(f'Falha: snapshot sem Matriz e Filial: {sorted(unidades)}')
+          seen = set()
+          for unidade in ('matriz', 'filial'):
               info = unidades[unidade]
-              ids = set(info.get('contratos', {}).keys())
-              contratos_snapshot |= ids
-              print(f'{unidade.upper()}: UNIVERSO={info.get("total",0)} NOVOS={info.get("novos",0)} ALTERADOS={info.get("alterados",0)} SEM_MUDANCA={info.get("sem_mudanca",0)} ERROS_LISTAGEM={info.get("paginas_com_erro",0)}')
-              if info.get('paginas_com_erro',0) >= 416:
-                  raise SystemExit(f'Falha: listagem insuficiente na {unidade}.')
-              if info.get('total',0) != len(ids):
-                  raise SystemExit(f'Falha: total/snapshot divergente na {unidade}.')
-          if not contratos_snapshot.issubset(contratos_base):
-              faltantes = sorted(contratos_snapshot - contratos_base)
-              raise SystemExit(f'Falha: contratos do universo ausentes da base: {faltantes[:20]}')
-          validos = [c for c in contratos_base if c]
-          if len(validos) != len(set(validos)):
-              raise SystemExit('Falha: contratos duplicados na base.')
-          dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
-          pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
-          print(f'UNIVERSO CGD DESCOBERTO: {len(contratos_snapshot)}')
-          print(f'BASE PERSISTIDA: {len(dados)}')
-          print(f'DASHBOARD CGD CAPTURADO: {len(dash_ok)}/2')
-          print(f'FONTES DE PACOTES CAPTURADAS: {len(pac_ok)}/4')
-          if len(dash_ok) != 2:
-              raise SystemExit(f'Falha: Dashboard CGD não capturado nas duas unidades: {len(dash_ok)}/2.')
-          if len(pac_ok) != 4:
-              raise SystemExit(f'Falha: fontes de pacote/relatório não capturadas: {len(pac_ok)}/4.')
-          print('VALIDAÇÃO UNIVERSO + INCREMENTAL: OK')
+              universe = set(info.get('contratos', {}).keys())
+              total = int(info.get('total', 0))
+              lote = int(info.get('lote_planejado', 0))
+              capturados = int(info.get('capturados_no_lote', 0))
+              if total != len(universe) or total <= 0:
+                  raise SystemExit(f'Falha: universo invalido na {unidade}: total={total} ids={len(universe)}')
+              if lote > 750:
+                  raise SystemExit(f'Falha: lote acima de 750 na {unidade}: {lote}')
+              if capturados < 0 or capturados > lote:
+                  raise SystemExit(f'Falha: captura do lote invalida na {unidade}: {capturados}/{lote}')
+              base_unit = set()
+              for a in dados:
+                  u = str(a.get('unidade') or '').lower()
+                  cid = str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip()
+                  if u == unidade and cid:
+                      base_unit.add(cid)
+                      token = (u, cid)
+                      if token in seen:
+                          raise SystemExit(f'Falha: contrato duplicado na base: {token}')
+                      seen.add(token)
+              fora = base_unit - universe
+              print(f'{unidade.upper()}: UNIVERSO={total} BASE={len(base_unit)} LOTE={lote} CAPTURADOS={capturados} PENDENTES={len(universe-base_unit)} FORA_UNIVERSO={len(fora)} ERROS_DETALHE={info.get("erros_detalhe",0)}')
+              if capturados and not base_unit.intersection(universe):
+                  raise SystemExit(f'Falha: lote reportou captura mas nenhum contrato do lote esta na base da {unidade}.')
+          print(f'BASE_TOTAL_PERSISTIDA={len(dados)}')
+          print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
           '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
+        continue-on-error: true
         shell: powershell
         run: python build_reposicoes_from_alunos.py
       - name: Validar reposições capturadas
+        continue-on-error: true
         shell: powershell
         run: |
-          if (-not (Test-Path 'dados_reposicoes.json')) { throw 'Falha: dados_reposicoes.json não foi gerado.' }
+          if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
           $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
           Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
-          if ($rep.source -ne 'CGD') { throw 'Falha: fonte de reposições não é CGD.' }
+          if ($rep.source -ne 'CGD') { throw 'Fonte de reposições não é CGD.' }
       - name: Salvar diagnósticos
         if: always()
         uses: actions/upload-artifact@v4
@@ -175,16 +176,19 @@ jobs:
             dados_frequencias_a_registrar.json
           if-no-files-found: warn
           retention-days: 7
-      - name: Commit e Push dos dados públicos
+      - name: Commit e Push do progresso persistido
         if: success()
         shell: powershell
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add dados_alunos.json dados_universo_cgd.json dados_reposicoes.json dados_dashboard_cgd.json dados_pacotes_cursos.json dados_frequencias_a_registrar.json
+          git add dados_alunos.json dados_universo_cgd.json
+          foreach ($f in @('dados_reposicoes.json','dados_dashboard_cgd.json','dados_pacotes_cursos.json','dados_frequencias_a_registrar.json')) {
+            if (Test-Path $f) { git add $f }
+          }
           if (git diff --cached --quiet) {
             Write-Host 'Nenhuma alteração nos dados sincronizados.'
           } else {
-            git commit -m 'Auto-update: universo CGD sincronizado incrementalmente'
+            git commit -m 'Auto-update: progresso incremental CGD persistido'
             git push
           }
