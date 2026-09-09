@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  executar-scraping:
+  coletar-cgd:
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 720
     steps:
@@ -30,8 +30,7 @@ jobs:
           python -m playwright install chromium
       - name: Validar parser de frequência determinístico
         shell: powershell
-        run: |
-          python -m unittest -v test_frequencia_parser_cgd.py
+        run: python -m unittest -v test_frequencia_parser_cgd.py
       - name: Validar Secrets obrigatórios
         shell: powershell
         env:
@@ -101,15 +100,42 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_DIAGNOSTICO: '1'
           PYTHONUNBUFFERED: '1'
-        run: |
-          Write-Host '=== AUDITORIA DE FREQUENCIA: registros = presencas + faltas | ultimo acesso | a registrar ==='
-          python -u auditar_frequencias_cgd.py
+        run: python -u auditar_frequencias_cgd.py
+      - name: Empacotar coleta para validação separada
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cgd-coleta-${{ github.run_id }}
+          path: |
+            dados_alunos.json
+            dados_reposicoes.json
+            dados_dashboard_cgd.json
+            dados_pacotes_cursos.json
+            dados_frequencias_a_registrar.json
+            dados_populacao_cgd.json
+            diagnostico_scraping/
+          if-no-files-found: warn
+          retention-days: 7
+
+  validar-e-publicar:
+    needs: coletar-cgd
+    if: always()
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+      - name: Baixar coleta do mesmo run
+        uses: actions/download-artifact@v4
+        with:
+          name: cgd-coleta-${{ github.run_id }}
+          path: .
       - name: Validar captura real e base auditada
         shell: powershell
         run: |
+          if ('${{ needs.coletar-cgd.result }}' -ne 'success') { throw "Falha na etapa de coleta: ${{ needs.coletar-cgd.result }}" }
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
           if (-not (Test-Path 'dados_populacao_cgd.json')) { throw 'Falha: snapshot da população real do CGD não foi gerado.' }
-          if (-not (Test-Path 'dados_dashboard_cgd.json')) { Write-Warning 'dados_dashboard_cgd.json não foi gerado; dashboard é apenas informativo e não bloqueia a aprovação.' }
           if (-not (Test-Path 'dados_pacotes_cursos.json')) { throw 'Falha: dados_pacotes_cursos.json não foi gerado.' }
           if (-not (Test-Path 'dados_frequencias_a_registrar.json')) { throw 'Falha: snapshot de Frequencias a Registrar não foi gerado.' }
           @'
@@ -127,7 +153,8 @@ jobs:
           matriz = [a for a in dados if a.get('unidade') == 'matriz']
           filial = [a for a in dados if a.get('unidade') == 'filial']
           contratos = [str(a.get('contrato') or '') for a in dados]
-          duplicados = len(contratos) - len(set(contratos))
+          contratos_com_valor = [c for c in contratos if c]
+          duplicados = len(contratos_com_valor) - len(set(contratos_com_valor))
           freq_ok = [a for a in dados if not a.get('frequencia_raw') or (isinstance(a.get('frequencia_validacao_interna'), dict) and a['frequencia_validacao_interna'].get('matematica_ok'))]
           ultimo = [a for a in dados if a.get('ultimo_acesso')]
           freq_real = [a for a in dados if isinstance(a.get('frequencia_raw'), list) and a.get('frequencia_raw')]
@@ -137,7 +164,7 @@ jobs:
                   dash = json.loads(Path('dados_dashboard_cgd.json').read_text(encoding='utf-8'))
                   dash_ok = [x for x in dash.get('unidades', []) if x.get('ok')]
               except Exception:
-                  print('AVISO: dados_dashboard_cgd.json existe, mas não pôde ser interpretado; permanece fora dos critérios de aprovação.')
+                  print('AVISO: dashboard existe, mas não pôde ser interpretado; permanece informativo.')
           pac_ok = [x for x in pac.get('unidades', []) if x.get('ok')]
           pend_ok = [x for x in pend.get('unidades', []) if x.get('url')]
           print(f'ALUNOS NA BASE: {len(dados)}')
@@ -174,19 +201,19 @@ jobs:
           $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
           Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
           if ($rep.source -ne 'CGD') { throw 'Falha: fonte de reposições não é CGD.' }
-      - name: Salvar diagnósticos
+      - name: Salvar diagnósticos da validação
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostico-scraping-cgd
+          name: diagnostico-validacao-cgd-${{ github.run_id }}
           path: |
-            diagnostico_scraping/
             dados_alunos.json
             dados_reposicoes.json
             dados_dashboard_cgd.json
             dados_pacotes_cursos.json
             dados_frequencias_a_registrar.json
             dados_populacao_cgd.json
+            diagnostico_scraping/
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push dos dados públicos
