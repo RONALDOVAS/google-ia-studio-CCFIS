@@ -85,6 +85,7 @@ jobs:
         run: |
           Write-Host '=== SINCRONIZAÇÃO COMPLETA: universo real Matriz + Filial ==='
           Write-Host '=== SEM LIMITE 20 | SEM LIMITE 750 | CHROMIUM HEADLESS ==='
+          python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -u scraper_sync_robusto.py
 
       - name: Gerar reposições reais a partir dos alunos capturados
