@@ -11,6 +11,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import scraper
 import scraper_runner_threaded as runner
@@ -73,8 +74,6 @@ def _barra(unidade, etapa, atual, total, inicio, extra=""):
     linha = f"[{unidade.upper()}] {etapa:<12} [{'#' * cheios}{'-' * vazios}] {pct:6.2%} {atual}/{total} ETA {eta_txt}"
     if extra:
         linha += f" | {extra}"
-    # \r ajuda terminais a exibirem uma barra viva; o marcador [PROGRESSO]
-    # garante visibilidade mesmo quando o Runner normaliza cada linha do log.
     print("\r[PROGRESSO] " + linha, end="", flush=True)
     if atual == total:
         print("", flush=True)
@@ -89,6 +88,71 @@ def _preparar_contexto(context):
         else:
             route.continue_()
     context.route("**/*", _route)
+
+
+def _discover_unlimited(page, unidade, destino):
+    """Descobre todo o universo paginado do CGD sem MAX_CONTRACTS/MAX_PAGES.
+
+    A paginacao termina somente quando o proprio CGD deixa de entregar novos
+    contratos. Assim, 20/750/10000 e limites de paginas deixam de participar
+    da definicao do universo.
+    """
+    sr = runner.scraper_runner
+    source = sr._listing_source(page, destino)
+    print(f"[{unidade}] FONTE_LISTAGEM_FIXA: {source}", flush=True)
+    if not scraper.open_page(page, source, unidade, "lista_pagina_1", 300):
+        raise RuntimeError(f"[{unidade}] FALHA_ABRINDO_LISTAGEM: {source} final={page.url}")
+
+    first_ids = sr._extract_contract_ids(page.content())
+    if not first_ids:
+        raise RuntimeError(f"[{unidade}] LISTAGEM_PAGINA_1_SEM_CONTRATOS: {page.url}")
+
+    session = sr._session_from_page(page)
+    cookies = {c.name: c.value for c in session.cookies}
+    headers = dict(session.headers)
+    found = {cid: scraper.contract_url(cid) for cid in first_ids}
+    print(f"[{unidade}] LISTAGEM REAL: pagina=1 contratos_p1={len(first_ids)}", flush=True)
+
+    page_number = 2
+    empty_streak = 0
+    while True:
+        url = sr._page_url(source, page_number)
+        try:
+            _, _, ids, body_size = sr._fetch_listing((unidade, url, cookies, headers))
+            before = len(found)
+            for cid in ids:
+                found[cid] = scraper.contract_url(cid)
+            novos = len(found) - before
+            print(
+                f"[{unidade}] pagina_lista={page_number} contratos_acumulados={len(found)} "
+                f"novos={novos} bytes={body_size}",
+                flush=True,
+            )
+            if novos == 0:
+                empty_streak += 1
+            else:
+                empty_streak = 0
+            # O fim da paginacao e determinado pelo proprio CGD. Duas paginas
+            # sem contrato novo protegem contra uma pagina vazia intermediaria.
+            if empty_streak >= 2:
+                break
+        except Exception as exc:
+            raise RuntimeError(f"[{unidade}] FALHA_LISTAGEM_PAGINA={page_number}: {exc}") from exc
+        page_number += 1
+
+    print(
+        f"[{unidade}] UNIVERSO_DISCOVER_FINAL paginas_visitadas={page_number} "
+        f"contratos={len(found)}",
+        flush=True,
+    )
+    if not found:
+        raise RuntimeError(f"[{unidade}] UNIVERSO_CGD_VAZIO")
+    return list(found.values())
+
+
+# O sincronizador completo usa explicitamente a descoberta dinamica acima.
+# Isso neutraliza os limites historicos existentes no runner legado.
+scraper.discover_contracts = _discover_unlimited
 
 
 def _run_unit(unidade, cfg, pw, existing):
