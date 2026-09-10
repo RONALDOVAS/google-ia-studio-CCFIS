@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from time import perf_counter
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
@@ -82,6 +83,7 @@ def fetch_listing(args):
 
 
 def discover_universe(page, unidade):
+    started = perf_counter()
     if not scraper.open_page(page, SOURCE, unidade, "lista_universo", 300):
         raise RuntimeError(f"[{unidade}] nao foi possivel abrir {SOURCE}")
     first_html = page.content()
@@ -118,8 +120,9 @@ def discover_universe(page, unidade):
         raise RuntimeError(f"[{unidade}] listagem insuficiente: {errors}/{LISTING_PAGES} paginas falharam")
     if len(found) > MAX_CONTRACTS:
         raise RuntimeError(f"[{unidade}] universo={len(found)} excede limite operacional CGD_MAX_CONTRACTS={MAX_CONTRACTS}")
-    print(f"[{unidade}] UNIVERSO_COMPLETO_DESCOBERTO={len(found)} paginas_com_erro={errors}", flush=True)
-    return found, signatures, errors
+    elapsed = perf_counter() - started
+    print(f"[{unidade}] UNIVERSO_COMPLETO_DESCOBERTO={len(found)} paginas_com_erro={errors} TEMPO_DESCOBERTA={elapsed:.2f}s", flush=True)
+    return found, signatures, errors, elapsed
 
 
 def load_json(path, default):
@@ -160,10 +163,12 @@ def detail(page, unidade, cid, reps, signature):
 
 
 def main():
+    total_started = perf_counter()
     print("=" * 96, flush=True)
     print("CGD SYNC — UNIVERSO COMPLETO + LOTES DE 750 + PERSISTENCIA INCREMENTAL", flush=True)
     print("A listagem do universo e completa; o detalhamento pesado e limitado a 750 por unidade por rodada.", flush=True)
     print("Novos/alterados tem prioridade. O restante continua pendente para a proxima rodada.", flush=True)
+    print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
     print("=" * 96, flush=True)
 
     existing = load_json(DATA_PATH, [])
@@ -178,85 +183,117 @@ def main():
 
     snapshot = {"gerado_em": datetime.now(timezone.utc).isoformat(), "regra": "UNIVERSO_COMPLETO_LOTES_750_INCREMENTAL", "unidades": {}}
     totals = {"universo": 0, "novos": 0, "alterados": 0, "capturados": 0, "sem_mudanca": 0, "erros_detalhe": 0}
+    performance = {"discovery": {}, "comparison": {}, "detail": {}, "persistence": 0.0, "total": 0.0}
 
     with sync_playwright() as pw:
-        for unidade in ("matriz", "filial"):
-            cfg = scraper.CONFIG[unidade]
-            browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
-            context = browser.new_context()
-            page = context.new_page()
-            try:
-                scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-                contracts, signatures, listing_errors = discover_universe(page, unidade)
-                reps = scraper.get_replacements(page, unidade)
+        browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+        try:
+            for unidade in ("matriz", "filial"):
+                unit_started = perf_counter()
+                cfg = scraper.CONFIG[unidade]
+                context = browser.new_context()
+                page = context.new_page()
+                try:
+                    scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
+                    contracts, signatures, listing_errors, discovery_elapsed = discover_universe(page, unidade)
+                    performance["discovery"][unidade] = discovery_elapsed
 
-                current = {cid: by_id.get((unidade, cid)) for cid in contracts}
-                new_ids = [cid for cid in contracts if current[cid] is None]
-                changed_ids = [cid for cid in contracts if current[cid] is not None and signature_changed(current[cid], signatures[cid])]
-                unchanged_ids = [cid for cid in contracts if current[cid] is not None and cid not in set(changed_ids)]
+                    comparison_started = perf_counter()
+                    reps = scraper.get_replacements(page, unidade)
+                    current = {cid: by_id.get((unidade, cid)) for cid in contracts}
+                    new_ids = [cid for cid in contracts if current[cid] is None]
+                    changed_ids = [cid for cid in contracts if current[cid] is not None and signature_changed(current[cid], signatures[cid])]
+                    changed_set = set(changed_ids)
+                    unchanged_ids = [cid for cid in contracts if current[cid] is not None and cid not in changed_set]
+                    targets = (changed_ids + new_ids)[:BATCH_PER_UNIT]
+                    comparison_elapsed = perf_counter() - comparison_started
+                    performance["comparison"][unidade] = comparison_elapsed
+                    print(f"[{unidade}] COMPARACAO TEMPO={comparison_elapsed:.2f}s", flush=True)
+                    print(f"[{unidade}] UNIVERSO={len(contracts)} NOVOS={len(new_ids)} ALTERADOS={len(changed_ids)} SEM_MUDANCA={len(unchanged_ids)} LOTE_ATUAL={len(targets)}/{BATCH_PER_UNIT}", flush=True)
 
-                # Primeiro entram os alterados; depois os novos. O corte de 750 e por unidade.
-                targets = changed_ids + new_ids
-                targets = targets[:BATCH_PER_UNIT]
-                print(f"[{unidade}] UNIVERSO={len(contracts)} NOVOS={len(new_ids)} ALTERADOS={len(changed_ids)} SEM_MUDANCA={len(unchanged_ids)} LOTE_ATUAL={len(targets)}/{BATCH_PER_UNIT}", flush=True)
+                    detail_started = perf_counter()
+                    captured = 0
+                    detail_errors = []
+                    for idx, cid in enumerate(targets, 1):
+                        try:
+                            aluno = detail(page, unidade, cid, reps, signatures[cid])
+                            by_id[(unidade, cid)] = aluno
+                            captured += 1
+                            print(f"[{unidade}] DETALHE_OK {idx}/{len(targets)} cid={cid}", flush=True)
+                        except Exception as exc:
+                            detail_errors.append((cid, repr(exc)))
+                            print(f"[{unidade}] DETALHE_ERRO cid={cid}: {exc!r}", flush=True)
+                        if DETAIL_INTERVAL_MS and idx < len(targets):
+                            page.wait_for_timeout(DETAIL_INTERVAL_MS)
+                    detail_elapsed = perf_counter() - detail_started
+                    performance["detail"][unidade] = detail_elapsed
+                    print(f"[{unidade}] DETALHAMENTO TEMPO={detail_elapsed:.2f}s CAPTURADOS={captured} ERROS={len(detail_errors)}", flush=True)
 
-                captured = 0
-                detail_errors = []
-                for idx, cid in enumerate(targets, 1):
-                    try:
-                        aluno = detail(page, unidade, cid, reps, signatures[cid])
-                        by_id[(unidade, cid)] = aluno
-                        captured += 1
-                        print(f"[{unidade}] DETALHE_OK {idx}/{len(targets)} cid={cid}", flush=True)
-                    except Exception as exc:
-                        detail_errors.append((cid, repr(exc)))
-                        print(f"[{unidade}] DETALHE_ERRO cid={cid}: {exc!r}", flush=True)
-                    if DETAIL_INTERVAL_MS and idx < len(targets):
-                        page.wait_for_timeout(DETAIL_INTERVAL_MS)
+                    now = datetime.now(timezone.utc).isoformat()
+                    for cid in unchanged_ids:
+                        aluno = current[cid]
+                        aluno["assinatura_universo_cgd"] = signatures[cid]
+                        aluno["visto_no_cgd_em"] = now
 
-                # Mesmo com falhas de detalhe, a rodada grava o que foi realmente capturado.
-                # Registros sem alteracao recebem somente a nova assinatura de listagem.
-                now = datetime.now(timezone.utc).isoformat()
-                for cid in unchanged_ids:
-                    aluno = current[cid]
-                    aluno["assinatura_universo_cgd"] = signatures[cid]
-                    aluno["visto_no_cgd_em"] = now
-
-                # Snapshot guarda o universo inteiro e a situacao desta rodada.
-                snapshot["unidades"][unidade] = {
-                    "total": len(contracts),
-                    "contratos": {cid: signatures[cid] for cid in contracts},
-                    "novos_detectados": len(new_ids),
-                    "alterados_detectados": len(changed_ids),
-                    "sem_mudanca": len(unchanged_ids),
-                    "lote_planejado": len(targets),
-                    "capturados_no_lote": captured,
-                    "erros_detalhe": len(detail_errors),
-                    "paginas_com_erro": listing_errors,
-                    "pendentes_apos_lote": max(0, len(contracts) - sum(1 for cid in contracts if current[cid] is not None) - captured),
-                    "detalhe_erros": [{"contrato": cid, "erro": err} for cid, err in detail_errors[:100]],
-                }
-                totals["universo"] += len(contracts)
-                totals["novos"] += len(new_ids)
-                totals["alterados"] += len(changed_ids)
-                totals["capturados"] += captured
-                totals["sem_mudanca"] += len(unchanged_ids)
-                totals["erros_detalhe"] += len(detail_errors)
-            finally:
-                context.close()
-                browser.close()
+                    snapshot["unidades"][unidade] = {
+                        "total": len(contracts),
+                        "contratos": {cid: signatures[cid] for cid in contracts},
+                        "novos_detectados": len(new_ids),
+                        "alterados_detectados": len(changed_ids),
+                        "sem_mudanca": len(unchanged_ids),
+                        "lote_planejado": len(targets),
+                        "capturados_no_lote": captured,
+                        "erros_detalhe": len(detail_errors),
+                        "paginas_com_erro": listing_errors,
+                        "pendentes_apos_lote": max(0, len(contracts) - sum(1 for cid in contracts if current[cid] is not None) - captured),
+                        "detalhe_erros": [{"contrato": cid, "erro": err} for cid, err in detail_errors[:100]],
+                        "performance_s": {
+                            "descoberta": round(discovery_elapsed, 2),
+                            "comparacao": round(comparison_elapsed, 2),
+                            "detalhamento": round(detail_elapsed, 2),
+                            "unidade_total_ate_aqui": round(perf_counter() - unit_started, 2),
+                        },
+                    }
+                    totals["universo"] += len(contracts)
+                    totals["novos"] += len(new_ids)
+                    totals["alterados"] += len(changed_ids)
+                    totals["capturados"] += captured
+                    totals["sem_mudanca"] += len(unchanged_ids)
+                    totals["erros_detalhe"] += len(detail_errors)
+                finally:
+                    context.close()
+        finally:
+            browser.close()
 
     merged = list(by_id.values())
     merged.sort(key=lambda a: (str(a.get("unidade") or ""), key(a)))
+
+    persistence_started = perf_counter()
     atomic_write(DATA_PATH, merged)
     atomic_write(SNAPSHOT_PATH, snapshot)
+    performance["persistence"] = perf_counter() - persistence_started
+    print(f"PERSISTENCIA TEMPO={performance['persistence']:.2f}s", flush=True)
 
     pending = 0
+    base_counts = {}
     for unidade, info in snapshot["unidades"].items():
         base_unit = {key(a) for a in merged if str(a.get("unidade") or "").lower() == unidade and key(a)}
         universe = set(info["contratos"])
         pending += len(universe - base_unit)
+        base_counts[unidade] = len(base_unit)
+        print(f"[{unidade}] BASE_PRESERVADA={len(base_unit)} UNIVERSO={len(universe)} PENDENTES={len(universe - base_unit)}", flush=True)
 
+    performance["total"] = perf_counter() - total_started
+    print("=" * 96, flush=True)
+    print(f"PERFORMANCE_MATRIZ_DESCOBERTA={performance['discovery'].get('matriz', 0.0):.2f}s", flush=True)
+    print(f"PERFORMANCE_FILIAL_DESCOBERTA={performance['discovery'].get('filial', 0.0):.2f}s", flush=True)
+    print(f"PERFORMANCE_MATRIZ_COMPARACAO={performance['comparison'].get('matriz', 0.0):.2f}s", flush=True)
+    print(f"PERFORMANCE_FILIAL_COMPARACAO={performance['comparison'].get('filial', 0.0):.2f}s", flush=True)
+    print(f"PERFORMANCE_MATRIZ_DETALHES={performance['detail'].get('matriz', 0.0):.2f}s", flush=True)
+    print(f"PERFORMANCE_FILIAL_DETALHES={performance['detail'].get('filial', 0.0):.2f}s", flush=True)
+    print(f"PERFORMANCE_PERSISTENCIA={performance['persistence']:.2f}s", flush=True)
+    print(f"PERFORMANCE_TOTAL={performance['total']:.2f}s", flush=True)
+    print("=" * 96, flush=True)
     print(f"UNIVERSO_TOTAL_CGD={totals['universo']}", flush=True)
     print(f"NOVOS_DETECTADOS={totals['novos']}", flush=True)
     print(f"ALTERADOS_DETECTADOS={totals['alterados']}", flush=True)
@@ -264,6 +301,8 @@ def main():
     print(f"SEM_MUDANCA_PRESERVADOS={totals['sem_mudanca']}", flush=True)
     print(f"ERROS_DETALHE_NESTA_RODADA={totals['erros_detalhe']}", flush=True)
     print(f"BASE_PERSISTIDA={len(merged)}", flush=True)
+    print(f"BASE_MATRIZ={base_counts.get('matriz', 0)}", flush=True)
+    print(f"BASE_FILIAL={base_counts.get('filial', 0)}", flush=True)
     print(f"PENDENTES_DE_DETALHAMENTO={pending}", flush=True)
     if totals["universo"] <= 0:
         raise RuntimeError("Nenhum contrato descoberto no universo CGD")
