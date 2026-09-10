@@ -1,7 +1,69 @@
 {
-  "updated_at": "2026-09-07T21:34:38.260855+00:00",
+  "updated_at": "2026-09-10T08:00:36.227154+00:00",
   "source": "CGD",
   "records": [
+    {
+      "id": "cgd_rep_196a55982184d18529171feab24599d5",
+      "aluno_id": "784210",
+      "aluno_nome": "Lucas Ferreira Lopes",
+      "contrato": "784210",
+      "unidade": "filial",
+      "data": "10/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "10/09/2026",
+        "Lucas Ferreira Lopes",
+        "Laboratório 1",
+        "Quinta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-10T08:00:35.295728+00:00"
+    },
+    {
+      "id": "cgd_rep_45fcde56bd98f10bef4872b4b415c953",
+      "aluno_id": "878992",
+      "aluno_nome": "Kauany Vitoria dos Santos Freitas",
+      "contrato": "878992",
+      "unidade": "filial",
+      "data": "10/09/2026",
+      "horario_inicio": "10:00",
+      "horario_fim": "12:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "10/09/2026",
+        "Kauany Vitoria dos Santos Freitas",
+        "Laboratório 1",
+        "Quinta-feira: 10:00 às 12:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-10T08:00:35.373894+00:00"
+    },
     {
       "id": "cgd_rep_b5c249de8d3d64bab729a75f8099f068",
       "aluno_id": "895246",
@@ -31,7 +93,38 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-07T21:34:38.010693+00:00"
+      "updated_at": "2026-09-10T08:00:35.375972+00:00"
+    },
+    {
+      "id": "cgd_rep_194f75c54b7b8fc5f63350bb7c9ecb73",
+      "aluno_id": "765520",
+      "aluno_nome": "ANA LUIZA DAS GRAÇAS MONTEIRO",
+      "contrato": "765520",
+      "unidade": "matriz",
+      "data": "09/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "09/09/2026",
+        "ANA LUIZA DAS GRAÇAS MONTEIRO",
+        "LABORATÓRIO 1",
+        "Quarta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-10T08:00:36.103566+00:00"
     },
     {
       "id": "cgd_rep_97e37e5911a6be4e0ffcfcc568879ebf",
@@ -62,7 +155,69 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-07T21:34:38.166574+00:00"
+      "updated_at": "2026-09-10T08:00:36.154716+00:00"
+    },
+    {
+      "id": "cgd_rep_ecd630c2135cafedbf72df4088258095",
+      "aluno_id": "882903",
+      "aluno_nome": "ALICE LORRANE MONTEIRO SILVA",
+      "contrato": "882903",
+      "unidade": "matriz",
+      "data": "11/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "11/09/2026",
+        "ALICE LORRANE MONTEIRO SILVA",
+        "LABORATÓRIO 1",
+        "Sexta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-10T08:00:36.209717+00:00"
+    },
+    {
+      "id": "cgd_rep_dc30a606791888ba3d0f6dc6cd65d1cb",
+      "aluno_id": "890828",
+      "aluno_nome": "ANDRE LUCAS VIEIRA BARRADAS",
+      "contrato": "890828",
+      "unidade": "matriz",
+      "data": "10/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "10/09/2026",
+        "ANDRE LUCAS VIEIRA BARRADAS",
+        "LABORATÓRIO 1",
+        "Quinta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-10T08:00:36.215849+00:00"
     }
   ]
 }
