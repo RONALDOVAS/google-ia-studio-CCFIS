@@ -70,7 +70,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
-          CGD_DETAIL_BATCH_PER_UNIT: '100'
+          CGD_DETAIL_BATCH_PER_UNIT: '500'
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
@@ -81,8 +81,8 @@ jobs:
           CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD: MODO OPERACIONAL CURTO ==='
-          Write-Host '=== UNIVERSO COMPLETO + LOTE DE 100 POR UNIDADE ==='
+          Write-Host '=== CGD: MODO OPERACIONAL ESCALADO ==='
+          Write-Host '=== UNIVERSO COMPLETO + LOTE DE 500 POR UNIDADE ==='
           Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM ==='
           Write-Host '=== SEM DIAGNOSTICO PESADO ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
