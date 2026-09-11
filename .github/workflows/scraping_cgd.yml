@@ -17,7 +17,7 @@ concurrency:
 jobs:
   executar-scraping:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 720
+    timeout-minutes: 120
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '10000'
-          CGD_DETAIL_BATCH_PER_UNIT: '750'
+          CGD_DETAIL_BATCH_PER_UNIT: '100'
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
@@ -78,12 +78,13 @@ jobs:
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_INTERVAL_MS: '200'
           CGD_HEADLESS: 'false'
-          CGD_DIAGNOSTICO: '1'
+          CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD: UNIVERSO COMPLETO + LOTE DE 750 POR UNIDADE ==='
-          Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM NA PROXIMA RODADA ==='
-          Write-Host '=== PROGRESSO DA BASE E PERSISTIDO NO FINAL DA RODADA ==='
+          Write-Host '=== CGD: MODO OPERACIONAL CURTO ==='
+          Write-Host '=== UNIVERSO COMPLETO + LOTE DE 100 POR UNIDADE ==='
+          Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM ==='
+          Write-Host '=== SEM DIAGNOSTICO PESADO ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -u scraper_sync_incremental.py
       - name: Auditar frequências reais, último acesso e Frequências a Registrar
@@ -101,7 +102,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_PAGE_WAIT_MS: '100'
-          CGD_DIAGNOSTICO: '1'
+          CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: python -u auditar_frequencias_cgd.py
       - name: Validar lote persistido e avanço incremental
