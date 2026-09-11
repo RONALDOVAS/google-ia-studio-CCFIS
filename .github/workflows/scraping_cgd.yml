@@ -65,7 +65,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
-          CGD_MAX_CONTRACTS: '10000'
+          CGD_MAX_CONTRACTS: '50000'
           CGD_DETAIL_BATCH_PER_UNIT: '500'
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
@@ -80,9 +80,9 @@ jobs:
           Write-Host '=== CGD: MODO OPERACIONAL ESCALADO ==='
           Write-Host '=== UNIVERSO COMPLETO + LOTE DE 500 POR UNIDADE ==='
           Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM ==='
-          Write-Host '=== SEM DIAGNOSTICO PESADO ==='
+          Write-Host '=== BROWSER HEADED FORA DA TELA; SEM INTERAÇÃO MANUAL ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
-          python -u scraper_sync_incremental.py
+          python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
       - name: Auditar frequências reais, último acesso e Frequências a Registrar
         continue-on-error: true
         shell: powershell
@@ -125,8 +125,8 @@ jobs:
               capturados = int(info.get('capturados_no_lote', 0))
               if total != len(universe) or total <= 0:
                   raise SystemExit(f'Falha: universo invalido na {unidade}: total={total} ids={len(universe)}')
-              if lote > 750:
-                  raise SystemExit(f'Falha: lote acima de 750 na {unidade}: {lote}')
+              if lote > 500:
+                  raise SystemExit(f'Falha: lote acima de 500 na {unidade}: {lote}')
               if capturados < 0 or capturados > lote:
                   raise SystemExit(f'Falha: captura do lote invalida na {unidade}: {capturados}/{lote}')
               base_unit = set()
