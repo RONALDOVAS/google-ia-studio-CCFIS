@@ -190,5 +190,26 @@ jobs:
             Write-Host 'Nenhuma alteração nos dados sincronizados.'
           } else {
             git commit -m 'Auto-update: progresso incremental CGD persistido'
-            git push
+            $published = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Write-Host "=== PUBLICAÇÃO CGD: tentativa $attempt/3 ==="
+              git fetch origin main
+              if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar referência remota antes da publicação.' }
+              git rebase origin/main
+              if ($LASTEXITCODE -ne 0) {
+                git rebase --abort
+                throw 'Falha ao integrar alterações remotas antes da publicação; dados não foram sobrescritos.'
+              }
+              git push origin HEAD:main
+              if ($LASTEXITCODE -eq 0) {
+                $published = $true
+                Write-Host 'PUBLICAÇÃO CGD: OK'
+                break
+              }
+              if ($attempt -lt 3) {
+                Write-Warning 'Push rejeitado por avanço remoto; nova tentativa após atualização.'
+                Start-Sleep -Seconds 5
+              }
+            }
+            if (-not $published) { throw 'Falha definitiva na publicação após 3 tentativas.' }
           }
