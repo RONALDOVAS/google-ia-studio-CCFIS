@@ -4,6 +4,8 @@ O CGD atual renderiza o formulario de login com inputs que nao expõem
 name/id confiaveis. O login legado dependia desses atributos e falhava com
 CAMPOS_LOGIN_NAO_ENCONTRADOS. Este patch substitui apenas a autenticacao,
 priorizando type/placeholder/aria-label e mantendo o restante do scraper.
+Tambem força o Playwright a usar o Chromium empacotado, removendo o canal
+msedge do scraper legado sem alterar a logica de coleta.
 """
 
 import re
@@ -87,4 +89,24 @@ def _patch():
 
     scraper.login = login
 
+
+def _patch_playwright_channel():
+    """Remove channel=msedge do scraper legado para usar Chromium bundled."""
+    try:
+        from playwright.sync_api import BrowserType
+    except Exception:
+        return
+    if getattr(BrowserType.launch, "_cfis_chromium_patch", False):
+        return
+    original_launch = BrowserType.launch
+
+    def launch_without_brand_channel(self, *args, **kwargs):
+        kwargs.pop("channel", None)
+        return original_launch(self, *args, **kwargs)
+
+    launch_without_brand_channel._cfis_chromium_patch = True
+    BrowserType.launch = launch_without_brand_channel
+
+
+_patch_playwright_channel()
 _patch()
