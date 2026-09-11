@@ -2,10 +2,6 @@ name: Execução Manual Scraping CGD
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/scraping_cgd.yml'
-      - 'scraper_sync_incremental.py'
 
 permissions:
   contents: write
@@ -17,7 +13,7 @@ concurrency:
 jobs:
   executar-scraping:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
