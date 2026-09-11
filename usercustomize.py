@@ -75,7 +75,9 @@ def _patch():
             info = []
             for frame in list(page.frames):
                 try:
-                    info.append(f"{frame.url}:inputs={frame.locator('input').count()}:password={frame.locator('input[type=\"password\"]').count()}")
+                    input_count = frame.locator('input').count()
+                    password_count = frame.locator('input[type="password"]').count()
+                    info.append(f"{frame.url}:inputs={input_count}:password={password_count}")
                 except Exception:
                     info.append(frame.url)
             raise RuntimeError(f"[{unidade}] CAMPOS_LOGIN_NAO_ENCONTRADOS: {page.url} frames={info}")
