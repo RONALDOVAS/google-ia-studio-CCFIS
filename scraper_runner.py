@@ -8,6 +8,13 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+# scraper_sync_incremental importa este modulo antes de calcular MAX_CONTRACTS.
+# Portanto estas variaveis eliminam o limite artificial de 10.000 sem depender
+# de alteracao no workflow.
+os.environ["CGD_MAX_CONTRACTS"] = "50000"
+os.environ["CGD_HEADLESS"] = "true"
+os.environ.setdefault("CGD_DETAIL_BATCH_PER_UNIT", "500")
+
 import requests
 import scraper
 from playwright.sync_api import sync_playwright
@@ -161,7 +168,6 @@ def robust_extract_frequency(page, cid):
     except Exception as exc:
         print(f"[FREQUENCIA] cid={cid} erro_dom={exc!r}", flush=True)
 
-    # Fallback para o texto renderizado quando o CGD nao usa uma tabela convencional.
     if not records:
         try:
             text = page.locator("body").inner_text(timeout=5000)
