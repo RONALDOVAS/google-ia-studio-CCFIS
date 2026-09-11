@@ -1,0 +1,51 @@
+name: Teste Login CGD
+on:
+  push:
+    paths:
+      - usercustomize.py
+      - sitecustomize.py
+      - scraper.py
+      - .github/workflows/test_cgd_login.yml
+jobs:
+  login:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright playwright-stealth
+          python -m playwright install chromium
+      - name: Testar login Matriz e Filial
+        shell: powershell
+        env:
+          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
+          CGD_HEADLESS: 'true'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          @'
+          import os
+          import sitecustomize
+          import usercustomize
+          import scraper
+          from playwright.sync_api import sync_playwright
+          for unidade in ('matriz','filial'):
+              cfg = scraper.CONFIG[unidade]
+              with sync_playwright() as pw:
+                  browser = pw.chromium.launch(headless=True)
+                  context = browser.new_context()
+                  page = context.new_page()
+                  scraper.login(page, cfg['usuario'], cfg['senha'], unidade)
+                  print(f'LOGIN_VALIDADO={unidade.upper()} URL={page.url}', flush=True)
+                  context.close(); browser.close()
+          print('LOGIN_CGD_MATRIZ_FILIAL_VALIDADO=OK', flush=True)
+          '@ | python
