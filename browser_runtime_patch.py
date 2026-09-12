@@ -1,10 +1,4 @@
-"""Runtime patch for CGD automation on the self-hosted Windows runner.
-
-The CGD Cloudflare path rejects Chromium headless, but the scraper does not need
-an operator watching a browser. Keep Playwright headed for the anti-bot path while
-placing the window off-screen and minimized. This preserves the browser execution
-model without turning the job into a visible/manual workflow.
-"""
+"""Runtime patches for CGD automation on the self-hosted Windows runner."""
 from playwright.sync_api import BrowserType
 
 _original_launch = BrowserType.launch
@@ -27,3 +21,13 @@ def _launch_offscreen(self, *args, **kwargs):
 
 BrowserType.launch = _launch_offscreen
 print("PATCH_BROWSER_OFFSCREEN=OK", flush=True)
+
+# The operational workflow already imports this runtime patch before starting
+# scraper_sync_incremental.py. Chain the real CGD frequency-route fallback here
+# so the workflow needs no second manual import or dispatch change.
+try:
+    import frequency_runtime_patch  # noqa: F401
+except Exception as exc:
+    print(f"PATCH_FREQUENCIA_LISTA_ERRO={exc!r}", flush=True)
+else:
+    print("PATCH_FREQUENCIA_LISTA=OK", flush=True)
