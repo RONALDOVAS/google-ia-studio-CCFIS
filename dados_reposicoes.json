@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-11T22:30:41.927165+00:00",
+  "updated_at": "2026-09-12T02:33:55.589220+00:00",
   "source": "CGD",
   "records": [
     {
@@ -31,7 +31,7 @@
         "Quinta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:39.958677+00:00"
+      "updated_at": "2026-09-12T02:33:53.954633+00:00"
     },
     {
       "id": "cgd_rep_45fcde56bd98f10bef4872b4b415c953",
@@ -62,7 +62,7 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:40.089735+00:00"
+      "updated_at": "2026-09-12T02:33:54.037235+00:00"
     },
     {
       "id": "cgd_rep_b5c249de8d3d64bab729a75f8099f068",
@@ -93,7 +93,7 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:40.089735+00:00"
+      "updated_at": "2026-09-12T02:33:54.039230+00:00"
     },
     {
       "id": "cgd_rep_024f521b4154bab30e0f114400180639",
@@ -124,7 +124,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:41.623130+00:00"
+      "updated_at": "2026-09-12T02:33:55.349948+00:00"
     },
     {
       "id": "cgd_rep_97e37e5911a6be4e0ffcfcc568879ebf",
@@ -155,7 +155,100 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:41.752873+00:00"
+      "updated_at": "2026-09-12T02:33:55.457317+00:00"
+    },
+    {
+      "id": "cgd_rep_8ab45d487875b3434a13418fa34469f7",
+      "aluno_id": "843238",
+      "aluno_nome": "CAMILA ELLEN DA CUNHA SILVA",
+      "contrato": "843238",
+      "unidade": "matriz",
+      "data": "14/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "14/09/2026",
+        "CAMILA ELLEN DA CUNHA SILVA",
+        "LABORATÓRIO 1",
+        "Segunda-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-12T02:33:55.483247+00:00"
+    },
+    {
+      "id": "cgd_rep_f6f42fe8fecf022987a818d4d95a25c2",
+      "aluno_id": "843238",
+      "aluno_nome": "CAMILA ELLEN DA CUNHA SILVA",
+      "contrato": "843238",
+      "unidade": "matriz",
+      "data": "16/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "16/09/2026",
+        "CAMILA ELLEN DA CUNHA SILVA",
+        "LABORATÓRIO 2",
+        "Quarta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-12T02:33:55.483247+00:00"
+    },
+    {
+      "id": "cgd_rep_2bee4a0a227f3cc94ad526cd411e3c2e",
+      "aluno_id": "843238",
+      "aluno_nome": "CAMILA ELLEN DA CUNHA SILVA",
+      "contrato": "843238",
+      "unidade": "matriz",
+      "data": "18/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "18/09/2026",
+        "CAMILA ELLEN DA CUNHA SILVA",
+        "LABORATÓRIO 2",
+        "Sexta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-12T02:33:55.484245+00:00"
     },
     {
       "id": "cgd_rep_ecd630c2135cafedbf72df4088258095",
@@ -186,7 +279,38 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:41.889511+00:00"
+      "updated_at": "2026-09-12T02:33:55.553064+00:00"
+    },
+    {
+      "id": "cgd_rep_3d91c91118534fe91236d0de30c86e9d",
+      "aluno_id": "885318",
+      "aluno_nome": "BRYAN ADAMS DA SILVA DA SILVA",
+      "contrato": "885318",
+      "unidade": "matriz",
+      "data": "14/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "14/09/2026",
+        "BRYAN ADAMS DA SILVA DA SILVA",
+        "LABORATÓRIO 1",
+        "Segunda-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-12T02:33:55.559125+00:00"
     },
     {
       "id": "cgd_rep_dc30a606791888ba3d0f6dc6cd65d1cb",
@@ -217,7 +341,7 @@
         "Quinta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-11T22:30:41.912428+00:00"
+      "updated_at": "2026-09-12T02:33:55.562119+00:00"
     }
   ]
 }
