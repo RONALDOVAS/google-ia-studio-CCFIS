@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-13T00:48:32.942311+00:00",
+  "updated_at": "2026-09-13T04:05:15.920180+00:00",
   "source": "CGD",
   "records": [
     {
@@ -31,7 +31,7 @@
         "Quinta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:30.844748+00:00"
+      "updated_at": "2026-09-13T04:05:12.669389+00:00"
     },
     {
       "id": "cgd_rep_518d4df21e0bb488182da8bcbdc4dada",
@@ -62,7 +62,7 @@
         "Sábado: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:30.911175+00:00"
+      "updated_at": "2026-09-13T04:05:12.762142+00:00"
     },
     {
       "id": "cgd_rep_b5c249de8d3d64bab729a75f8099f068",
@@ -93,7 +93,7 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:30.949921+00:00"
+      "updated_at": "2026-09-13T04:05:12.809014+00:00"
     },
     {
       "id": "cgd_rep_024f521b4154bab30e0f114400180639",
@@ -124,7 +124,38 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.609980+00:00"
+      "updated_at": "2026-09-13T04:05:15.439225+00:00"
+    },
+    {
+      "id": "cgd_rep_31658bea9692b7bbcb127cf89b8c95df",
+      "aluno_id": "765520",
+      "aluno_nome": "ANA LUIZA DAS GRAÇAS MONTEIRO",
+      "contrato": "765520",
+      "unidade": "matriz",
+      "data": "14/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "14/09/2026",
+        "ANA LUIZA DAS GRAÇAS MONTEIRO",
+        "LABORATÓRIO 1",
+        "Segunda-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-13T04:05:15.511032+00:00"
     },
     {
       "id": "cgd_rep_97e37e5911a6be4e0ffcfcc568879ebf",
@@ -155,7 +186,7 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.760295+00:00"
+      "updated_at": "2026-09-13T04:05:15.648665+00:00"
     },
     {
       "id": "cgd_rep_8ab45d487875b3434a13418fa34469f7",
@@ -186,7 +217,7 @@
         "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.793466+00:00"
+      "updated_at": "2026-09-13T04:05:15.689556+00:00"
     },
     {
       "id": "cgd_rep_f6f42fe8fecf022987a818d4d95a25c2",
@@ -217,7 +248,7 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.793466+00:00"
+      "updated_at": "2026-09-13T04:05:15.689556+00:00"
     },
     {
       "id": "cgd_rep_2bee4a0a227f3cc94ad526cd411e3c2e",
@@ -248,7 +279,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.793466+00:00"
+      "updated_at": "2026-09-13T04:05:15.689556+00:00"
     },
     {
       "id": "cgd_rep_60be99fae8a382572ea72ff3ff1a6027",
@@ -279,7 +310,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.857927+00:00"
+      "updated_at": "2026-09-13T04:05:15.794517+00:00"
     },
     {
       "id": "cgd_rep_7f789378b177176aa09a40e10d1fc4dc",
@@ -310,7 +341,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.857927+00:00"
+      "updated_at": "2026-09-13T04:05:15.795514+00:00"
     },
     {
       "id": "cgd_rep_ecd630c2135cafedbf72df4088258095",
@@ -341,7 +372,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.892413+00:00"
+      "updated_at": "2026-09-13T04:05:15.836405+00:00"
     },
     {
       "id": "cgd_rep_3d91c91118534fe91236d0de30c86e9d",
@@ -372,7 +403,7 @@
         "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.892413+00:00"
+      "updated_at": "2026-09-13T04:05:15.845391+00:00"
     },
     {
       "id": "cgd_rep_f9ff8e7c6f0f152535aa8a56fc8052da",
@@ -403,7 +434,7 @@
         "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T00:48:32.909008+00:00"
+      "updated_at": "2026-09-13T04:05:15.856351+00:00"
     }
   ]
 }
