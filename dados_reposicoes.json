@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-12T10:55:56.137650+00:00",
+  "updated_at": "2026-09-13T00:48:32.942311+00:00",
   "source": "CGD",
   "records": [
     {
@@ -31,17 +31,17 @@
         "Quinta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:54.190022+00:00"
+      "updated_at": "2026-09-13T00:48:30.844748+00:00"
     },
     {
-      "id": "cgd_rep_45fcde56bd98f10bef4872b4b415c953",
-      "aluno_id": "878992",
-      "aluno_nome": "Kauany Vitoria dos Santos Freitas",
-      "contrato": "878992",
+      "id": "cgd_rep_518d4df21e0bb488182da8bcbdc4dada",
+      "aluno_id": "838674",
+      "aluno_nome": "Pablo Davi Silva Neves",
+      "contrato": "838674",
       "unidade": "filial",
-      "data": "10/09/2026",
-      "horario_inicio": "10:00",
-      "horario_fim": "12:00",
+      "data": "12/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
       "duracao_horas": 2,
       "disciplina": "Módulo Geral",
       "professor": "Ronaldo Vasconcelos",
@@ -56,13 +56,13 @@
         ""
       ],
       "valores": [
-        "10/09/2026",
-        "Kauany Vitoria dos Santos Freitas",
+        "12/09/2026",
+        "Pablo Davi Silva Neves",
         "Laboratório 1",
-        "Quinta-feira: 10:00 às 12:00",
+        "Sábado: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:54.275003+00:00"
+      "updated_at": "2026-09-13T00:48:30.911175+00:00"
     },
     {
       "id": "cgd_rep_b5c249de8d3d64bab729a75f8099f068",
@@ -93,7 +93,7 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:54.277039+00:00"
+      "updated_at": "2026-09-13T00:48:30.949921+00:00"
     },
     {
       "id": "cgd_rep_024f521b4154bab30e0f114400180639",
@@ -124,7 +124,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:55.840456+00:00"
+      "updated_at": "2026-09-13T00:48:32.609980+00:00"
     },
     {
       "id": "cgd_rep_97e37e5911a6be4e0ffcfcc568879ebf",
@@ -155,7 +155,7 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:55.977765+00:00"
+      "updated_at": "2026-09-13T00:48:32.760295+00:00"
     },
     {
       "id": "cgd_rep_8ab45d487875b3434a13418fa34469f7",
@@ -186,7 +186,7 @@
         "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:56.008850+00:00"
+      "updated_at": "2026-09-13T00:48:32.793466+00:00"
     },
     {
       "id": "cgd_rep_f6f42fe8fecf022987a818d4d95a25c2",
@@ -217,7 +217,7 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:56.008850+00:00"
+      "updated_at": "2026-09-13T00:48:32.793466+00:00"
     },
     {
       "id": "cgd_rep_2bee4a0a227f3cc94ad526cd411e3c2e",
@@ -248,7 +248,69 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:56.008850+00:00"
+      "updated_at": "2026-09-13T00:48:32.793466+00:00"
+    },
+    {
+      "id": "cgd_rep_60be99fae8a382572ea72ff3ff1a6027",
+      "aluno_id": "869937",
+      "aluno_nome": "ALICE ESMERALDA GOMES LIMA",
+      "contrato": "869937",
+      "unidade": "matriz",
+      "data": "18/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "18/09/2026",
+        "ALICE ESMERALDA GOMES LIMA",
+        "LABORATÓRIO 1",
+        "Sexta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-13T00:48:32.857927+00:00"
+    },
+    {
+      "id": "cgd_rep_7f789378b177176aa09a40e10d1fc4dc",
+      "aluno_id": "869939",
+      "aluno_nome": "AGATHA DOS SANTOS FERREIRA DIAS",
+      "contrato": "869939",
+      "unidade": "matriz",
+      "data": "18/09/2026",
+      "horario_inicio": "16:00",
+      "horario_fim": "18:00",
+      "duracao_horas": 2,
+      "disciplina": "Módulo Geral",
+      "professor": "Ronaldo Vasconcelos",
+      "status": "agendada",
+      "tipo": "laboratorio",
+      "observacao": "Capturado dentro do detalhe real do CGD",
+      "cabecalhos": [
+        "Aula",
+        "Aluno",
+        "Sala",
+        "Horário",
+        ""
+      ],
+      "valores": [
+        "18/09/2026",
+        "AGATHA DOS SANTOS FERREIRA DIAS",
+        "LABORATÓRIO 1",
+        "Sexta-feira: 16:00 às 18:00",
+        "Excluir"
+      ],
+      "updated_at": "2026-09-13T00:48:32.857927+00:00"
     },
     {
       "id": "cgd_rep_ecd630c2135cafedbf72df4088258095",
@@ -279,7 +341,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:56.099124+00:00"
+      "updated_at": "2026-09-13T00:48:32.892413+00:00"
     },
     {
       "id": "cgd_rep_3d91c91118534fe91236d0de30c86e9d",
@@ -310,15 +372,15 @@
         "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:56.106267+00:00"
+      "updated_at": "2026-09-13T00:48:32.892413+00:00"
     },
     {
-      "id": "cgd_rep_dc30a606791888ba3d0f6dc6cd65d1cb",
+      "id": "cgd_rep_f9ff8e7c6f0f152535aa8a56fc8052da",
       "aluno_id": "890828",
       "aluno_nome": "ANDRE LUCAS VIEIRA BARRADAS",
       "contrato": "890828",
       "unidade": "matriz",
-      "data": "10/09/2026",
+      "data": "14/09/2026",
       "horario_inicio": "16:00",
       "horario_fim": "18:00",
       "duracao_horas": 2,
@@ -335,13 +397,13 @@
         ""
       ],
       "valores": [
-        "10/09/2026",
+        "14/09/2026",
         "ANDRE LUCAS VIEIRA BARRADAS",
         "LABORATÓRIO 1",
-        "Quinta-feira: 16:00 às 18:00",
+        "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-12T10:55:56.109259+00:00"
+      "updated_at": "2026-09-13T00:48:32.909008+00:00"
     }
   ]
 }
