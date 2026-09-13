@@ -21,6 +21,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import requests
 from playwright.sync_api import sync_playwright
 
+# O detalhamento usa a mesma pagina autenticada para varias navegacoes.
+# Reduzimos apenas a espera artificial entre navegacoes; nao alteramos timeout,
+# concorrencia do navegador ou a sessao autenticada.
+os.environ.setdefault("CGD_PAGE_WAIT_MS", "100")
+
 import scraper
 import scraper_runner
 
@@ -31,7 +36,7 @@ BATCH_PER_UNIT = max(1, int(os.getenv("CGD_DETAIL_BATCH_PER_UNIT", "750")))
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
 LISTING_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "12")))
 LISTING_TIMEOUT = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
-DETAIL_INTERVAL_MS = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "200")))
+DETAIL_INTERVAL_MS = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "50")))
 HEADLESS = os.getenv("CGD_HEADLESS", "false").lower() in ("1", "true", "yes", "sim")
 SOURCE = "https://app.cgd.com.br/alunos"
 CF_MARKERS = ("sorry, you have been blocked", "you have been blocked", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
@@ -169,6 +174,7 @@ def main():
     print("A listagem do universo e completa; o detalhamento pesado e limitado a 750 por unidade por rodada.", flush=True)
     print("Novos/alterados tem prioridade. O restante continua pendente para a proxima rodada.", flush=True)
     print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
+    print("OTIMIZACAO SEGURA: espera artificial reduzida; sem aumento de concorrencia do navegador.", flush=True)
     print("=" * 96, flush=True)
 
     existing = load_json(DATA_PATH, [])
