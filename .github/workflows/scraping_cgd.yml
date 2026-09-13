@@ -66,19 +66,20 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '50000'
-          CGD_DETAIL_BATCH_PER_UNIT: '500'
+          CGD_DETAIL_BATCH_PER_UNIT: '750'
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
-          CGD_DETAIL_INTERVAL_MS: '200'
+          CGD_DETAIL_INTERVAL_MS: '50'
+          CGD_PAGE_WAIT_MS: '100'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
           Write-Host '=== CGD: MODO OPERACIONAL ESCALADO ==='
-          Write-Host '=== UNIVERSO COMPLETO + LOTE DE 500 POR UNIDADE ==='
+          Write-Host '=== UNIVERSO COMPLETO + LOTE DE 750 POR UNIDADE ==='
           Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM ==='
           Write-Host '=== BROWSER HEADED FORA DA TELA; SEM INTERAÇÃO MANUAL ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
@@ -125,8 +126,8 @@ jobs:
               capturados = int(info.get('capturados_no_lote', 0))
               if total != len(universe) or total <= 0:
                   raise SystemExit(f'Falha: universo invalido na {unidade}: total={total} ids={len(universe)}')
-              if lote > 500:
-                  raise SystemExit(f'Falha: lote acima de 500 na {unidade}: {lote}')
+              if lote > 750:
+                  raise SystemExit(f'Falha: lote acima de 750 na {unidade}: {lote}')
               if capturados < 0 or capturados > lote:
                   raise SystemExit(f'Falha: captura do lote invalida na {unidade}: {capturados}/{lote}')
               base_unit = set()
