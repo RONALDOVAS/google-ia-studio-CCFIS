@@ -1,16 +1,11 @@
 """Captura coletiva da tela CGD de frequencias a registrar.
 
-Este modulo nao inventa seletores de sala/data/horario. Ele navega pela rota
-real descoberta no menu autenticado, registra a URL efetivamente encontrada,
-e extrai tabelas/texto renderizados para posterior cruzamento com o universo.
-A captura e independente do detalhamento individual de cada contrato.
+A captura deve reutilizar a pagina ja autenticada pelo sincronizador principal.
+Nao abre outro navegador, nao executa novo login e nao cria uma segunda sessao.
 """
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-
-from playwright.sync_api import sync_playwright
 
 import scraper
 
@@ -35,7 +30,7 @@ def snapshot(page, unidade):
     }
 
 
-def find_route(page, unidade):
+def _candidate_routes(page):
     candidates = []
     for text, href in scraper.links(page):
         hay = norm(f"{text} {href}").lower()
@@ -45,10 +40,33 @@ def find_route(page, unidade):
         hay = norm(f"{text} {href}").lower()
         if "frequenc" in hay:
             candidates.append(href)
+    return list(dict.fromkeys(candidates))
 
-    for href in dict.fromkeys(candidates):
-        if scraper.open_page(page, href, unidade, "frequencias_coletivas", 800):
-            return snapshot(page, unidade)
+
+def capture_on_authenticated_page(page, unidade):
+    """Captura a rota coletiva usando a sessao autenticada existente.
+
+    Retorna um snapshot estruturado e restaura a pagina para a URL original
+    quando possivel. Nenhum login ou novo contexto de navegador e criado aqui.
+    """
+    original_url = page.url
+    last_error = None
+
+    for href in _candidate_routes(page):
+        try:
+            if not scraper.open_page(page, href, unidade, "frequencias_coletivas", 800):
+                continue
+            item = snapshot(page, unidade)
+            if item["url"] and (item["texto"] or item["tabelas"]):
+                return item
+        except Exception as exc:
+            last_error = repr(exc)
+
+    if original_url:
+        try:
+            scraper.open_page(page, original_url, unidade, "retorno_pos_frequencias_coletivas", 300)
+        except Exception:
+            pass
 
     return {
         "source": "CGD",
@@ -58,41 +76,32 @@ def find_route(page, unidade):
         "texto": "",
         "tabelas": [],
         "erro": "ROTA_FREQUENCIAS_A_REGISTRAR_NAO_ENCONTRADA",
+        "detalhe": last_error,
     }
 
 
-def main():
-    resultado = {"source": "CGD", "gerado_em": datetime.now(timezone.utc).isoformat(), "unidades": []}
-    headless = os.getenv("CGD_HEADLESS", "false").lower() in ("1", "true", "yes", "sim")
-
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(channel="msedge", headless=headless)
+def capture_and_persist(page, unidade, output=OUTPUT):
+    item = capture_on_authenticated_page(page, unidade)
+    existing = {"source": "CGD", "gerado_em": datetime.now(timezone.utc).isoformat(), "unidades": []}
+    if output.exists():
         try:
-            for unidade in ("matriz", "filial"):
-                cfg = scraper.CONFIG[unidade]
-                context = browser.new_context()
-                page = context.new_page()
-                try:
-                    scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-                    item = find_route(page, unidade)
-                    resultado["unidades"].append(item)
-                    print(
-                        f"[{unidade}] FREQUENCIA_COLETIVA_URL={item.get('url')} "
-                        f"TABELAS={len(item.get('tabelas') or [])}",
-                        flush=True,
-                    )
-                finally:
-                    context.close()
-        finally:
-            browser.close()
+            existing = json.loads(output.read_text(encoding="utf-8"))
+        except Exception:
+            pass
 
-    OUTPUT.write_text(json.dumps(resultado, ensure_ascii=False, indent=2), encoding="utf-8")
-    ok = sum(bool(item.get("url")) for item in resultado["unidades"])
-    print(f"ROTAS_COLETIVAS_CAPTURADAS={ok}/{len(resultado['unidades'])}", flush=True)
-
-    if ok == 0:
-        raise SystemExit("Nenhuma rota coletiva de frequencias foi encontrada.")
+    unidades = [x for x in existing.get("unidades", []) if x.get("unidade") != unidade]
+    unidades.append(item)
+    existing["unidades"] = unidades
+    output.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(
+        f"[{unidade}] FREQUENCIA_COLETIVA_URL={item.get('url')} "
+        f"TABELAS={len(item.get('tabelas') or [])}",
+        flush=True,
+    )
+    return item
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        "Este modulo deve ser chamado pelo sincronizador principal com uma pagina autenticada."
+    )
