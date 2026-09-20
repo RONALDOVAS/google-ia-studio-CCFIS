@@ -22,9 +22,27 @@ def _launch_offscreen(self, *args, **kwargs):
 BrowserType.launch = _launch_offscreen
 print("PATCH_BROWSER_OFFSCREEN=OK", flush=True)
 
-# The operational workflow already imports this runtime patch before starting
-# scraper_sync_incremental.py. Chain the real CGD frequency-route fallback here
-# so the workflow needs no second manual import or dispatch change.
+# Integra a captura coletiva na mesma sessao autenticada do sincronizador.
+# O patch e aplicado antes da importacao/execucao do scraper principal.
+try:
+    import scraper
+    from frequencia_coletiva_cgd import capture_and_persist
+
+    _original_login = scraper.login
+
+    def _login_with_collective_capture(page, user, password, unidade):
+        result = _original_login(page, user, password, unidade)
+        try:
+            capture_and_persist(page, unidade)
+        except Exception as exc:
+            print(f"[{unidade}] FREQUENCIA_COLETIVA_ERRO={exc!r}", flush=True)
+        return result
+
+    scraper.login = _login_with_collective_capture
+    print("PATCH_FREQUENCIA_COLETIVA_SESSAO=OK", flush=True)
+except Exception as exc:
+    print(f"PATCH_FREQUENCIA_COLETIVA_SESSAO_ERRO={exc!r}", flush=True)
+
 try:
     import frequency_runtime_patch  # noqa: F401
 except Exception as exc:
