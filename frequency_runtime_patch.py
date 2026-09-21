@@ -47,6 +47,8 @@ def _contract_bundle_with_real_frequency(page, cid, u, reps):
         aluno["presencas"] = freq.get("presencas", aluno.get("presencas", 0))
         aluno["frequencia_raw"] = freq.get("registros") or aluno.get("frequencia_raw") or []
         aluno["frequencia_reposicoes_cgd"] = freq.get("reposicoes", 0)
+        datas = [str(r.get("data_iso") or "").strip() for r in (freq.get("registros") or []) if str(r.get("data_iso") or "").strip()]
+        aluno["ultimo_acesso"] = max(datas) if datas else None
         aluno["frequencia_status"] = (
             "COM_FREQUENCIA_REAL" if aluno["frequencia_raw"] else "SEM_FREQUENCIA_A_INVESTIGAR"
         )
