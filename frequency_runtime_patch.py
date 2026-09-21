@@ -41,16 +41,21 @@ def _parse_frequency(page, cid):
 
 def _contract_bundle_with_real_frequency(page, cid, u, reps):
     aluno = _original_contract_bundle(page, cid, u, reps)
-    freq = getattr(page, "_cfis_last_frequency", None) or {}
-    if aluno and freq:
+    freq = getattr(page, "_cfis_last_frequency", None)
+    if aluno and isinstance(freq, dict):
+        registros = freq.get("registros") or []
         aluno["faltas"] = freq.get("faltas", aluno.get("faltas", 0))
         aluno["presencas"] = freq.get("presencas", aluno.get("presencas", 0))
-        aluno["frequencia_raw"] = freq.get("registros") or aluno.get("frequencia_raw") or []
+        aluno["frequencia_raw"] = registros
         aluno["frequencia_reposicoes_cgd"] = freq.get("reposicoes", 0)
-        datas = [str(r.get("data_iso") or "").strip() for r in (freq.get("registros") or []) if str(r.get("data_iso") or "").strip()]
+        datas = [
+            str(r.get("data_iso") or "").strip()
+            for r in registros
+            if isinstance(r, dict) and str(r.get("data_iso") or "").strip()
+        ]
         aluno["ultimo_acesso"] = max(datas) if datas else None
         aluno["frequencia_status"] = (
-            "COM_FREQUENCIA_REAL" if aluno["frequencia_raw"] else "SEM_FREQUENCIA_A_INVESTIGAR"
+            "COM_FREQUENCIA_REAL" if registros else "SEM_FREQUENCIA_A_INVESTIGAR"
         )
     return aluno
 
