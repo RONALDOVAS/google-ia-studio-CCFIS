@@ -73,6 +73,7 @@ jobs:
           CGD_DETAIL_TIMEOUT_S: '45'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_INTERVAL_MS: '50'
+          CGD_DETAIL_WORKERS: '4'
           CGD_PAGE_WAIT_MS: '100'
           CGD_HEADLESS: 'false'
           CGD_DIAGNOSTICO: '0'
@@ -84,24 +85,36 @@ jobs:
           Write-Host '=== BROWSER HEADED FORA DA TELA; SEM INTERAÇÃO MANUAL ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
-      - name: Auditar frequências reais, último acesso e Frequências a Registrar
-        continue-on-error: true
+      - name: Validar frequências reais capturadas no lote
         shell: powershell
-        env:
-          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
-          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
-          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
-          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
-          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
-          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
-          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          CGD_DETAIL_TIMEOUT_S: '45'
-          CGD_PAGE_WAIT_MS: '100'
-          CGD_DIAGNOSTICO: '0'
-          PYTHONUNBUFFERED: '1'
-        run: python -u auditar_frequencias_cgd.py
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          snap = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          total = 0
+          falhas = []
+          for unidade, info in snap.get('unidades', {}).items():
+              ids = set(info.get('contratos_capturados_no_lote', []))
+              for aluno in dados:
+                  cid = str(aluno.get('contrato') or aluno.get('cgd_matricula_id') or '').strip()
+                  if str(aluno.get('unidade') or '').lower() != unidade or cid not in ids:
+                      continue
+                  registros = [r for r in (aluno.get('frequencia_raw') or []) if r.get('classificacao') in ('presenca','falta')]
+                  presencas = sum(r.get('classificacao') == 'presenca' for r in registros)
+                  faltas = sum(r.get('classificacao') == 'falta' for r in registros)
+                  if len(registros) != presencas + faltas:
+                      falhas.append((unidade, cid, len(registros), presencas, faltas))
+                  total += 1
+          print(f'FREQUENCIAS_REAIS_VALIDANDO_LOTE={total}')
+          print(f'FREQUENCIAS_REAIS_ERROS_MATEMATICOS={len(falhas)}')
+          if falhas:
+              raise SystemExit(f'Falha na matematica de frequencia: {falhas[:10]}')
+          if total == 0:
+              raise SystemExit('Falha: nenhum detalhe do lote possui frequencia real persistida.')
+          print('VALIDACAO_FREQUENCIA_LOTE=OK')
+          '@ | python
       - name: Validar lote persistido e avanço incremental
         shell: powershell
         run: |
