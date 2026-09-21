@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-13T16:49:48.471930+00:00",
+  "updated_at": "2026-09-21T00:57:36.308836+00:00",
   "source": "CGD",
   "records": [
     {
@@ -31,38 +31,7 @@
         "Quinta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:45.774578+00:00"
-    },
-    {
-      "id": "cgd_rep_518d4df21e0bb488182da8bcbdc4dada",
-      "aluno_id": "838674",
-      "aluno_nome": "Pablo Davi Silva Neves",
-      "contrato": "838674",
-      "unidade": "filial",
-      "data": "12/09/2026",
-      "horario_inicio": "16:00",
-      "horario_fim": "18:00",
-      "duracao_horas": 2,
-      "disciplina": "Módulo Geral",
-      "professor": "Ronaldo Vasconcelos",
-      "status": "agendada",
-      "tipo": "laboratorio",
-      "observacao": "Capturado dentro do detalhe real do CGD",
-      "cabecalhos": [
-        "Aula",
-        "Aluno",
-        "Sala",
-        "Horário",
-        ""
-      ],
-      "valores": [
-        "12/09/2026",
-        "Pablo Davi Silva Neves",
-        "Laboratório 1",
-        "Sábado: 16:00 às 18:00",
-        "Excluir"
-      ],
-      "updated_at": "2026-09-13T16:49:45.836918+00:00"
+      "updated_at": "2026-09-21T00:57:33.462844+00:00"
     },
     {
       "id": "cgd_rep_b5c249de8d3d64bab729a75f8099f068",
@@ -93,7 +62,7 @@
         "Quinta-feira: 10:00 às 12:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:45.857546+00:00"
+      "updated_at": "2026-09-21T00:57:33.595941+00:00"
     },
     {
       "id": "cgd_rep_024f521b4154bab30e0f114400180639",
@@ -124,69 +93,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:48.084526+00:00"
-    },
-    {
-      "id": "cgd_rep_31658bea9692b7bbcb127cf89b8c95df",
-      "aluno_id": "765520",
-      "aluno_nome": "ANA LUIZA DAS GRAÇAS MONTEIRO",
-      "contrato": "765520",
-      "unidade": "matriz",
-      "data": "14/09/2026",
-      "horario_inicio": "16:00",
-      "horario_fim": "18:00",
-      "duracao_horas": 2,
-      "disciplina": "Módulo Geral",
-      "professor": "Ronaldo Vasconcelos",
-      "status": "agendada",
-      "tipo": "laboratorio",
-      "observacao": "Capturado dentro do detalhe real do CGD",
-      "cabecalhos": [
-        "Aula",
-        "Aluno",
-        "Sala",
-        "Horário",
-        ""
-      ],
-      "valores": [
-        "14/09/2026",
-        "ANA LUIZA DAS GRAÇAS MONTEIRO",
-        "LABORATÓRIO 1",
-        "Segunda-feira: 16:00 às 18:00",
-        "Excluir"
-      ],
-      "updated_at": "2026-09-13T16:49:48.155576+00:00"
-    },
-    {
-      "id": "cgd_rep_97e37e5911a6be4e0ffcfcc568879ebf",
-      "aluno_id": "832723",
-      "aluno_nome": "ALICE DA SILVA BARBOSA",
-      "contrato": "832723",
-      "unidade": "matriz",
-      "data": "09/09/2026",
-      "horario_inicio": "16:00",
-      "horario_fim": "18:00",
-      "duracao_horas": 2,
-      "disciplina": "Módulo Geral",
-      "professor": "Ronaldo Vasconcelos",
-      "status": "agendada",
-      "tipo": "laboratorio",
-      "observacao": "Capturado dentro do detalhe real do CGD",
-      "cabecalhos": [
-        "Aula",
-        "Aluno",
-        "Sala",
-        "Horário",
-        ""
-      ],
-      "valores": [
-        "09/09/2026",
-        "ALICE DA SILVA BARBOSA",
-        "LABORATÓRIO 1",
-        "Quarta-feira: 16:00 às 18:00",
-        "Excluir"
-      ],
-      "updated_at": "2026-09-13T16:49:48.279006+00:00"
+      "updated_at": "2026-09-21T00:57:35.892920+00:00"
     },
     {
       "id": "cgd_rep_8ab45d487875b3434a13418fa34469f7",
@@ -217,7 +124,7 @@
         "Segunda-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:48.305188+00:00"
+      "updated_at": "2026-09-21T00:57:36.125876+00:00"
     },
     {
       "id": "cgd_rep_f6f42fe8fecf022987a818d4d95a25c2",
@@ -248,7 +155,7 @@
         "Quarta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:48.305188+00:00"
+      "updated_at": "2026-09-21T00:57:36.125876+00:00"
     },
     {
       "id": "cgd_rep_2bee4a0a227f3cc94ad526cd411e3c2e",
@@ -279,38 +186,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:48.305188+00:00"
-    },
-    {
-      "id": "cgd_rep_60be99fae8a382572ea72ff3ff1a6027",
-      "aluno_id": "869937",
-      "aluno_nome": "ALICE ESMERALDA GOMES LIMA",
-      "contrato": "869937",
-      "unidade": "matriz",
-      "data": "18/09/2026",
-      "horario_inicio": "16:00",
-      "horario_fim": "18:00",
-      "duracao_horas": 2,
-      "disciplina": "Módulo Geral",
-      "professor": "Ronaldo Vasconcelos",
-      "status": "agendada",
-      "tipo": "laboratorio",
-      "observacao": "Capturado dentro do detalhe real do CGD",
-      "cabecalhos": [
-        "Aula",
-        "Aluno",
-        "Sala",
-        "Horário",
-        ""
-      ],
-      "valores": [
-        "18/09/2026",
-        "ALICE ESMERALDA GOMES LIMA",
-        "LABORATÓRIO 1",
-        "Sexta-feira: 16:00 às 18:00",
-        "Excluir"
-      ],
-      "updated_at": "2026-09-13T16:49:48.390763+00:00"
+      "updated_at": "2026-09-21T00:57:36.125876+00:00"
     },
     {
       "id": "cgd_rep_7f789378b177176aa09a40e10d1fc4dc",
@@ -341,7 +217,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:48.391758+00:00"
+      "updated_at": "2026-09-21T00:57:36.209204+00:00"
     },
     {
       "id": "cgd_rep_ecd630c2135cafedbf72df4088258095",
@@ -372,69 +248,7 @@
         "Sexta-feira: 16:00 às 18:00",
         "Excluir"
       ],
-      "updated_at": "2026-09-13T16:49:48.421693+00:00"
-    },
-    {
-      "id": "cgd_rep_3d91c91118534fe91236d0de30c86e9d",
-      "aluno_id": "885318",
-      "aluno_nome": "BRYAN ADAMS DA SILVA DA SILVA",
-      "contrato": "885318",
-      "unidade": "matriz",
-      "data": "14/09/2026",
-      "horario_inicio": "16:00",
-      "horario_fim": "18:00",
-      "duracao_horas": 2,
-      "disciplina": "Módulo Geral",
-      "professor": "Ronaldo Vasconcelos",
-      "status": "agendada",
-      "tipo": "laboratorio",
-      "observacao": "Capturado dentro do detalhe real do CGD",
-      "cabecalhos": [
-        "Aula",
-        "Aluno",
-        "Sala",
-        "Horário",
-        ""
-      ],
-      "valores": [
-        "14/09/2026",
-        "BRYAN ADAMS DA SILVA DA SILVA",
-        "LABORATÓRIO 1",
-        "Segunda-feira: 16:00 às 18:00",
-        "Excluir"
-      ],
-      "updated_at": "2026-09-13T16:49:48.421693+00:00"
-    },
-    {
-      "id": "cgd_rep_f9ff8e7c6f0f152535aa8a56fc8052da",
-      "aluno_id": "890828",
-      "aluno_nome": "ANDRE LUCAS VIEIRA BARRADAS",
-      "contrato": "890828",
-      "unidade": "matriz",
-      "data": "14/09/2026",
-      "horario_inicio": "16:00",
-      "horario_fim": "18:00",
-      "duracao_horas": 2,
-      "disciplina": "Módulo Geral",
-      "professor": "Ronaldo Vasconcelos",
-      "status": "agendada",
-      "tipo": "laboratorio",
-      "observacao": "Capturado dentro do detalhe real do CGD",
-      "cabecalhos": [
-        "Aula",
-        "Aluno",
-        "Sala",
-        "Horário",
-        ""
-      ],
-      "valores": [
-        "14/09/2026",
-        "ANDRE LUCAS VIEIRA BARRADAS",
-        "LABORATÓRIO 1",
-        "Segunda-feira: 16:00 às 18:00",
-        "Excluir"
-      ],
-      "updated_at": "2026-09-13T16:49:48.438373+00:00"
+      "updated_at": "2026-09-21T00:57:36.242267+00:00"
     }
   ]
 }
