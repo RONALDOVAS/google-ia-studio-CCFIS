@@ -110,3 +110,8 @@ def _patch_playwright_channel():
 
 _patch_playwright_channel()
 _patch()
+
+try:
+    import frequency_runtime_patch  # noqa: F401
+except Exception as exc:
+    print(f"PATCH_FREQUENCIA_REAL_ERRO={exc!r}", flush=True)
