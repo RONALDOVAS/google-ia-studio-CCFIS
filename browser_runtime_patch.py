@@ -22,9 +22,6 @@ def _launch_offscreen(self, *args, **kwargs):
 BrowserType.launch = _launch_offscreen
 print("PATCH_BROWSER_OFFSCREEN=OK", flush=True)
 
-# The operational workflow already imports this runtime patch before starting
-# scraper_sync_incremental.py. Chain the real CGD frequency-route fallback here
-# so the workflow needs no second manual import or dispatch change.
 try:
     import frequency_runtime_patch  # noqa: F401
 except Exception as exc:

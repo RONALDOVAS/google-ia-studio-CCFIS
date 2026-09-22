@@ -14,7 +14,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from time import perf_counter
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -37,6 +37,8 @@ LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
 LISTING_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "12")))
 LISTING_TIMEOUT = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
 DETAIL_INTERVAL_MS = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "50")))
+DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
+PENDING_FREQUENCY_PATH = Path("dados_frequencias_a_registrar.json")
 HEADLESS = os.getenv("CGD_HEADLESS", "false").lower() in ("1", "true", "yes", "sim")
 SOURCE = "https://app.cgd.com.br/alunos"
 CF_MARKERS = ("sorry, you have been blocked", "you have been blocked", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
@@ -130,6 +132,22 @@ def discover_universe(page, unidade):
     return found, signatures, errors, elapsed
 
 
+def capture_pending_frequency_route(page, unidade):
+    candidates = []
+    for text, href in scraper.links(page):
+        hay = norm(f"{text} {href}").lower()
+        if "frequenc" in hay and any(x in hay for x in ("registr", "pend", "lanç", "lanc")):
+            candidates.append(href)
+    if not candidates:
+        for text, href in scraper.links(page):
+            if "frequenc" in norm(f"{text} {href}").lower():
+                candidates.append(href)
+    for href in dict.fromkeys(candidates):
+        if scraper.open_page(page, href, unidade, "frequencias_a_registrar", 500):
+            return {"unidade": unidade, "url": page.url, "ok": True, "texto": scraper.body(page)[:50000], "tabelas": [{"cabecalhos": h, "linhas": r} for h, r in scraper.table_data(page)], "capturado_em": datetime.now(timezone.utc).isoformat()}
+    return {"unidade": unidade, "url": None, "ok": False, "texto": "", "tabelas": [], "capturado_em": datetime.now(timezone.utc).isoformat()}
+
+
 def load_json(path, default):
     if not path.exists():
         return default
@@ -174,7 +192,7 @@ def main():
     print("A listagem do universo e completa; o detalhamento pesado e limitado a 750 por unidade por rodada.", flush=True)
     print("Novos/alterados tem prioridade. O restante continua pendente para a proxima rodada.", flush=True)
     print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
-    print("OTIMIZACAO SEGURA: espera artificial reduzida; sem aumento de concorrencia do navegador.", flush=True)
+    print("OTIMIZACAO: detalhamento paralelo controlado por processos independentes.", flush=True)
     print("=" * 96, flush=True)
 
     existing = load_json(DATA_PATH, [])
@@ -190,6 +208,7 @@ def main():
     snapshot = {"gerado_em": datetime.now(timezone.utc).isoformat(), "regra": "UNIVERSO_COMPLETO_LOTES_750_INCREMENTAL", "unidades": {}}
     totals = {"universo": 0, "novos": 0, "alterados": 0, "capturados": 0, "sem_mudanca": 0, "erros_detalhe": 0}
     performance = {"discovery": {}, "comparison": {}, "detail": {}, "persistence": 0.0, "total": 0.0}
+    pending_frequency = []
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
@@ -201,6 +220,7 @@ def main():
                 page = context.new_page()
                 try:
                     scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
+                    pending_frequency.append(capture_pending_frequency_route(page, unidade))
                     contracts, signatures, listing_errors, discovery_elapsed = discover_universe(page, unidade)
                     performance["discovery"][unidade] = discovery_elapsed
 
@@ -220,17 +240,35 @@ def main():
                     detail_started = perf_counter()
                     captured = 0
                     detail_errors = []
-                    for idx, cid in enumerate(targets, 1):
-                        try:
-                            aluno = detail(page, unidade, cid, reps, signatures[cid])
-                            by_id[(unidade, cid)] = aluno
-                            captured += 1
-                            print(f"[{unidade}] DETALHE_OK {idx}/{len(targets)} cid={cid}", flush=True)
-                        except Exception as exc:
-                            detail_errors.append((cid, repr(exc)))
-                            print(f"[{unidade}] DETALHE_ERRO cid={cid}: {exc!r}", flush=True)
-                        if DETAIL_INTERVAL_MS and idx < len(targets):
-                            page.wait_for_timeout(DETAIL_INTERVAL_MS)
+                    captured_ids = []
+                    storage_state = Path("edge_cgd_profiles") / f"{unidade}_incremental_storage_state.json"
+                    context.storage_state(path=str(storage_state))
+                    workers = min(DETAIL_WORKERS, len(targets)) if targets else 0
+                    print(f"[{unidade}] INICIO DETALHAMENTO PARALELO: {len(targets)} contratos / {workers} workers", flush=True)
+                    if targets:
+                        args = [(unidade, cfg, cid, reps, str(storage_state), 1) for cid in targets]
+                        with ProcessPoolExecutor(max_workers=workers) as pool:
+                            futures = [pool.submit(scraper.detail_worker, arg) for arg in args]
+                            for idx, future in enumerate(as_completed(futures), 1):
+                                try:
+                                    result = future.result()
+                                except Exception as exc:
+                                    result = {"ok": False, "cid": "desconhecido", "error": repr(exc)}
+                                cid = str(result.get("cid") or "").strip()
+                                if result.get("ok") and result.get("aluno") and cid in contracts:
+                                    aluno = result["aluno"]
+                                    aluno["unidade"] = unidade
+                                    aluno["assinatura_universo_cgd"] = signatures[cid]
+                                    aluno["sincronizado_em"] = datetime.now(timezone.utc).isoformat()
+                                    by_id[(unidade, cid)] = aluno
+                                    captured += 1
+                                    captured_ids.append(cid)
+                                    print(f"[{unidade}] DETALHE_OK {idx}/{len(futures)} cid={cid} freq={len(aluno.get('frequencia_raw') or [])}", flush=True)
+                                else:
+                                    detail_errors.append((cid or "desconhecido", str(result.get("error") or "resultado invalido")))
+                                    print(f"[{unidade}] DETALHE_ERRO cid={cid or 'desconhecido'}: {result.get('error') or 'resultado invalido'}", flush=True)
+                                if idx % max(1, workers) == 0 or idx == len(futures):
+                                    print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
                     print(f"[{unidade}] DETALHAMENTO TEMPO={detail_elapsed:.2f}s CAPTURADOS={captured} ERROS={len(detail_errors)}", flush=True)
@@ -249,6 +287,7 @@ def main():
                         "sem_mudanca": len(unchanged_ids),
                         "lote_planejado": len(targets),
                         "capturados_no_lote": captured,
+                        "contratos_capturados_no_lote": sorted(captured_ids),
                         "erros_detalhe": len(detail_errors),
                         "paginas_com_erro": listing_errors,
                         "pendentes_apos_lote": max(0, len(contracts) - sum(1 for cid in contracts if current[cid] is not None) - captured),
@@ -277,6 +316,7 @@ def main():
     persistence_started = perf_counter()
     atomic_write(DATA_PATH, merged)
     atomic_write(SNAPSHOT_PATH, snapshot)
+    atomic_write(PENDING_FREQUENCY_PATH, {"source": "CGD", "unidades": pending_frequency, "capturado_em": datetime.now(timezone.utc).isoformat()})
     performance["persistence"] = perf_counter() - persistence_started
     print(f"PERSISTENCIA TEMPO={performance['persistence']:.2f}s", flush=True)
 

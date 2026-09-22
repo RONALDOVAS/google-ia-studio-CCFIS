@@ -401,8 +401,9 @@ def validate_real_detail(aluno, cid, u):
     nome = norm(aluno.get("nome"))
     if not nome or nome == f"Contrato {cid}":
         raise RuntimeError(f"[{u}] ALUNO_NAO_IDENTIFICADO cid={cid}")
-    if not (aluno.get("frequencia_raw") or []):
-        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_CAPTURADA cid={cid}")
+    status = str(aluno.get("frequencia_status") or "").strip()
+    if status not in ("COM_FREQUENCIA_REAL", "SEM_FREQUENCIA_A_INVESTIGAR"):
+        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_PROCESSADA cid={cid} status={status!r}")
     return aluno
 
 
