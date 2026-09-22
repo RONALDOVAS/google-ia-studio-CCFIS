@@ -9,13 +9,22 @@ msedge do scraper legado sem alterar a logica de coleta.
 """
 
 from pathlib import Path
+import importlib
 import re
+import sys
 from urllib.parse import urlparse
 
 
+# O runner pode iniciar o processo com um working directory diferente da raiz
+# do repositorio. O carregamento de modulos criticos nao pode depender apenas
+# do cwd nem de um sys.path implicitamente configurado pelo Python.
+_PROJECT_ROOT = Path(__file__).resolve().parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 # O estado autenticado e persistido por unidade. O diretorio deve ser criado
 # pelo proprio processo, independentemente do diretorio de trabalho do runner.
-Path("edge_cgd_profiles").mkdir(parents=True, exist_ok=True)
+(_PROJECT_ROOT / "edge_cgd_profiles").mkdir(parents=True, exist_ok=True)
 
 
 def _patch():
@@ -118,6 +127,7 @@ _patch_playwright_channel()
 _patch()
 
 try:
-    import frequency_runtime_patch  # noqa: F401
+    _frequency_module = importlib.import_module("frequency_runtime_patch")
+    print(f"PATCH_FREQUENCIA_REAL=OK path={getattr(_frequency_module, '__file__', 'desconhecido')}", flush=True)
 except Exception as exc:
-    print(f"PATCH_FREQUENCIA_REAL_ERRO={exc!r}", flush=True)
+    print(f"PATCH_FREQUENCIA_REAL_ERRO={type(exc).__name__}: {exc!r} root={_PROJECT_ROOT}", flush=True)
