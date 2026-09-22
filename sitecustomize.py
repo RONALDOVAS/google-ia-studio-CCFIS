@@ -8,8 +8,14 @@ Tambem força o Playwright a usar o Chromium empacotado, removendo o canal
 msedge do scraper legado sem alterar a logica de coleta.
 """
 
+from pathlib import Path
 import re
 from urllib.parse import urlparse
+
+
+# O estado autenticado e persistido por unidade. O diretorio deve ser criado
+# pelo proprio processo, independentemente do diretorio de trabalho do runner.
+Path("edge_cgd_profiles").mkdir(parents=True, exist_ok=True)
 
 
 def _patch():
