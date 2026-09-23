@@ -29,6 +29,12 @@ os.environ.setdefault("CGD_PAGE_WAIT_MS", "100")
 import scraper
 import scraper_runner
 
+try:
+    import importlib
+    importlib.import_module("frequency_runtime_patch")
+except Exception as exc:
+    raise RuntimeError(f"PATCH_FREQUENCIA_REAL_ERRO: {type(exc).__name__}: {exc}") from exc
+
 DATA_PATH = Path("dados_alunos.json")
 SNAPSHOT_PATH = Path("dados_universo_cgd.json")
 MAX_CONTRACTS = max(1, int(os.getenv("CGD_MAX_CONTRACTS", "10000")))
