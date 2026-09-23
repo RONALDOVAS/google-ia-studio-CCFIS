@@ -16,10 +16,12 @@ CONFIG = {
     "matriz": {"usuario": os.getenv("CGD_USER_MATRIZ"), "senha": os.getenv("CGD_PASS_MATRIZ"), "destino": os.getenv("CGD_MATRIZ_URL")},
     "filial": {"usuario": os.getenv("CGD_USER_FILIAL"), "senha": os.getenv("CGD_PASS_FILIAL"), "destino": os.getenv("CGD_FILIAL_URL")},
 }
-JSON_PATH = Path("dados_alunos.json")
-DIAGNOSTICO_DIR = Path("diagnostico_scraping")
+PROJECT_ROOT = Path(__file__).resolve().parent
+JSON_PATH = PROJECT_ROOT / "dados_alunos.json"
+DIAGNOSTICO_DIR = PROJECT_ROOT / "diagnostico_scraping"
 DIAGNOSTICO_DIR.mkdir(parents=True, exist_ok=True)
-EDGE_PROFILE_BASE = Path(os.getenv("EDGE_PROFILE_DIR") or "edge_cgd_profiles")
+EDGE_PROFILE_BASE = Path(os.getenv("EDGE_PROFILE_DIR") or str(PROJECT_ROOT / "edge_cgd_profiles"))
+EDGE_PROFILE_BASE.mkdir(parents=True, exist_ok=True)
 MAX_CONTRACTS = int(os.getenv("CGD_MAX_CONTRACTS", "5000"))
 MAX_PAGES = int(os.getenv("CGD_MAX_LINK_PAGES", "300"))
 DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
