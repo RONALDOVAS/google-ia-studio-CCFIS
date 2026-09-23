@@ -111,6 +111,10 @@ def contract_url(cid):
 
 
 def child_url(cid, k):
+    # Rota real da frequência individual no CGD inclui /list.
+    # Sem esse sufixo o contrato abre, mas a grade de frequência não é carregada.
+    if k == "frequencias":
+        return f"{CGD_URL.rstrip('/')}/contratos/frequencias/{cid}/list"
     return f"{CGD_URL.rstrip('/')}/contratos/{k}/{cid}"
 
 
