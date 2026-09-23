@@ -241,7 +241,10 @@ def main():
                     captured = 0
                     detail_errors = []
                     captured_ids = []
-                    storage_state = Path("edge_cgd_profiles") / f"{unidade}_incremental_storage_state.json"
+                    project_root = Path(__file__).resolve().parent
+                    storage_dir = project_root / "edge_cgd_profiles"
+                    storage_dir.mkdir(parents=True, exist_ok=True)
+                    storage_state = storage_dir / f"{unidade}_incremental_storage_state.json"
                     context.storage_state(path=str(storage_state))
                     workers = min(DETAIL_WORKERS, len(targets)) if targets else 0
                     print(f"[{unidade}] INICIO DETALHAMENTO PARALELO: {len(targets)} contratos / {workers} workers", flush=True)
