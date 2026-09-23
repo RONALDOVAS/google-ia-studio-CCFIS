@@ -30,7 +30,10 @@ jobs:
           python -m playwright install chromium
       - name: Validar parser de frequência determinístico
         shell: powershell
-        run: python -m unittest -v test_frequencia_parser_cgd.py
+        run: |
+          python -m unittest -v test_frequencia_parser_cgd.py
+          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py sitecustomize.py frequency_runtime_patch.py frequencia_parser_cgd.py
+          python -c "import sitecustomize; import frequency_runtime_patch; print('PREFLIGHT_IMPORTS_CGD=OK')"
       - name: Validar Secrets obrigatórios
         shell: powershell
         env:
@@ -177,11 +180,9 @@ jobs:
           print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
           '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
-        continue-on-error: true
         shell: powershell
         run: python build_reposicoes_from_alunos.py
       - name: Validar reposições capturadas
-        continue-on-error: true
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
