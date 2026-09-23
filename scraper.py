@@ -408,6 +408,7 @@ def validate_real_detail(aluno, cid, u):
 
 
 def detail_worker(args):
+    u, cfg, cid, reps, storage_state, attempt = args
     # ProcessPool no Windows pode iniciar o filho com um sys.path diferente.
     # O patch de frequência real precisa ser carregado explicitamente antes
     # de contract_bundle, sem depender de sitecustomize/cwd.
@@ -420,8 +421,6 @@ def detail_worker(args):
         importlib.import_module("frequency_runtime_patch")
     except Exception as exc:
         return {"ok": False, "cid": cid, "error": f"PATCH_FREQUENCIA_REAL_ERRO: {type(exc).__name__}: {exc}", "attempt": attempt}
-
-    u, cfg, cid, reps, storage_state, attempt = args
     profile = EDGE_PROFILE_BASE / f"{u}_{cid}_{attempt}"
     profile.mkdir(parents=True, exist_ok=True)
     try:
@@ -489,6 +488,11 @@ def get_replacements(page, u):
 
 
 def run_unit(u, cfg, pw):
+    try:
+        import importlib
+        importlib.import_module("frequency_runtime_patch")
+    except Exception as exc:
+        raise RuntimeError(f"PATCH_FREQUENCIA_REAL_ERRO: {type(exc).__name__}: {exc}") from exc
     profile = EDGE_PROFILE_BASE / u
     profile.mkdir(parents=True, exist_ok=True)
     browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
