@@ -35,8 +35,9 @@ try:
 except Exception as exc:
     raise RuntimeError(f"PATCH_FREQUENCIA_REAL_ERRO: {type(exc).__name__}: {exc}") from exc
 
-DATA_PATH = Path("dados_alunos.json")
-SNAPSHOT_PATH = Path("dados_universo_cgd.json")
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_PATH = PROJECT_ROOT / "dados_alunos.json"
+SNAPSHOT_PATH = PROJECT_ROOT / "dados_universo_cgd.json"
 MAX_CONTRACTS = max(1, int(os.getenv("CGD_MAX_CONTRACTS", "10000")))
 BATCH_PER_UNIT = max(1, int(os.getenv("CGD_DETAIL_BATCH_PER_UNIT", "750")))
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
@@ -44,7 +45,7 @@ LISTING_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "12")))
 LISTING_TIMEOUT = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
 DETAIL_INTERVAL_MS = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "50")))
 DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
-PENDING_FREQUENCY_PATH = Path("dados_frequencias_a_registrar.json")
+PENDING_FREQUENCY_PATH = PROJECT_ROOT / "dados_frequencias_a_registrar.json"
 HEADLESS = os.getenv("CGD_HEADLESS", "false").lower() in ("1", "true", "yes", "sim")
 SOURCE = "https://app.cgd.com.br/alunos"
 CF_MARKERS = ("sorry, you have been blocked", "you have been blocked", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
