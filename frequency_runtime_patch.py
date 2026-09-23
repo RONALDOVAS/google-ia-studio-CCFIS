@@ -1,24 +1,59 @@
-"""Patch operacional da frequencia real do CGD.
+"""Patch operacional da frequencia individual real do CGD.
 
-O CGD atual renderiza a frequencia individual via JavaScript e a tabela pode
-nao existir como <table> no DOM. O parser dedicado trabalha sobre o texto
-renderizado e e a fonte autoritativa para presencas, faltas e reposicoes.
+A frequencia individual e carregada por JavaScript. A rota pode responder
+antes de o texto dos registros estar disponivel no DOM; por isso este patch
+faz uma espera curta e direcionada antes de executar o parser.
 
-Mantemos a arquitetura incremental e o lote/performance atuais. O patch
-apenas troca o parser da frequencia e garante uma espera maior somente nessa
-rota, porque ela precisa do render client-side antes da leitura.
+A fonte continua sendo a rota individual do contrato/aluno. A tela coletiva
+Registrar Frequencia nao substitui este historico individual.
 """
+import re
 import scraper
 from frequencia_parser_cgd import parse_frequency_page
 
 _original_open_page = scraper.open_page
 _original_contract_bundle = scraper.contract_bundle
 
+_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+_STATUS_MARKERS = (
+    "presente",
+    "faltou",
+    "reposição",
+    "reposicao",
+    "compareceu",
+    "ausente",
+)
+
+
+def _frequency_body(page):
+    try:
+        return " ".join(page.locator("body").inner_text().split()).lower()
+    except Exception:
+        return ""
+
+
+def _wait_frequency_render(page):
+    """Aguarda o conteúdo individual renderizado sem depender de networkidle."""
+    for _ in range(10):
+        text = _frequency_body(page)
+        has_date = bool(_DATE_RE.search(text))
+        has_status = any(marker in text for marker in _STATUS_MARKERS)
+        has_frequency_context = (
+            "frequência de cursos individuais" in text
+            or "frequencia de cursos individuais" in text
+        )
+        if (has_frequency_context and has_date) or (has_date and has_status):
+            return
+        page.wait_for_timeout(500)
+
 
 def _open_page_frequency_aware(page, url, u, n, wait=None):
-    if wait is None and "/contratos/frequencias/" in (url or "").lower():
-        wait = 800
-    return _original_open_page(page, url, u, n, wait)
+    if "/contratos/frequencias/" in (url or "").lower():
+        wait = max(1500, int(wait or 0))
+    ok = _original_open_page(page, url, u, n, wait)
+    if ok and "/contratos/frequencias/" in (url or "").lower():
+        _wait_frequency_render(page)
+    return ok
 
 
 def _parse_frequency(page, cid):
