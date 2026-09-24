@@ -174,15 +174,16 @@ def extract_name(page, fallback=None):
         pass
     text = body(page)
     patterns = (
-        r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([^\n|]{4,150})",
-        r"\bNome\s*[:\-]\s*([^\n|]{4,150})",
-        r"(?:Contrato|Cadastro do aluno|Horários|Horarios|Cursos)?\s*([A-Za-zÀ-ÿ\s]{4,80}?)\s+\d{1,2}\s+anos",
+        r"(?:Contrato\s+Hor[aá]rios|Contrato\s+Cursos|Contrato|Cadastro\s+do\s+aluno|Hor[aá]rios|Cursos)\s+([A-Za-zÀ-ÿ\s]{4,80})\s+\d{1,2}\s+anos",
+        r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
+        r"\bNome\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
     )
     for pat in patterns:
-        for m in re.finditer(pat, text, re.I):
-            candidate = norm(m.group(1))
-            if len(candidate) >= 4 and len(candidate.split()) >= 2:
-                return candidate
+        m = re.search(pat, text, re.I)
+        if m:
+            cand = norm(m.group(1))
+            if len(cand) >= 4 and len(cand.split()) >= 2:
+                return cand
     return fallback
 
 
@@ -190,11 +191,17 @@ def extract_name_from_text(text):
     text = norm(text)
     if not text:
         return None
-    pattern = r"(?:Contrato|Cadastro do aluno|Horários|Horarios|Cursos)?\s*([A-Za-zÀ-ÿ\s]{4,80}?)\s+\d{1,2}\s+anos"
-    for m in re.finditer(pattern, text, re.I):
-        candidate = norm(m.group(1))
-        if len(candidate) >= 4 and len(candidate.split()) >= 2:
-            return candidate
+    patterns = (
+        r"(?:Contrato\s+Hor[aá]rios|Contrato\s+Cursos|Contrato|Cadastro\s+do\s+aluno|Hor[aá]rios|Cursos)\s+([A-Za-zÀ-ÿ\s]{4,80})\s+\d{1,2}\s+anos",
+        r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
+        r"\bNome\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
+    )
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            cand = norm(m.group(1))
+            if len(cand) >= 4 and len(cand.split()) >= 2:
+                return cand
     return None
 
 
@@ -220,7 +227,6 @@ def extract_name_from_sources(page, *sources):
         if value:
             return value
     return None
-
 
 def login(page, user, password, u):
     page.goto(CGD_LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
