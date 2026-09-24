@@ -163,6 +163,7 @@ def body(page):
 
 
 def extract_name(page, fallback=None):
+    # 1. Inputs de formulario
     try:
         for sel in ('input[name*="nome" i]', 'input[id*="nome" i]'):
             loc = page.locator(sel)
@@ -172,11 +173,24 @@ def extract_name(page, fallback=None):
                     return v
     except Exception:
         pass
+
+    # 2. Link do aluno no HTML da pagina: <a href="/alunos/123">NOME DO ALUNO</a>
+    try:
+        html = page.content()
+        m_link = re.search(r'<a\s+[^>]*href=["\'](?:https?://[^"\']+)?/alunos/\d+[^"\']*["\'][^>]*>\s*([^<]+?)\s*</a>', html, re.I)
+        if m_link:
+            cand = norm(m_link.group(1))
+            if len(cand) >= 4 and len(cand.split()) >= 2 and not any(w in cand.lower() for w in ("aluno", "editar", "ver", "detalhes")):
+                return cand
+    except Exception:
+        pass
+
+    # 3. Textos com rotulos (com ou sem dois-pontos)
     text = body(page)
     patterns = (
-        r"(?:Contrato\s+Hor[aá]rios|Contrato\s+Cursos|Contrato|Cadastro\s+do\s+aluno|Hor[aá]rios|Cursos)\s+([A-Za-zÀ-ÿ\s]{4,80})\s+\d{1,2}\s+anos",
-        r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
-        r"\bNome\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
+        r"(?:Contrato\s+Hor[aá]rios|Contrato\s+Cursos|Contrato|Cadastro\s+do\s+aluno|Hor[aá]rios|Cursos)\s+([A-Za-zÀ-ÿ\s]{4,80}?)\s*(?:\d{1,2}\s+anos|Hor[aá]rios|Adicionar|$)",
+        r"(?:Nome\s+completo|Nome\s+do\s+aluno|Aluno|Estudante)\s*[:\-]?\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,})+)",
+        r"\bNome\s*[:\-]?\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,})+)",
     )
     for pat in patterns:
         m = re.search(pat, text, re.I)
@@ -184,6 +198,16 @@ def extract_name(page, fallback=None):
             cand = norm(m.group(1))
             if len(cand) >= 4 and len(cand.split()) >= 2:
                 return cand
+
+    # 4. Breadcrumb
+    try:
+        for item in page.locator(".breadcrumb li, ol.breadcrumb li").all_inner_texts():
+            cand = norm(item)
+            if len(cand.split()) >= 2 and not any(w in cand.lower() for w in ("início", "inicio", "dashboard", "alunos", "contrato")):
+                return cand
+    except Exception:
+        pass
+
     return fallback
 
 
@@ -192,9 +216,9 @@ def extract_name_from_text(text):
     if not text:
         return None
     patterns = (
-        r"(?:Contrato\s+Hor[aá]rios|Contrato\s+Cursos|Contrato|Cadastro\s+do\s+aluno|Hor[aá]rios|Cursos)\s+([A-Za-zÀ-ÿ\s]{4,80})\s+\d{1,2}\s+anos",
-        r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
-        r"\bNome\s*[:\-]\s*([A-Za-zÀ-ÿ\s]{4,80})",
+        r"(?:Contrato\s+Hor[aá]rios|Contrato\s+Cursos|Contrato|Cadastro\s+do\s+aluno|Hor[aá]rios|Cursos)\s+([A-Za-zÀ-ÿ\s]{4,80}?)\s*(?:\d{1,2}\s+anos|Hor[aá]rios|Adicionar|$)",
+        r"(?:Nome\s+completo|Nome\s+do\s+aluno|Aluno|Estudante)\s*[:\-]?\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,})+)",
+        r"\bNome\s*[:\-]?\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,})+)",
     )
     for pat in patterns:
         m = re.search(pat, text, re.I)
@@ -435,7 +459,8 @@ def contract_bundle(page, cid, u, reps):
         if not name:
             name = extract_name_from_sources(page, schedule_text, course_text, ctext)
     if not sid:
-        m = re.search(r"/alunos/(\d+)", ctext)
+        html_content = page.content()
+        m = re.search(r"/alunos/(\d+)", html_content, re.I)
         sid = m.group(1) if m else None
     if sid and open_page(page, f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit", u, f"aluno_{sid}"):
         name = extract_name(page, name)
