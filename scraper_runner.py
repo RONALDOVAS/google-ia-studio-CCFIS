@@ -17,6 +17,12 @@ os.environ.setdefault("CGD_DETAIL_BATCH_PER_UNIT", "500")
 
 import requests
 import scraper
+from frequency_runtime_patch import install_frequency_parser, validate_frequency_parser
+
+# Instala e valida o parser oficial antes de qualquer detalhamento.
+# Nao existe parser alternativo neste runner.
+install_frequency_parser()
+validate_frequency_parser()
 from playwright.sync_api import sync_playwright
 
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
@@ -117,87 +123,6 @@ def optimized_discover_contracts(page, unidade, destino):
     return list(found.values())[:MAX_CONTRACTS]
 
 
-def robust_extract_frequency(page, cid):
-    """Extrai frequencia diretamente do DOM real, sem depender do nome do cabecalho."""
-    records = []
-    faltas = 0
-    presencas = 0
-    absence = ("faltou", "falta", "ausente", "nao compareceu", "nao comparecimento")
-    presence = ("presente", "presenca", "compareceu")
-
-    def classify(text):
-        t = _plain(text)
-        if any(x in t for x in absence):
-            return "falta"
-        if any(x in t for x in presence):
-            return "presenca"
-        return ""
-
-    try:
-        rows = page.locator("table tr")
-        for i in range(rows.count()):
-            tr = rows.nth(i)
-            cells = tr.locator("td")
-            if cells.count() == 0:
-                continue
-            values = []
-            rich = []
-            for j in range(cells.count()):
-                cell = cells.nth(j)
-                text = " ".join(cell.all_text_contents()).strip()
-                attrs = " ".join(filter(None, [cell.get_attribute("title"), cell.get_attribute("aria-label"), cell.get_attribute("class")]))
-                values.append(" ".join(x for x in (text, attrs) if x))
-                rich.append(text)
-            joined = " | ".join(values)
-            kind = classify(joined)
-            if not kind:
-                continue
-            if kind == "falta":
-                faltas += 1
-            else:
-                presencas += 1
-            date_value = next((v for v in rich if re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", v)), None)
-            records.append({
-                "data": date_value,
-                "status": "Faltou" if kind == "falta" else "Presente",
-                "aluno": None,
-                "classificacao": kind,
-                "valores": rich,
-                "cabecalhos": [],
-            })
-    except Exception as exc:
-        print(f"[FREQUENCIA] cid={cid} erro_dom={exc!r}", flush=True)
-
-    if not records:
-        try:
-            text = page.locator("body").inner_text(timeout=5000)
-            lines = [" ".join(x.split()) for x in text.splitlines() if x.strip()]
-            for idx, line in enumerate(lines):
-                kind = classify(line)
-                if not kind:
-                    continue
-                if kind == "falta":
-                    faltas += 1
-                else:
-                    presencas += 1
-                date_value = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", line)
-                records.append({
-                    "data": date_value.group(0) if date_value else None,
-                    "status": "Faltou" if kind == "falta" else "Presente",
-                    "aluno": None,
-                    "classificacao": kind,
-                    "valores": [line],
-                    "cabecalhos": [],
-                })
-        except Exception as exc:
-            print(f"[FREQUENCIA] cid={cid} erro_texto={exc!r}", flush=True)
-
-    print(f"[FREQUENCIA] cid={cid} faltas={faltas} presencas={presencas} registros={len(records)}", flush=True)
-    if not records:
-        raise RuntimeError(f"FREQUENCIA_NAO_CAPTURADA cid={cid} url={page.url}")
-    return {"faltas": faltas, "presencas": presencas, "registros": records}
-
-
 class Progress:
     def __init__(self):
         self.start = time.monotonic()
@@ -236,8 +161,6 @@ class Progress:
 
 
 progress = Progress()
-_original_extract_frequency = scraper.extract_frequency
-scraper.extract_frequency = robust_extract_frequency
 
 
 def _persistent_detail_round(u, cfg, contracts, reps, storage_state, attempt):
