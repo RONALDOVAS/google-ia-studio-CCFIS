@@ -257,8 +257,11 @@ def main():
                     print(f"[{unidade}] INICIO DETALHAMENTO PARALELO: {len(targets)} contratos / {workers} workers", flush=True)
                     if targets:
                         args = [(unidade, cfg, cid, reps, str(storage_state), 1) for cid in targets]
-                        with ProcessPoolExecutor(max_workers=workers) as pool:
-                            futures = [pool.submit(scraper.detail_worker, arg) for arg in args]
+                        pool = ProcessPoolExecutor(max_workers=workers)
+                        futures = [pool.submit(scraper.detail_worker, arg) for arg in args]
+                        failure_streak = 0
+                        pool_aborted = False
+                        try:
                             for idx, future in enumerate(as_completed(futures), 1):
                                 try:
                                     result = future.result()
@@ -277,8 +280,25 @@ def main():
                                 else:
                                     detail_errors.append((cid or "desconhecido", str(result.get("error") or "resultado invalido")))
                                     print(f"[{unidade}] DETALHE_ERRO cid={cid or 'desconhecido'}: {result.get('error') or 'resultado invalido'}", flush=True)
+                                if result.get("ok") and result.get("aluno"):
+                                    failure_streak = 0
+                                else:
+                                    failure_streak += 1
+                                    if failure_streak >= 5:
+                                        message = (
+                                            f"[{unidade}] FAIL_FAST_FREQUENCIA: 5 falhas consecutivas "
+                                            f"no detalhamento; lote abortado antes de continuar aguardando. "
+                                            f"Ultimo cid={cid or 'desconhecido'} erro={result.get('error') or 'resultado invalido'}"
+                                        )
+                                        print(message, flush=True)
+                                        pool_aborted = True
+                                        pool.shutdown(wait=False, cancel_futures=True)
+                                        raise RuntimeError(message)
                                 if idx % max(1, workers) == 0 or idx == len(futures):
                                     print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
+                        finally:
+                            if not pool_aborted:
+                                pool.shutdown(wait=True)
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
                     print(f"[{unidade}] DETALHAMENTO TEMPO={detail_elapsed:.2f}s CAPTURADOS={captured} ERROS={len(detail_errors)}", flush=True)
