@@ -79,11 +79,16 @@ def install_frequency_parser():
         scraper._cfis_frequency_original_contract_bundle = original_contract_bundle
 
     def _open_page_frequency_aware(page, url, u, n, wait=None):
+        url_lower = (url or "").lower()
+        is_frequency = "/contratos/frequencias/" in url_lower
+        is_contract = bool(re.search(r"/contratos/\d+/?(?:$|[?#])", url_lower))
         effective_wait = wait
-        if "/contratos/frequencias/" in (url or "").lower():
+        if is_frequency:
             effective_wait = max(1500, int(wait or 0))
+        elif is_contract:
+            effective_wait = max(1200, int(wait or 0))
         ok = original_open_page(page, url, u, n, effective_wait)
-        if ok and "/contratos/frequencias/" in (url or "").lower():
+        if ok and is_frequency:
             _wait_frequency_render(page)
         return ok
 
