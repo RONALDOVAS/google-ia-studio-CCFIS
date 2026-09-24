@@ -24,7 +24,7 @@ from playwright.sync_api import sync_playwright
 # O detalhamento usa a mesma pagina autenticada para varias navegacoes.
 # Reduzimos apenas a espera artificial entre navegacoes; nao alteramos timeout,
 # concorrencia do navegador ou a sessao autenticada.
-os.environ.setdefault("CGD_PAGE_WAIT_MS", "100")
+os.environ.setdefault("CGD_PAGE_WAIT_MS", "800")
 
 import scraper
 import scraper_runner
