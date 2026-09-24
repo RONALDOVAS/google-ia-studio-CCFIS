@@ -172,11 +172,54 @@ def extract_name(page, fallback=None):
                     return v
     except Exception:
         pass
-    for pat in (r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([^\n|]{4,150})", r"\bNome\s*[:\-]\s*([^\n|]{4,150})"):
-        m = re.search(pat, body(page), re.I)
-        if m and len(norm(m.group(1))) >= 4:
-            return norm(m.group(1))
+    text = body(page)
+    patterns = (
+        r"(?:Nome completo|Nome do aluno|Aluno|Estudante)\s*[:\-]\s*([^\n|]{4,150})",
+        r"\bNome\s*[:\-]\s*([^\n|]{4,150})",
+        r"(?:Contrato|Cadastro do aluno|Horários|Horarios|Cursos)?\s*([A-Za-zÀ-ÿ\s]{4,80}?)\s+\d{1,2}\s+anos",
+    )
+    for pat in patterns:
+        for m in re.finditer(pat, text, re.I):
+            candidate = norm(m.group(1))
+            if len(candidate) >= 4 and len(candidate.split()) >= 2:
+                return candidate
     return fallback
+
+
+def extract_name_from_text(text):
+    text = norm(text)
+    if not text:
+        return None
+    pattern = r"(?:Contrato|Cadastro do aluno|Horários|Horarios|Cursos)?\s*([A-Za-zÀ-ÿ\s]{4,80}?)\s+\d{1,2}\s+anos"
+    for m in re.finditer(pattern, text, re.I):
+        candidate = norm(m.group(1))
+        if len(candidate) >= 4 and len(candidate.split()) >= 2:
+            return candidate
+    return None
+
+
+def extract_name_from_sources(page, *sources):
+    candidates = []
+    try:
+        title = norm(page.title())
+        if title:
+            candidates.append(title)
+    except Exception:
+        pass
+    try:
+        headings = page.locator("h1,h2,h3")
+        for i in range(min(headings.count(), 30)):
+            text = norm(headings.nth(i).inner_text())
+            if text:
+                candidates.append(text)
+    except Exception:
+        pass
+    candidates.extend(norm(x) for x in sources if norm(x))
+    for source in candidates:
+        value = extract_name_from_text(source)
+        if value:
+            return value
+    return None
 
 
 def login(page, user, password, u):
@@ -368,14 +411,23 @@ def contract_bundle(page, cid, u, reps):
     schedule = child_url(cid, "horarios")
     frequrl = child_url(cid, "frequencias")
     rows, st, name = [], "", None
+    course_text = ""
+    schedule_text = ""
     freq = {"faltas": 0, "presencas": 0, "registros": []}
+    name = extract_name(page)
     if open_page(page, course, u, f"cursos_individuais_{cid}"):
+        course_text = body(page)[:30000]
         rows += extract_disciplines(page, course)
+        name = name or extract_name(page)
     if open_page(page, schedule, u, f"horarios_individuais_{cid}"):
-        st = body(page)[:20000]
+        schedule_text = body(page)[:30000]
+        st = schedule_text[:20000]
+        name = name or extract_name(page)
     if open_page(page, frequrl, u, f"frequencia_{cid}"):
         freq = extract_frequency(page, cid)
-        name = extract_name(page)
+        name = name or extract_name(page)
+        if not name:
+            name = extract_name_from_sources(page, schedule_text, course_text, ctext)
     if not sid:
         m = re.search(r"/alunos/(\d+)", ctext)
         sid = m.group(1) if m else None
@@ -384,6 +436,8 @@ def contract_bundle(page, cid, u, reps):
         at = body(page)[:25000]
     else:
         at = ""
+    if not name:
+        name = extract_name_from_sources(page, schedule_text, course_text, ctext)
     rows, done, cur, fut = classify(rows)
     def num(r, k):
         m = re.search(r"\d+", str(r.get(k) or ""))
