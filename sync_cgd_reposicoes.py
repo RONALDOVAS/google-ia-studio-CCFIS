@@ -68,6 +68,9 @@ def parse_times(value): return re.findall(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b", val
 
 def extract(page, unidade):
     records=[]; tables=page.locator("table")
+    blocked_text = body(page).lower()
+    if any(marker in blocked_text for marker in ("sorry, you have been blocked", "you have been blocked", "checking your browser", "challenge-platform")):
+        raise RuntimeError(f"[{unidade}] CLOUDFLARE_OU_BLOQUEIO_DETECTADO");
     for ti in range(tables.count()):
         rows=tables.nth(ti).locator("tbody tr")
         for ri in range(rows.count()):
@@ -85,7 +88,7 @@ def extract(page, unidade):
             for cell in cells:
                 if any(k in cell.lower() for k in ("informática","informatica","módulo","modulo","disciplina")): discipline=cell.strip(); break
             key=f"{unidade}|{contract}|{name}|{date}|{start}|{discipline}".lower(); rid="cgd_rep_"+hashlib.sha256(key.encode()).hexdigest()[:32]
-            records.append({"id":rid,"aluno_id":None,"aluno_nome":name,"contrato":contract or None,"unidade":unidade,"data":date,"horario_inicio":start,"horario_fim":end,"duracao_horas":2,"disciplina":discipline,"professor":"Ronaldo Vasconcelos","status":"agendada","tipo":"laboratorio","observacao":"Sincronizado diretamente do CGD","updated_at":datetime.now().isoformat()})
+            records.append({"id":rid,"aluno_id":None,"aluno_nome":name,"contrato":contract or None,"unidade":unidade,"data":date,"horario_inicio":start,"horario_fim":end,"duracao_horas":2,"disciplina":discipline,"professor":None,"status":None,"tipo":"laboratorio","observacao":"Sincronizado diretamente do CGD","updated_at":datetime.now().isoformat()})
     return records
 
 def main():
