@@ -62,11 +62,26 @@ def dump(page, u, n):
         pass
 
 
+def page_is_blocked(page):
+    text = low(body(page))
+    return any(marker in text for marker in (
+        "sorry, you have been blocked",
+        "you have been blocked",
+        "checking your browser",
+        "just a moment",
+        "why have i been blocked",
+        "challenge-platform",
+        "cf-chl-",
+    ))
+
 def open_page(page, url, u, n, wait=None):
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
         page.wait_for_timeout(PAGE_WAIT_MS if wait is None else wait)
         print(f"[{u}] {n}: {page.url}")
+        if page_is_blocked(page):
+            dump(page, u, f"{n}_CLOUDFLARE")
+            raise RuntimeError(f"[{u}] CLOUDFLARE_OU_BLOQUEIO_DETECTADO rota={url}")
         dump(page, u, n)
         return same_host(page.url)
     except Exception as e:
@@ -453,6 +468,11 @@ def contract_bundle(page, cid, u, reps):
         at = ""
     if not name:
         name = extract_name_from_sources(page, schedule_text, course_text, ctext)
+    if page_is_blocked(page) or any(page_is_blocked_candidate for page_is_blocked_candidate in (
+        "Sorry, you have been blocked" in ctext,
+        "You are unable to access" in ctext,
+    )):
+        raise RuntimeError(f"[{u}] DETALHE_INVALIDO_CLOUDFLARE cid={cid}")
     rows, done, cur, fut = classify(rows)
     def num(r, k):
         m = re.search(r"\d+", str(r.get(k) or ""))
@@ -474,9 +494,8 @@ def validate_real_detail(aluno, cid, u):
     if not aluno:
         raise RuntimeError(f"[{u}] CONTRATO_SEM_RESULTADO cid={cid}")
     nome = norm(aluno.get("nome"))
-    if not nome or nome == f"Contrato {cid}":
-        aluno["nome"] = f"Aluno Contrato {cid}"
-        print(f"[{u}] AVISO: Nome nao identificado para cid={cid}; usando fallback.", flush=True)
+    if not nome or nome == f"Contrato {cid}" or nome == f"Aluno Contrato {cid}":
+        raise RuntimeError(f"[{u}] NOME_REAL_NAO_IDENTIFICADO cid={cid}")
     status = str(aluno.get("frequencia_status") or "").strip()
     if status not in ("COM_FREQUENCIA_REAL", "SEM_FREQUENCIA_A_INVESTIGAR"):
         raise RuntimeError(f"[{u}] FREQUENCIA_NAO_PROCESSADA cid={cid} status={status!r}")
