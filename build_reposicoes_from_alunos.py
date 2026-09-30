@@ -43,11 +43,15 @@ def parse_times(value):
 
 def is_replacement_raw(raw):
     cells = as_cells(raw.get("valores"))
+    if not cells:
+        return False
     joined = low(" | ".join(cells))
     return any(token in joined for token in ("reposição", "reposicao", "reposição-faltou", "reposicao-faltou"))
 
 
 def collect_replacements(aluno):
+    if not valid_real_detail(aluno):
+        return []
     out = []
     seen = set()
     for raw in (aluno.get("reposicoes") or []):
@@ -64,6 +68,30 @@ def collect_replacements(aluno):
                 out.append(raw)
     return out
 
+
+def explicit_status(raw):
+    text = low(" | ".join(as_cells(raw.get("valores"))))
+    if any(x in text for x in ("cancelada", "cancelado")):
+        return "cancelada"
+    if any(x in text for x in ("ausente", "faltou", "não compareceu", "nao compareceu")):
+        return "ausente"
+    if any(x in text for x in ("realizada", "realizado", "compareceu", "presença", "presenca")):
+        return "realizada"
+    if any(x in text for x in ("agendada", "agendado")):
+        return "agendada"
+    return None
+
+def valid_real_detail(aluno):
+    name = norm(aluno.get("nome"))
+    if not name or name.startswith("Aluno Contrato ") or name.startswith("Contrato "):
+        return False
+    blocked = low(" ".join([
+        str(aluno.get("horarios") or ""),
+        str(aluno.get("aluno_raw") or ""),
+    ]))
+    if "sorry, you have been blocked" in blocked or "you are unable to access" in blocked:
+        return False
+    return bool(aluno.get("disciplinas") or aluno.get("frequencia_raw") or aluno.get("reposicoes"))
 
 def transform(aluno, raw, index):
     heads = as_cells(raw.get("cabecalhos"))
@@ -100,8 +128,8 @@ def transform(aluno, raw, index):
         "horario_fim": end,
         "duracao_horas": 2,
         "disciplina": discipline,
-        "professor": aluno.get("professor") or "Ronaldo Vasconcelos",
-        "status": "agendada",
+        "professor": aluno.get("professor") or None,
+        "status": explicit_status(raw),
         "tipo": "laboratorio",
         "observacao": "Capturado dentro do detalhe real do CGD",
         "cabecalhos": heads,
@@ -121,7 +149,8 @@ def main():
         total_fontes += len(raws)
         for index, raw in enumerate(raws):
             record = transform(aluno, raw, index)
-            out[record["id"]] = record
+            if record["status"] is not None:
+                out[record["id"]] = record
     payload = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "source": "CGD",
@@ -129,7 +158,7 @@ def main():
     }
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"FONTES DE REPOSICAO ENCONTRADAS: {total_fontes}")
-    print(f"REPOSICOES A PARTIR DOS ALUNOS: {len(payload['records'])}")
+    print(f"REPOSICOES COM STATUS EXPLICITO: {len(payload['records'])}")
 
 
 if __name__ == "__main__":
