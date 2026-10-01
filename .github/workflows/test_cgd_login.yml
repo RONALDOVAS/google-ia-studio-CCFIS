@@ -29,19 +29,20 @@ jobs:
           CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
           CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
-          CGD_HEADLESS: 'true'
+          CGD_HEADLESS: 'false'
           PYTHONUNBUFFERED: '1'
         run: |
           @'
           import os
           import sitecustomize
           import usercustomize
+          import browser_runtime_patch
           import scraper
           from playwright.sync_api import sync_playwright
           for unidade in ('matriz','filial'):
               cfg = scraper.CONFIG[unidade]
               with sync_playwright() as pw:
-                  browser = pw.chromium.launch(headless=True)
+                  browser = pw.chromium.launch(channel="msedge")
                   context = browser.new_context()
                   page = context.new_page()
                   scraper.login(page, cfg['usuario'], cfg['senha'], unidade)
