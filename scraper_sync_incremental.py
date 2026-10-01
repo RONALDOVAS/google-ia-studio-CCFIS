@@ -248,60 +248,43 @@ def main():
                     captured = 0
                     detail_errors = []
                     captured_ids = []
-                    project_root = Path(__file__).resolve().parent
-                    storage_dir = project_root / "edge_cgd_profiles"
-                    storage_dir.mkdir(parents=True, exist_ok=True)
-                    storage_state = storage_dir / f"{unidade}_incremental_storage_state.json"
-                    context.storage_state(path=str(storage_state))
-                    workers = min(DETAIL_WORKERS, len(targets)) if targets else 0
-                    print(f"[{unidade}] INICIO DETALHAMENTO PARALELO: {len(targets)} contratos / {workers} workers", flush=True)
+                    workers = 1
+                    print(f"[{unidade}] INICIO DETALHAMENTO EM SESSAO UNICA: {len(targets)} contratos / 1 worker", flush=True)
                     if targets:
-                        args = [(unidade, cfg, cid, reps, str(storage_state), 1) for cid in targets]
-                        pool = ProcessPoolExecutor(max_workers=workers)
-                        futures = [pool.submit(scraper.detail_worker, arg) for arg in args]
-                        failure_streak = 0
-                        pool_aborted = False
-                        try:
-                            for idx, future in enumerate(as_completed(futures), 1):
-                                try:
-                                    result = future.result()
-                                except Exception as exc:
-                                    result = {"ok": False, "cid": "desconhecido", "error": repr(exc)}
-                                cid = str(result.get("cid") or "").strip()
-                                if result.get("ok") and result.get("aluno") and cid in contracts:
-                                    aluno = result["aluno"]
-                                    aluno["unidade"] = unidade
-                                    aluno["assinatura_universo_cgd"] = signatures[cid]
-                                    aluno["sincronizado_em"] = datetime.now(timezone.utc).isoformat()
-                                    by_id[(unidade, cid)] = aluno
-                                    captured += 1
-                                    captured_ids.append(cid)
-                                    print(f"[{unidade}] DETALHE_OK {idx}/{len(futures)} cid={cid} freq={len(aluno.get('frequencia_raw') or [])}", flush=True)
-                                else:
-                                    detail_errors.append((cid or "desconhecido", str(result.get("error") or "resultado invalido")))
-                                    print(f"[{unidade}] DETALHE_ERRO cid={cid or 'desconhecido'}: {result.get('error') or 'resultado invalido'}", flush=True)
-                                if result.get("ok") and result.get("aluno"):
-                                    failure_streak = 0
-                                else:
-                                    failure_streak += 1
-                                    if failure_streak >= 5:
-                                        message = (
-                                            f"[{unidade}] FAIL_FAST_FREQUENCIA: 5 falhas consecutivas "
-                                            f"no detalhamento; lote abortado antes de continuar aguardando. "
-                                            f"Ultimo cid={cid or 'desconhecido'} erro={result.get('error') or 'resultado invalido'}"
-                                        )
-                                        print(message, flush=True)
-                                        pool_aborted = True
-                                        pool.shutdown(wait=False, cancel_futures=True)
-                                        raise RuntimeError(message)
-                                if idx % max(1, workers) == 0 or idx == len(futures):
-                                    print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(futures)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
-                        finally:
-                            if not pool_aborted:
-                                pool.shutdown(wait=True)
+                        # O detalhamento permanece no mesmo browser/context/page autenticado
+                        # usado na descoberta da unidade. Nao criar ProcessPool, browser ou
+                        # contexto novo por aluno: isso preserva a sessao viva do CGD durante
+                        # toda a navegacao de detalhes e frequencias.
+                        for idx, cid in enumerate(targets, 1):
+                            try:
+                                print(f"[{unidade}] DETALHE_NECESSARIO {idx}/{len(targets)} cid={cid}", flush=True)
+                                aluno = detail(page, unidade, cid, reps, signatures[cid])
+                                aluno = scraper.validate_real_detail(aluno, cid, unidade)
+                                by_id[(unidade, cid)] = aluno
+                                captured += 1
+                                captured_ids.append(cid)
+                                print(
+                                    f"[{unidade}] DETALHE_OK {idx}/{len(targets)} cid={cid} "
+                                    f"freq={len(aluno.get('frequencia_raw') or [])}",
+                                    flush=True,
+                                )
+                            except Exception as exc:
+                                error = repr(exc)
+                                detail_errors.append((cid, error))
+                                print(f"[{unidade}] DETALHE_ERRO cid={cid}: {error}", flush=True)
+                            if idx % 1 == 0 or idx == len(targets):
+                                print(
+                                    f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(targets)} "
+                                    f"sucesso={captured} falhas={len(detail_errors)}",
+                                    flush=True,
+                                )
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
-                    print(f"[{unidade}] DETALHAMENTO TEMPO={detail_elapsed:.2f}s CAPTURADOS={captured} ERROS={len(detail_errors)}", flush=True)
+                    print(
+                        f"[{unidade}] DETALHAMENTO TEMPO={detail_elapsed:.2f}s "
+                        f"CAPTURADOS={captured} ERROS={len(detail_errors)}",
+                        flush=True,
+                    )
 
                     now = datetime.now(timezone.utc).isoformat()
                     for cid in unchanged_ids:
