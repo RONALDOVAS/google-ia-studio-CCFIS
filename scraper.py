@@ -435,6 +435,20 @@ def _route_kind(text, href):
         return "documentos"
     if "pagamento" in hay or "finance" in hay or "financeiro" in hay:
         return "financeiro"
+    if "turma" in hay or "/turmas/" in hay:
+        return "turmas"
+    if "nota" in hay:
+        return "notas"
+    if "histórico" in hay or "historico" in hay:
+        return "historico"
+    if "cadastro" in hay or "/alunos/" in hay:
+        return "cadastro_aluno"
+    if "tag" in hay:
+        return "tags"
+    if "imprimir" in hay or "impress" in hay or "certificado" in hay:
+        return "imprimir_certificado"
+    if "encerrar" in hay or "encerramento" in hay or "cancelar" in hay:
+        return "encerrar_contrato"
     if "contrato" in hay:
         return "contrato"
     return "outra"
@@ -466,7 +480,18 @@ def discover_contract_routes(page, cid):
 
     for text, href in links(page):
         path = urlparse(href).path.lower()
-        if f"/contratos/{cid}" in path or f"/contratos/" in path:
+        relevant = (
+            f"/contratos/{cid}" in path
+            or f"/alunos/" in path
+            or f"/turmas/" in path
+            or any(token in low(f"{text} {path}") for token in (
+                "frequenc", "horario", "curso", "disciplina", "ocorr",
+                "pend", "assin", "document", "finance", "pagamento",
+                "turma", "nota", "historico", "cadastro", "tag",
+                "imprimir", "certificado",
+            ))
+        )
+        if relevant:
             add(text, href, "link")
 
     # Algumas interfaces colocam a rota em atributos/data-* ou onclick,
@@ -490,12 +515,28 @@ def discover_contract_routes(page, cid):
 
 
 def _safe_contract_route(route, cid):
-    path = urlparse(route["url"]).path.lower()
-    if f"/contratos/{cid}" not in path:
+    url = route.get("url") or ""
+    path = urlparse(url).path.lower()
+    if not same_host(url):
         return False
-    if any(x in path for x in ("/delete", "/destroy", "/excluir", "/logout")):
+    blocked = (
+        "/delete", "/destroy", "/excluir", "/logout",
+        "/encerrar", "/cancelar", "/remover", "/deletar",
+        "/salvar", "/save", "/update", "/editar/confirm",
+    )
+    if any(x in path for x in blocked):
         return False
-    return True
+    return (
+        f"/contratos/{cid}" in path
+        or "/alunos/" in path
+        or "/turmas/" in path
+        or route.get("rota") in {
+            "frequencia", "horarios", "disciplinas", "ocorrencias",
+            "pendencias", "assinaturas", "documentos", "financeiro",
+            "turmas", "notas", "historico", "cadastro_aluno", "tags",
+            "imprimir_certificado", "contrato",
+        }
+    )
 
 
 def _capture_route_snapshot(page, unidade, cid, route, index):
