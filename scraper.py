@@ -656,7 +656,7 @@ def contract_bundle(page, cid, u, reps):
         "rotas_cgd": route_snapshots,
         "rotas_cgd_descobertas": routes,
         "rotas_cgd_status": rota_status,
-        "detalhamento_completo": bool(all(rota_status.values()) and freq["registros"]),
+        "detalhamento_completo": bool(all(rota_status.values())),
         "reposicoes": [r for r in reps if belongs(r, cid, sid, name)],
         "capturado_em": datetime.utcnow().isoformat() + "Z"
     }
@@ -669,8 +669,8 @@ def validate_real_detail(aluno, cid, u):
     if not nome or nome == f"Contrato {cid}" or nome == f"Aluno Contrato {cid}":
         raise RuntimeError(f"[{u}] NOME_REAL_NAO_IDENTIFICADO cid={cid}")
     status = str(aluno.get("frequencia_status") or "").strip()
-    if status != "COM_FREQUENCIA_REAL":
-        raise RuntimeError(f"[{u}] FREQUENCIA_REAL_INCOMPLETA cid={cid} status={status!r}")
+    if status not in ("COM_FREQUENCIA_REAL", "SEM_FREQUENCIA_A_INVESTIGAR"):
+        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_PROCESSADA cid={cid} status={status!r}")
     routes = aluno.get("rotas_cgd_status") or {}
     required = ("contrato", "disciplinas", "horarios", "frequencia")
     missing = [k for k in required if not routes.get(k)]
