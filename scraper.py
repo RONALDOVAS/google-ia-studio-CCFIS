@@ -417,67 +417,234 @@ def belongs(r, cid, sid, name):
     return any(v and low(v) in raw for v in (cid, sid, name))
 
 
+def _route_kind(text, href):
+    hay = low(f"{text} {href}")
+    if "frequenc" in hay:
+        return "frequencia"
+    if "horario" in hay or "agenda" in hay:
+        return "horarios"
+    if "disciplina" in hay or "curso" in hay:
+        return "disciplinas"
+    if "ocorr" in hay:
+        return "ocorrencias"
+    if "pend" in hay:
+        return "pendencias"
+    if "assin" in hay:
+        return "assinaturas"
+    if "document" in hay or "arquivo" in hay:
+        return "documentos"
+    if "pagamento" in hay or "finance" in hay or "financeiro" in hay:
+        return "financeiro"
+    if "contrato" in hay:
+        return "contrato"
+    return "outra"
+
+
+def discover_contract_routes(page, cid):
+    """Descobre as rotas que o próprio contrato expõe, sem inventar URLs."""
+    routes = []
+    seen = set()
+
+    def add(text, href, source="link"):
+        href = abs_url(page, href)
+        if not href or not same_host(href):
+            return
+        path = urlparse(href).path.rstrip("/").lower()
+        # Nunca seguir ações potencialmente destrutivas/admin como parte do scrape.
+        if any(x in path for x in ("/delete", "/destroy", "/excluir", "/logout")):
+            return
+        key = href.split("#", 1)[0]
+        if key in seen:
+            return
+        seen.add(key)
+        routes.append({
+            "texto": norm(text),
+            "url": key,
+            "rota": _route_kind(text, key),
+            "origem": source,
+        })
+
+    for text, href in links(page):
+        path = urlparse(href).path.lower()
+        if f"/contratos/{cid}" in path or f"/contratos/" in path:
+            add(text, href, "link")
+
+    # Algumas interfaces colocam a rota em atributos/data-* ou onclick,
+    # sem um href convencional.
+    try:
+        loc = page.locator("[data-href],[data-url],[href],[onclick]")
+        for i in range(min(loc.count(), 5000)):
+            el = loc.nth(i)
+            text = norm(el.inner_text())
+            for attr in ("href", "data-href", "data-url"):
+                value = el.get_attribute(attr)
+                if value:
+                    add(text, value, f"attribute:{attr}")
+            onclick = el.get_attribute("onclick") or ""
+            for match in re.findall(r"""['"]((?:https?://|/)[^'"]+)['"]""", onclick):
+                add(text, match, "onclick")
+    except Exception:
+        pass
+
+    return routes
+
+
+def _safe_contract_route(route, cid):
+    path = urlparse(route["url"]).path.lower()
+    if f"/contratos/{cid}" not in path:
+        return False
+    if any(x in path for x in ("/delete", "/destroy", "/excluir", "/logout")):
+        return False
+    return True
+
+
+def _capture_route_snapshot(page, unidade, cid, route, index):
+    if not _safe_contract_route(route, cid):
+        return None
+    if not open_page(page, route["url"], unidade, f"contrato_{cid}_rota_{index}", 500):
+        return None
+    tables = [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)]
+    text = body(page)
+    return {
+        "texto": route["texto"],
+        "url": page.url,
+        "rota": route["rota"],
+        "origem": route["origem"],
+        "tabelas": tables,
+        "texto_corpo": text[:60000],
+    }
+
+
 def contract_bundle(page, cid, u, reps):
     print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
     cu = contract_url(cid)
     open_page(page, cu, u, f"contrato_{cid}")
     ctext = body(page)
+    routes = discover_contract_routes(page, cid)
+    print(f"[{u}] ROTAS_CONTRATO_DESCUBERTAS cid={cid} total={len(routes)}")
+
     sl = [h for _, h in links(page) if student_id(h)]
     sid = student_id(sl[0]) if sl else None
-    course = child_url(cid, "cursos")
-    schedule = child_url(cid, "horarios")
-    frequrl = child_url(cid, "frequencias")
     rows, st, name = [], "", None
     course_text = ""
     schedule_text = ""
     freq = {"faltas": 0, "presencas": 0, "registros": []}
+    route_snapshots = []
+    visited = set()
+
     name = extract_name(page)
-    if not name:
-        for sel in ("h1, h2, h3, h4, .content-header, .box-title, .card-title, .breadcrumb li"):
-            try:
-                for t in page.locator(sel).all_inner_texts():
-                    cand = extract_name_from_text(t)
-                    if cand:
-                        name = cand
-                        break
-            except Exception:
-                pass
-            if name:
-                break
-    if open_page(page, course, u, f"cursos_individuais_{cid}"):
-        course_text = body(page)[:30000]
-        rows += extract_disciplines(page, course)
-        name = name or extract_name(page)
-    if open_page(page, schedule, u, f"horarios_individuais_{cid}"):
-        schedule_text = body(page)[:30000]
-        st = schedule_text[:20000]
-        name = name or extract_name(page)
-    if open_page(page, frequrl, u, f"frequencia_{cid}"):
-        freq = extract_frequency(page, cid)
-        name = name or extract_name(page)
-        if not name:
-            name = extract_name_from_sources(page, schedule_text, course_text, ctext)
+    for sel in ("h1, h2, h3, h4, .content-header, .box-title, .card-title, .breadcrumb li"):
+        if name:
+            break
+        try:
+            for t in page.locator(sel).all_inner_texts():
+                cand = extract_name_from_text(t)
+                if cand:
+                    name = cand
+                    break
+        except Exception:
+            pass
+
+    # Primeiro, as três rotas conhecidas e necessárias. Elas recebem
+    # tratamento específico porque seus campos alimentam o domínio do CFIS.
+    known = [
+        ("disciplinas", child_url(cid, "cursos")),
+        ("horarios", child_url(cid, "horarios")),
+        ("frequencia", child_url(cid, "frequencias")),
+    ]
+    for kind, url in known:
+        route = {"texto": kind, "url": url, "rota": kind, "origem": "rota_conhecida"}
+        if not open_page(page, url, u, f"{kind}_individuais_{cid}", 700):
+            continue
+        visited.add(url.split("#", 1)[0])
+        snapshot = {
+            "texto": kind,
+            "url": page.url,
+            "rota": kind,
+            "origem": "rota_conhecida",
+            "tabelas": [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)],
+            "texto_corpo": body(page)[:60000],
+        }
+        route_snapshots.append(snapshot)
+        if kind == "disciplinas":
+            course_text = snapshot["texto_corpo"][:30000]
+            rows += extract_disciplines(page, url)
+            name = name or extract_name(page)
+        elif kind == "horarios":
+            schedule_text = snapshot["texto_corpo"][:30000]
+            st = schedule_text[:20000]
+            name = name or extract_name(page)
+        elif kind == "frequencia":
+            freq = extract_frequency(page, cid)
+            name = name or extract_name(page)
+
+    # Depois das rotas conhecidas, visita as demais rotas que o contrato
+    # realmente apresentou. Isso permite descobrir novos botões/abas do CGD
+    # sem hard-code e sem sair do escopo do contrato.
+    for idx, route in enumerate(routes, 1):
+        normalized = route["url"].split("#", 1)[0]
+        if normalized in visited:
+            continue
+        snapshot = _capture_route_snapshot(page, u, cid, route, idx)
+        if snapshot:
+            route_snapshots.append(snapshot)
+            visited.add(normalized)
+
+            # Se uma aba foi descoberta com outro URL, aproveitamos seus dados
+            # para reforçar a captura das três áreas sem duplicar registros.
+            if route["rota"] == "disciplinas":
+                before = len(rows)
+                rows += extract_disciplines(page, normalized)
+                if len(rows) != before:
+                    course_text = snapshot["texto_corpo"][:30000]
+            elif route["rota"] == "horarios":
+                if not st:
+                    st = snapshot["texto_corpo"][:20000]
+                    schedule_text = snapshot["texto_corpo"][:30000]
+            elif route["rota"] == "frequencia":
+                extra = extract_frequency(page, cid)
+                if extra["registros"]:
+                    freq = extra
+
+    # Localiza o aluno relacionado ao contrato depois que as rotas já foram
+    # visitadas, mantendo a mesma sessão autenticada.
     if not sid:
         html_content = page.content()
         m = re.search(r"/alunos/(\d+)", html_content, re.I)
         sid = m.group(1) if m else None
-    if sid and open_page(page, f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit", u, f"aluno_{sid}"):
+
+    at = ""
+    if sid and open_page(page, f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit", u, f"aluno_{sid}", 500):
         name = extract_name(page, name)
         at = body(page)[:25000]
-    else:
-        at = ""
+
     if not name:
         name = extract_name_from_sources(page, schedule_text, course_text, ctext)
-    if page_is_blocked(page) or any(page_is_blocked_candidate for page_is_blocked_candidate in (
+    if page_is_blocked(page) or any(flag for flag in (
         "Sorry, you have been blocked" in ctext,
         "You are unable to access" in ctext,
     )):
         raise RuntimeError(f"[{u}] DETALHE_INVALIDO_CLOUDFLARE cid={cid}")
+
     rows, done, cur, fut = classify(rows)
+
     def num(r, k):
         m = re.search(r"\d+", str(r.get(k) or ""))
         return int(m.group()) if m else -1
+
     point = max(cur, key=lambda r: (num(r, "modulo"), num(r, "passo"), num(r, "progresso"))) if cur else None
+
+    # Evidência de captura: não confundimos "rota acessível" com "dados
+    # realmente extraídos". A validação posterior decide se o detalhe pode
+    # ser considerado completo.
+    rota_status = {
+        "contrato": bool(ctext),
+        "disciplinas": any(r.get("rota") == "disciplinas" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
+        "horarios": any(r.get("rota") == "horarios" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
+        "frequencia": any(r.get("rota") == "frequencia" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
+    }
+    frequencia_status = "COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR"
+
     aluno = {
         "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "email": None, "telefone": None,
         "curso": None, "turma": None, "professor": None, "data_matricula": None, "data_inicio": None, "data_fim": None,
@@ -485,10 +652,15 @@ def contract_bundle(page, cid, u, reps):
         "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO", "cgd_url": cu,
         "disciplinas": rows, "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
         "progresso_atual": point, "horarios": st, "aluno_raw": at, "frequencia_raw": freq["registros"],
-        "reposicoes": [r for r in reps if belongs(r, cid, sid, name)], "capturado_em": datetime.utcnow().isoformat() + "Z"
+        "frequencia_status": frequencia_status,
+        "rotas_cgd": route_snapshots,
+        "rotas_cgd_descobertas": routes,
+        "rotas_cgd_status": rota_status,
+        "detalhamento_completo": bool(all(rota_status.values()) and freq["registros"]),
+        "reposicoes": [r for r in reps if belongs(r, cid, sid, name)],
+        "capturado_em": datetime.utcnow().isoformat() + "Z"
     }
     return aluno
-
 
 def validate_real_detail(aluno, cid, u):
     if not aluno:
@@ -497,8 +669,15 @@ def validate_real_detail(aluno, cid, u):
     if not nome or nome == f"Contrato {cid}" or nome == f"Aluno Contrato {cid}":
         raise RuntimeError(f"[{u}] NOME_REAL_NAO_IDENTIFICADO cid={cid}")
     status = str(aluno.get("frequencia_status") or "").strip()
-    if status not in ("COM_FREQUENCIA_REAL", "SEM_FREQUENCIA_A_INVESTIGAR"):
-        raise RuntimeError(f"[{u}] FREQUENCIA_NAO_PROCESSADA cid={cid} status={status!r}")
+    if status != "COM_FREQUENCIA_REAL":
+        raise RuntimeError(f"[{u}] FREQUENCIA_REAL_INCOMPLETA cid={cid} status={status!r}")
+    routes = aluno.get("rotas_cgd_status") or {}
+    required = ("contrato", "disciplinas", "horarios", "frequencia")
+    missing = [k for k in required if not routes.get(k)]
+    if missing:
+        raise RuntimeError(f"[{u}] ROTAS_CGD_INCOMPLETAS cid={cid} ausentes={','.join(missing)}")
+    if not aluno.get("detalhamento_completo"):
+        raise RuntimeError(f"[{u}] DETALHAMENTO_NAO_COMPLETO cid={cid}")
     return aluno
 
 
