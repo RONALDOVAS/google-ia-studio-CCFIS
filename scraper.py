@@ -626,6 +626,13 @@ def contract_bundle(page, cid, u, reps):
         normalized = route["url"].split("#", 1)[0]
         if normalized in visited:
             continue
+        # O certificado/impressão fica disponível como link para a aplicação,
+        # mas não deve ser aberto no scraping: pode gerar PDF/download e não
+        # agrega dados acadêmicos ao universo do aluno.
+        if route.get("rota") == "imprimir_certificado":
+            print(f"[{u}] ROTA_SOMENTE_LINK cid={cid} tipo=imprimir_certificado url={normalized}", flush=True)
+            visited.add(normalized)
+            continue
         snapshot = _capture_route_snapshot(page, u, cid, route, idx)
         if snapshot:
             route_snapshots.append(snapshot)
