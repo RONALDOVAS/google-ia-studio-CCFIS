@@ -236,13 +236,37 @@ def main():
                     current = {cid: by_id.get((unidade, cid)) for cid in contracts}
                     new_ids = [cid for cid in contracts if current[cid] is None]
                     changed_ids = [cid for cid in contracts if current[cid] is not None and signature_changed(current[cid], signatures[cid])]
+                    incomplete_ids = [
+                        cid for cid in contracts
+                        if current[cid] is not None
+                        and not bool(current[cid].get("detalhamento_completo"))
+                    ]
                     changed_set = set(changed_ids)
-                    unchanged_ids = [cid for cid in contracts if current[cid] is not None and cid not in changed_set]
-                    targets = (changed_ids + new_ids)[:BATCH_PER_UNIT]
+                    new_set = set(new_ids)
+                    incomplete_set = set(incomplete_ids)
+                    retry_ids = [
+                        cid for cid in incomplete_ids
+                        if cid not in changed_set and cid not in new_set
+                    ]
+                    unchanged_ids = [
+                        cid for cid in contracts
+                        if current[cid] is not None
+                        and cid not in changed_set
+                        and cid not in incomplete_set
+                    ]
+                    # Prioridade: novos/alterados primeiro; depois detalhes
+                    # incompletos. Assim a assinatura do universo nunca mascara
+                    # uma coleta parcial.
+                    targets = list(dict.fromkeys(changed_ids + new_ids + retry_ids))[:BATCH_PER_UNIT]
                     comparison_elapsed = perf_counter() - comparison_started
                     performance["comparison"][unidade] = comparison_elapsed
                     print(f"[{unidade}] COMPARACAO TEMPO={comparison_elapsed:.2f}s", flush=True)
-                    print(f"[{unidade}] UNIVERSO={len(contracts)} NOVOS={len(new_ids)} ALTERADOS={len(changed_ids)} SEM_MUDANCA={len(unchanged_ids)} LOTE_ATUAL={len(targets)}/{BATCH_PER_UNIT}", flush=True)
+                    print(
+                        f"[{unidade}] UNIVERSO={len(contracts)} NOVOS={len(new_ids)} "
+                        f"ALTERADOS={len(changed_ids)} INCOMPLETOS_RETRY={len(retry_ids)} "
+                        f"SEM_MUDANCA={len(unchanged_ids)} LOTE_ATUAL={len(targets)}/{BATCH_PER_UNIT}",
+                        flush=True,
+                    )
 
                     detail_started = perf_counter()
                     captured = 0
@@ -297,6 +321,7 @@ def main():
                         "contratos": {cid: signatures[cid] for cid in contracts},
                         "novos_detectados": len(new_ids),
                         "alterados_detectados": len(changed_ids),
+                        "incompletos_para_retry": len(retry_ids),
                         "sem_mudanca": len(unchanged_ids),
                         "lote_planejado": len(targets),
                         "capturados_no_lote": captured,
