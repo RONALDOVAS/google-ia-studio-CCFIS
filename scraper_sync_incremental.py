@@ -1,11 +1,13 @@
-"""Sincronizador CGD por lotes persistentes.
+"""Sincronizador CGD diferencial e persistente.
 
 Objetivo operacional:
 - redescobrir o universo completo Matriz + Filial em cada rodada;
-- processar no maximo 750 contratos por unidade por rodada;
-- priorizar contratos novos ou alterados;
-- persistir o progresso no fim da rodada mesmo que alguns detalhes falhem;
-- na rodada seguinte continuar de onde a base parou;
+- comparar o universo atual com a base ja detalhada;
+- detalhar somente contratos novos, alterados ou incompletos;
+- manter uma pequena fila rotativa para dados dinamicos que possam mudar sem
+  alterar a assinatura da listagem;
+- usar 750 apenas como teto de seguranca por unidade, nunca como meta fixa;
+- persistir o progresso mesmo que alguns detalhes falhem;
 - nunca substituir a base inteira por uma coleta parcial.
 """
 import hashlib
@@ -40,6 +42,8 @@ DATA_PATH = PROJECT_ROOT / "dados_alunos.json"
 SNAPSHOT_PATH = PROJECT_ROOT / "dados_universo_cgd.json"
 MAX_CONTRACTS = max(1, int(os.getenv("CGD_MAX_CONTRACTS", "10000")))
 BATCH_PER_UNIT = max(1, int(os.getenv("CGD_DETAIL_BATCH_PER_UNIT", "750")))
+DYNAMIC_REFRESH_HOURS = max(0, float(os.getenv("CGD_DYNAMIC_REFRESH_HOURS", "24")))
+DYNAMIC_BATCH_PER_UNIT = max(0, int(os.getenv("CGD_DYNAMIC_BATCH_PER_UNIT", "100")))
 LISTING_PAGES = max(1, int(os.getenv("CGD_LISTING_PAGES", "831")))
 LISTING_WORKERS = max(1, int(os.getenv("CGD_LISTING_HTTP_WORKERS", "12")))
 LISTING_TIMEOUT = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
@@ -179,6 +183,22 @@ def signature_changed(existing, current):
     return not old or old != current
 
 
+def dynamic_data_stale(existing, now=None):
+    if DYNAMIC_REFRESH_HOURS <= 0:
+        return False
+    stamp = existing.get("sincronizado_dinamico_em") or existing.get("sincronizado_em")
+    if not stamp:
+        return True
+    try:
+        checked = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        return (current - checked).total_seconds() >= DYNAMIC_REFRESH_HOURS * 3600
+    except Exception:
+        return True
+
+
 def detail(page, unidade, cid, reps, signature):
     print(f"[{unidade}] DETALHE_NECESSARIO cid={cid}", flush=True)
     aluno = scraper.contract_bundle(page, cid, unidade, reps)
@@ -188,16 +208,20 @@ def detail(page, unidade, cid, reps, signature):
         raise RuntimeError(f"aluno nao identificado: {cid}")
     aluno["unidade"] = unidade
     aluno["assinatura_universo_cgd"] = signature
-    aluno["sincronizado_em"] = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    aluno["sincronizado_em"] = now
+    aluno["sincronizado_dinamico_em"] = now
+    aluno["ultima_verificacao_cgd"] = now
     return aluno
 
 
 def main():
     total_started = perf_counter()
     print("=" * 96, flush=True)
-    print("CGD SYNC — UNIVERSO COMPLETO + LOTES DE 750 + PERSISTENCIA INCREMENTAL", flush=True)
-    print("A listagem do universo e completa; o detalhamento pesado e limitado a 750 por unidade por rodada.", flush=True)
-    print("Novos/alterados tem prioridade. O restante continua pendente para a proxima rodada.", flush=True)
+    print("CGD SYNC — UNIVERSO COMPLETO + DIFERENCIAL + PERSISTENCIA", flush=True)
+    print("A listagem do universo e completa; o detalhamento ocorre somente onde ha necessidade.", flush=True)
+    print("750 e apenas teto de seguranca por unidade; nao e meta de processamento.", flush=True)
+    print(f"Fila dinamica rotativa: {DYNAMIC_BATCH_PER_UNIT}/unidade a cada {DYNAMIC_REFRESH_HOURS:g}h.", flush=True)
     print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
     print("OTIMIZACAO: detalhamento paralelo controlado por processos independentes.", flush=True)
     print("=" * 96, flush=True)
@@ -241,6 +265,14 @@ def main():
                         if current[cid] is not None
                         and not bool(current[cid].get("detalhamento_completo"))
                     ]
+                    dynamic_ids = [
+                        cid for cid in contracts
+                        if current[cid] is not None
+                        and cid not in set(new_ids)
+                        and cid not in set(changed_ids)
+                        and cid not in set(incomplete_ids)
+                        and dynamic_data_stale(current[cid])
+                    ]
                     changed_set = set(changed_ids)
                     new_set = set(new_ids)
                     incomplete_set = set(incomplete_ids)
@@ -254,17 +286,20 @@ def main():
                         and cid not in changed_set
                         and cid not in incomplete_set
                     ]
-                    # Prioridade: novos/alterados primeiro; depois detalhes
-                    # incompletos. Assim a assinatura do universo nunca mascara
-                    # uma coleta parcial.
-                    targets = list(dict.fromkeys(changed_ids + new_ids + retry_ids))[:BATCH_PER_UNIT]
+                    priority = list(dict.fromkeys(changed_ids + new_ids + retry_ids))
+                    dynamic_candidates = [cid for cid in dynamic_ids if cid not in priority]
+                    remaining_capacity = max(0, BATCH_PER_UNIT - len(priority))
+                    targets = priority[:BATCH_PER_UNIT]
+                    if remaining_capacity:
+                        targets.extend(dynamic_candidates[:min(DYNAMIC_BATCH_PER_UNIT, remaining_capacity)])
                     comparison_elapsed = perf_counter() - comparison_started
                     performance["comparison"][unidade] = comparison_elapsed
                     print(f"[{unidade}] COMPARACAO TEMPO={comparison_elapsed:.2f}s", flush=True)
                     print(
                         f"[{unidade}] UNIVERSO={len(contracts)} NOVOS={len(new_ids)} "
                         f"ALTERADOS={len(changed_ids)} INCOMPLETOS_RETRY={len(retry_ids)} "
-                        f"SEM_MUDANCA={len(unchanged_ids)} LOTE_ATUAL={len(targets)}/{BATCH_PER_UNIT}",
+                        f"DINAMICOS_STALE={len(dynamic_ids)} SEM_MUDANCA={len(unchanged_ids)} "
+                        f"FILA_ATUAL={len(targets)}/{BATCH_PER_UNIT}",
                         flush=True,
                     )
 
@@ -322,8 +357,11 @@ def main():
                         "novos_detectados": len(new_ids),
                         "alterados_detectados": len(changed_ids),
                         "incompletos_para_retry": len(retry_ids),
+                        "dinamicos_stale": len(dynamic_ids),
                         "sem_mudanca": len(unchanged_ids),
                         "lote_planejado": len(targets),
+                        "teto_seguranca": BATCH_PER_UNIT,
+                        "fila_dinamica_planejada": min(len(dynamic_candidates), DYNAMIC_BATCH_PER_UNIT, max(0, BATCH_PER_UNIT - min(len(priority), BATCH_PER_UNIT))),
                         "capturados_no_lote": captured,
                         "contratos_capturados_no_lote": sorted(captured_ids),
                         "erros_detalhe": len(detail_errors),
