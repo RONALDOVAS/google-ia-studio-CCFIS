@@ -1,7 +1,10 @@
-name: Execução Manual Scraping CGD
+name: Sincronização Automática e Manual Scraping CGD
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '5 20 * * *'
+      timezone: 'America/Belem'
 
 permissions:
   contents: write
@@ -70,6 +73,8 @@ jobs:
           CGD_MAX_LINK_PAGES: '5000'
           CGD_MAX_CONTRACTS: '50000'
           CGD_DETAIL_BATCH_PER_UNIT: '750'
+          CGD_DYNAMIC_REFRESH_HOURS: '24'
+          CGD_DYNAMIC_BATCH_PER_UNIT: '100'
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
@@ -82,9 +87,10 @@ jobs:
           CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
-          Write-Host '=== CGD: MODO OPERACIONAL ESCALADO ==='
-          Write-Host '=== UNIVERSO COMPLETO + LOTE DE 750 POR UNIDADE ==='
-          Write-Host '=== NOVOS/ALTERADOS PRIMEIRO; PENDENTES CONTINUAM ==='
+          Write-Host '=== CGD: SINCRONIZACAO DIFERENCIAL ==='
+          Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
+          Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
+          Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
           Write-Host '=== BROWSER HEADED FORA DA TELA; SEM INTERAÇÃO MANUAL ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
