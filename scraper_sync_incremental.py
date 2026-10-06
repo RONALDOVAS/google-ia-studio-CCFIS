@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 from playwright.sync_api import sync_playwright
+import cgd_http_detail
 
 # O detalhamento usa a mesma pagina autenticada para varias navegacoes.
 # Reduzimos apenas a espera artificial entre navegacoes; nao alteramos timeout,
@@ -199,13 +200,17 @@ def dynamic_data_stale(existing, now=None):
         return True
 
 
-def detail(page, unidade, cid, reps, signature):
-    print(f"[{unidade}] DETALHE_NECESSARIO cid={cid}", flush=True)
-    aluno = scraper.contract_bundle(page, cid, unidade, reps)
-    if not aluno:
-        raise RuntimeError(f"contrato sem resultado: {cid}")
-    if not norm(aluno.get("nome")) or norm(aluno.get("nome")) == f"Contrato {cid}":
-        raise RuntimeError(f"aluno nao identificado: {cid}")
+def detail(page, unidade, cid, reps, signature, http_session):
+    print(f"[{unidade}] DETALHE_NECESSARIO cid={cid} modo=HTTP", flush=True)
+    try:
+        aluno = cgd_http_detail.contract_bundle_http(http_session, cid, unidade, reps)
+        aluno = scraper.validate_real_detail(aluno, cid, unidade)
+        print(f"[{unidade}] DETALHE_HTTP_OK cid={cid}", flush=True)
+    except Exception as http_exc:
+        print(f"[{unidade}] DETALHE_HTTP_FALLBACK_NAVEGADOR cid={cid}: {http_exc!r}", flush=True)
+        aluno = scraper.contract_bundle(page, cid, unidade, reps)
+        aluno = scraper.validate_real_detail(aluno, cid, unidade)
+        aluno["detalhamento_modo"] = "browser_fallback"
     aluno["unidade"] = unidade
     aluno["assinatura_universo_cgd"] = signature
     now = datetime.now(timezone.utc).isoformat()
@@ -213,6 +218,31 @@ def detail(page, unidade, cid, reps, signature):
     aluno["sincronizado_dinamico_em"] = now
     aluno["ultima_verificacao_cgd"] = now
     return aluno
+
+def refresh_dynamic(page, unidade, cid, aluno, http_session):
+    print(f"[{unidade}] DINAMICO_HTTP cid={cid} tipo=frequencia", flush=True)
+    try:
+        freq, _, ok = cgd_http_detail.refresh_frequency(http_session, cid)
+        if not ok:
+            raise RuntimeError("rota de frequencia sem conteúdo")
+        aluno["faltas"] = freq["faltas"]
+        aluno["presencas"] = freq["presencas"]
+        aluno["frequencia_raw"] = freq["registros"]
+        aluno["frequencia_status"] = "COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR"
+        aluno["detalhamento_modo_dinamico"] = "http_autenticado"
+        now = datetime.now(timezone.utc).isoformat()
+        aluno["sincronizado_dinamico_em"] = now
+        aluno["ultima_verificacao_cgd"] = now
+        return aluno
+    except Exception as http_exc:
+        print(f"[{unidade}] DINAMICO_HTTP_FALLBACK_NAVEGADOR cid={cid}: {http_exc!r}", flush=True)
+        aluno2 = scraper.contract_bundle(page, cid, unidade, aluno.get("reposicoes") or [])
+        aluno2["assinatura_universo_cgd"] = aluno.get("assinatura_universo_cgd")
+        now = datetime.now(timezone.utc).isoformat()
+        aluno2["sincronizado_dinamico_em"] = now
+        aluno2["ultima_verificacao_cgd"] = now
+        aluno2["detalhamento_modo_dinamico"] = "browser_fallback"
+        return aluno2
 
 
 def main():
@@ -223,7 +253,7 @@ def main():
     print("750 e apenas teto de seguranca por unidade; nao e meta de processamento.", flush=True)
     print(f"Fila dinamica rotativa: {DYNAMIC_BATCH_PER_UNIT}/unidade a cada {DYNAMIC_REFRESH_HOURS:g}h.", flush=True)
     print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
-    print("OTIMIZACAO: detalhamento paralelo controlado por processos independentes.", flush=True)
+    print("OTIMIZACAO: detalhe HTTP autenticado; navegador apenas login/fallback.", flush=True)
     print("=" * 96, flush=True)
 
     existing = load_json(DATA_PATH, [])
@@ -307,36 +337,29 @@ def main():
                     captured = 0
                     detail_errors = []
                     captured_ids = []
-                    workers = 1
-                    print(f"[{unidade}] INICIO DETALHAMENTO EM SESSAO UNICA: {len(targets)} contratos / 1 worker", flush=True)
-                    if targets:
-                        # O detalhamento permanece no mesmo browser/context/page autenticado
-                        # usado na descoberta da unidade. Nao criar ProcessPool, browser ou
-                        # contexto novo por aluno: isso preserva a sessao viva do CGD durante
-                        # toda a navegacao de detalhes e frequencias.
-                        for idx, cid in enumerate(targets, 1):
-                            try:
-                                print(f"[{unidade}] DETALHE_NECESSARIO {idx}/{len(targets)} cid={cid}", flush=True)
-                                aluno = detail(page, unidade, cid, reps, signatures[cid])
-                                aluno = scraper.validate_real_detail(aluno, cid, unidade)
-                                by_id[(unidade, cid)] = aluno
-                                captured += 1
-                                captured_ids.append(cid)
-                                print(
-                                    f"[{unidade}] DETALHE_OK {idx}/{len(targets)} cid={cid} "
-                                    f"freq={len(aluno.get('frequencia_raw') or [])}",
-                                    flush=True,
-                                )
-                            except Exception as exc:
-                                error = repr(exc)
-                                detail_errors.append((cid, error))
-                                print(f"[{unidade}] DETALHE_ERRO cid={cid}: {error}", flush=True)
-                            if idx % 1 == 0 or idx == len(targets):
-                                print(
-                                    f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(targets)} "
-                                    f"sucesso={captured} falhas={len(detail_errors)}",
-                                    flush=True,
-                                )
+                    http_session = cgd_http_detail.session_from_page(page)
+                    priority_targets = priority[:BATCH_PER_UNIT]
+                    dynamic_targets = [cid for cid in dynamic_candidates if cid not in set(priority_targets)][:max(0, min(DYNAMIC_BATCH_PER_UNIT, BATCH_PER_UNIT - len(priority_targets)))]
+                    print(f"[{unidade}] INICIO DETALHAMENTO: HTTP={len(priority_targets)} DINAMICOS_FREQUENCIA={len(dynamic_targets)}", flush=True)
+                    for idx, cid in enumerate(priority_targets, 1):
+                        try:
+                            aluno = detail(page, unidade, cid, reps, signatures[cid], http_session)
+                            by_id[(unidade, cid)] = aluno
+                            captured += 1
+                            captured_ids.append(cid)
+                            print(f"[{unidade}] DETALHE_OK {idx}/{len(priority_targets)} cid={cid} modo={aluno.get('detalhamento_modo')}", flush=True)
+                        except Exception as exc:
+                            detail_errors.append((cid, repr(exc)))
+                            print(f"[{unidade}] DETALHE_ERRO cid={cid}: {exc!r}", flush=True)
+                        print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(priority_targets)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
+                    for idx, cid in enumerate(dynamic_targets, 1):
+                        try:
+                            aluno = by_id[(unidade, cid)]
+                            by_id[(unidade, cid)] = refresh_dynamic(page, unidade, cid, aluno, http_session)
+                            print(f"[{unidade}] DINAMICO_OK {idx}/{len(dynamic_targets)} cid={cid}", flush=True)
+                        except Exception as exc:
+                            detail_errors.append((cid, repr(exc)))
+                            print(f"[{unidade}] DINAMICO_ERRO cid={cid}: {exc!r}", flush=True)
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
                     print(
@@ -359,9 +382,9 @@ def main():
                         "incompletos_para_retry": len(retry_ids),
                         "dinamicos_stale": len(dynamic_ids),
                         "sem_mudanca": len(unchanged_ids),
-                        "lote_planejado": len(targets),
+                        "lote_planejado": len(priority_targets) + len(dynamic_targets),
                         "teto_seguranca": BATCH_PER_UNIT,
-                        "fila_dinamica_planejada": min(len(dynamic_candidates), DYNAMIC_BATCH_PER_UNIT, max(0, BATCH_PER_UNIT - min(len(priority), BATCH_PER_UNIT))),
+                        "fila_dinamica_planejada": len(dynamic_targets),
                         "capturados_no_lote": captured,
                         "contratos_capturados_no_lote": sorted(captured_ids),
                         "erros_detalhe": len(detail_errors),
