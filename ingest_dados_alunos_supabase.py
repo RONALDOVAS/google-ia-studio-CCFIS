@@ -38,8 +38,8 @@ def nullable_num(*values):
         except: pass
     return None
 
-def date_value(v):
-    s=text(v)
+def date_value(*values):
+    s=text(*values)
     if not s: return None
     if len(s)>=10 and s[2:3]=="/" and s[5:6]=="/": return f"{s[6:10]}-{s[3:5]}-{s[:2]}"
     if len(s)>=10 and s[4:5]=="-": return s[:10]
