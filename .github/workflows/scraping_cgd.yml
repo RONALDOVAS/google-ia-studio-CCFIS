@@ -91,7 +91,7 @@ jobs:
           Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
           Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
           Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
-          Write-Host '=== BROWSER HEADED FORA DA TELA; SEM INTERAÇÃO MANUAL ==='
+          Write-Host '=== NAVEGADOR SOMENTE PARA LOGIN/FALLBACK; DETALHE PRINCIPAL VIA HTTP ==='
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
       - name: Integrar alunos e disciplinas no Supabase
