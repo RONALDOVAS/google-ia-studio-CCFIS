@@ -3,7 +3,7 @@
 Fonte: dados_alunos.json produzido pelo mesmo processo.
 Destino: Supabase via service_role no runner, nunca no frontend.
 """
-import hashlib, json, os
+import hashlib, json, os, re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -80,7 +80,7 @@ def _label_from_snapshots(raw, labels):
         text(raw.get("aluno_raw")),
     ])
     for label in labels:
-        m = __import__("re").search(rf"\\b{__import__('re').escape(label)}\\s*[:\\-]\\s*([^|;\\n]{2,120})", hay, __import__("re").I)
+        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{2,120})", hay, re.I)
         if m:
             return text(m.group(1))
     return ""
@@ -92,7 +92,7 @@ def _first_snapshot_date(raw, labels):
         text(raw.get("aluno_raw")),
     ])
     for label in labels:
-        m = re.search(rf"\\b{re.escape(label)}\\s*[:\\-]?\\s*([^|;\\n]{{2,80}})", hay, re.I)
+        m = re.search(rf"\b{re.escape(label)}\s*[:\-]?\s*([^|;\n]{2,80})", hay, re.I)
         if m:
             d = re.search(r"\\b\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}\\b", m.group(1))
             if d:
@@ -102,7 +102,7 @@ def _first_snapshot_date(raw, labels):
 def _months_snapshot(raw):
     import re
     hay = " | ".join([_snapshot_text(raw, {"contrato","cadastro_aluno"}), text(raw.get("aluno_raw"))])
-    m = re.search(r"\\b(\\d{1,2})\\s*mes(?:es)?\\b", hay, re.I)
+    m = re.search(r"\b(\d{1,2})\s*mes(?:es)?\b", hay, re.I)
     return int(m.group(1)) if m else None
 
 def normalize(raw):
