@@ -94,6 +94,58 @@ def _student_id(html):
     m = re.search(r"/alunos/(\d+)", html or "", re.I)
     return m.group(1) if m else None
 
+def _label_value(text, labels):
+    text = norm(text)
+    for label in labels:
+        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{2,120})", text, re.I)
+        if m:
+            value = norm(m.group(1))
+            if value:
+                return value
+    return None
+
+def _first_date(text, labels):
+    value = _label_value(text, labels)
+    if value:
+        m = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", value)
+        if m:
+            return m.group(0)
+    return None
+
+def _months_from_text(text):
+    m = re.search(r"\b(\d{1,2})\s*mes(?:es)?\b", norm(text), re.I)
+    return int(m.group(1)) if m else None
+
+def _domain_fields(contract_text, course_text, schedule_text, aluno_text):
+    sources = [contract_text, course_text, schedule_text, aluno_text]
+    def first(labels):
+        for source in sources:
+            value = _label_value(source, labels)
+            if value:
+                return value
+        return None
+    def first_date(labels):
+        for source in sources:
+            value = _first_date(source, labels)
+            if value:
+                return value
+        return None
+    def first_months():
+        for source in sources:
+            value = _months_from_text(source)
+            if value:
+                return value
+        return None
+    return {
+        "curso": first(("Curso", "Curso do aluno", "Curso contratado")),
+        "turma": first(("Turma", "Turma atual", "Turma do aluno")),
+        "professor": first(("Professor", "Professor responsável", "Professor responsavel")),
+        "data_matricula": first_date(("Data de matrícula", "Data de matricula")),
+        "data_inicio": first_date(("Data de início", "Data de inicio", "Início", "Inicio")),
+        "data_fim": first_date(("Data de término", "Data de termino", "Término", "Termino", "Data fim")),
+        "meses_contrato_total": first_months(),
+    }
+
 def _frequency(html):
     rec, faltas, pres = [], 0, 0
     for heads, rows in _tables(html):
