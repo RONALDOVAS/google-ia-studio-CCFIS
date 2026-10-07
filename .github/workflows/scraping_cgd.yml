@@ -124,9 +124,25 @@ jobs:
                       continue
                   encontrados.add(cid)
                   status = str(aluno.get('frequencia_status') or '').strip()
-                  registros = [r for r in (aluno.get('frequencia_raw') or []) if isinstance(r, dict) and r.get('classificacao') in ('presenca','falta')]
-                  presencas = sum(r.get('classificacao') == 'presenca' for r in registros)
-                  faltas = sum(r.get('classificacao') == 'falta' for r in registros)
+                  def classificar(r):
+                      if not isinstance(r, dict):
+                          return None
+                      c = str(r.get('classificacao') or '').strip().lower()
+                      if c in ('presenca','falta','reposicao','reposicao_faltou'):
+                          return c
+                      s = str(r.get('status') or '').strip().lower().replace('ç','c').replace('ã','a')
+                      if 'reposicao-faltou' in s or 'reposicao faltou' in s:
+                          return 'reposicao_faltou'
+                      if 'reposicao' in s:
+                          return 'reposicao'
+                      if 'faltou' in s or 'ausente' in s or 'nao compareceu' in s:
+                          return 'falta'
+                      if 'presente' in s or 'compareceu' in s:
+                          return 'presenca'
+                      return None
+                  registros = [r for r in (aluno.get('frequencia_raw') or []) if classificar(r) in ('presenca','falta')]
+                  presencas = sum(classificar(r) == 'presenca' for r in registros)
+                  faltas = sum(classificar(r) == 'falta' for r in registros)
                   if status not in ('COM_FREQUENCIA_REAL', 'SEM_FREQUENCIA_A_INVESTIGAR'):
                       falhas.append((unidade, cid, 'status_invalido', status))
                   if len(registros) != presencas + faltas:
