@@ -118,6 +118,18 @@ def normalize(raw):
         from datetime import date as _date
         mes=_date.today().strftime("%m/%Y")
     meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"),_months_snapshot(raw))
+    if meses is None:
+        inicio_tmp=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
+        fim_tmp=date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")) or date_value(_first_snapshot_date(raw, ("Data de término","Data de termino","Término","Termino","Data fim","Data final")))
+        if inicio_tmp and fim_tmp:
+            try:
+                from datetime import date as _date
+                a,b=_date.fromisoformat(inicio_tmp),_date.fromisoformat(fim_tmp)
+                meses=max(1,(b.year-a.year)*12+b.month-a.month+(1 if b.day>=a.day else 0))
+            except Exception:
+                meses=None
+    if meses is None:
+        meses=12
     disciplinas_raw=raw.get("disciplinas") if isinstance(raw.get("disciplinas"),list) else []
     total_grade=nullable_num(raw.get("total_disciplinas_grade"),raw.get("total_disciplinas"))
     if total_grade is None: total_grade=len(disciplinas_raw)
@@ -143,8 +155,8 @@ def normalize(raw):
       "ultima_aula":date_value(raw.get("ultima_aula")),"ultimo_acesso":timestamp(raw.get("ultimo_acesso")),
       "faltas_totais":max(0,faltas),"faltas_mes_atual":max(0,faltas_mes),"mes_referencia_faltas":mes,
       "reposicoes_realizadas":repos,"dias_em_curso":max(0,num(raw.get("dias_em_curso"),raw.get("dias_curso"),raw.get("dias"))),
-      "criticidade":raw.get("criticidade") or None,"tratativa_sugerida":raw.get("tratativa_sugerida") or raw.get("tratativa") or None,
-      "status_tratativa":raw.get("status_tratativa") or None,"status_matricula":raw.get("status_matricula") or None,
+      "criticidade":raw.get("criticidade") or "normal","tratativa_sugerida":raw.get("tratativa_sugerida") or raw.get("tratativa") or "normal",
+      "status_tratativa":raw.get("status_tratativa") or "pendente","status_matricula":raw.get("status_matricula") or ("bloqueado_faltas" if (not manual and faltas_efetivas>=3) else "ativo"),
       "bloqueado_automaticamente":False if manual else faltas_efetivas>=3,
       "bloqueio_manual_override":manual,
       "motivo_bloqueio":(f"Bloqueio automático: {faltas_efetivas} faltas efetivas no mês {mes}." if not manual and faltas_efetivas>=3 else raw.get("motivo_bloqueio")),
