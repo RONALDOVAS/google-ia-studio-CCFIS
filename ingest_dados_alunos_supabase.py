@@ -62,16 +62,62 @@ def unidade(*values):
     if "filial" in s: return "filial"
     return None
 
+def _snapshot_text(raw, kinds=None):
+    kinds = set(kinds or [])
+    parts = []
+    for snap in raw.get("rotas_cgd") or []:
+        if not isinstance(snap, dict):
+            continue
+        if kinds and str(snap.get("rota") or "").lower() not in kinds:
+            continue
+        parts.append(text(snap.get("texto_corpo")))
+    return " | ".join(x for x in parts if x)
+
+def _label_from_snapshots(raw, labels):
+    hay = " | ".join([
+        text(raw.get("curso"), raw.get("turma"), raw.get("professor")),
+        _snapshot_text(raw, {"contrato","disciplinas","horarios"}),
+        text(raw.get("aluno_raw")),
+    ])
+    for label in labels:
+        m = __import__("re").search(rf"\\b{__import__('re').escape(label)}\\s*[:\\-]\\s*([^|;\\n]{2,120})", hay, __import__("re").I)
+        if m:
+            return text(m.group(1))
+    return ""
+
+def _first_snapshot_date(raw, labels):
+    import re
+    hay = " | ".join([
+        _snapshot_text(raw, {"contrato","cadastro_aluno"}),
+        text(raw.get("aluno_raw")),
+    ])
+    for label in labels:
+        m = re.search(rf"\\b{re.escape(label)}\\s*[:\\-]?\\s*([^|;\\n]{{2,80}})", hay, re.I)
+        if m:
+            d = re.search(r"\\b\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}\\b", m.group(1))
+            if d:
+                return d.group(0)
+    return ""
+
+def _months_snapshot(raw):
+    import re
+    hay = " | ".join([_snapshot_text(raw, {"contrato","cadastro_aluno"}), text(raw.get("aluno_raw"))])
+    m = re.search(r"\\b(\\d{1,2})\\s*mes(?:es)?\\b", hay, re.I)
+    return int(m.group(1)) if m else None
+
 def normalize(raw):
     cid=text(raw.get("contrato"),raw.get("cgd_matricula_id"),raw.get("matricula"),raw.get("id_aluno"))
     nome=text(raw.get("nome"),raw.get("aluno"),raw.get("nome_aluno"))
     un=unidade(raw.get("unidade"),raw.get("filial"))
-    curso=text(raw.get("curso"))
-    inicio=date_value(raw.get("data_inicio"),raw.get("data_matricula"))
-    turma=text(raw.get("turma_nome"),raw.get("turma"))
-    professor=text(raw.get("professor_nome"),raw.get("professor"))
+    curso=text(raw.get("curso")) or _label_from_snapshots(raw, ("Curso", "Curso do aluno", "Curso contratado"))
+    inicio=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
+    turma=text(raw.get("turma_nome"),raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
+    professor=text(raw.get("professor_nome"),raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
     mes=text(raw.get("mes_referencia_faltas"),raw.get("mes_referencia"))
-    meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"))
+    if not mes:
+        from datetime import date as _date
+        mes=_date.today().strftime("%m/%Y")
+    meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"),_months_snapshot(raw))
     disciplinas_raw=raw.get("disciplinas") if isinstance(raw.get("disciplinas"),list) else []
     total_grade=nullable_num(raw.get("total_disciplinas_grade"),raw.get("total_disciplinas"))
     if total_grade is None: total_grade=len(disciplinas_raw)
@@ -140,6 +186,10 @@ def main():
         if a["cgd_matricula_id"] in seen: raise SystemExit(f"Contrato duplicado: {a['cgd_matricula_id']}")
         seen.add(a["cgd_matricula_id"]); alunos.append(a); disciplinas.extend(d)
     print(f"INGESTAO_INTEGRADA_ALUNOS={len(alunos)} DISCIPLINAS={len(disciplinas)} INVALIDOS={len(errors)}",flush=True)
+    if errors:
+        print(f"INGESTAO_INVALIDOS_AMOSTRA={errors[:10]}",flush=True)
+    if not alunos:
+        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
     url=os.getenv("SUPABASE_URL"); key=os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key: raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios")
     sb=create_client(url,key)
@@ -154,6 +204,7 @@ def main():
         batch=disciplinas[i:i+BATCH]
         sb.table("aluno_disciplinas").insert(batch).execute()
         print(f"DISCIPLINAS_PERSISTIDAS={min(i+BATCH,len(disciplinas))}/{len(disciplinas)}",flush=True)
-    print("INGESTAO_INTEGRADA_SUPABASE=OK",flush=True)
+    persisted=len(alunos)
+    print(f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted} DISCIPLINAS_PERSISTIDAS={len(disciplinas)}",flush=True)
 
 if __name__=="__main__": main()
