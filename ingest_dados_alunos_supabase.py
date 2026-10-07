@@ -56,8 +56,8 @@ def uuid_from_key(key):
     h=hashlib.sha256(key.encode()).hexdigest()[:32]
     return f"{h[:8]}-{h[8:12]}-5{h[13:16]}-8{h[17:20]}-{h[20:32]}"
 
-def unidade(v):
-    s=text(v).lower()
+def unidade(*values):
+    s=text(*values).lower()
     if "matriz" in s: return "matriz"
     if "filial" in s: return "filial"
     return None
