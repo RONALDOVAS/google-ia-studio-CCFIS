@@ -94,7 +94,7 @@ def _first_snapshot_date(raw, labels):
     for label in labels:
         m = re.search(rf"\b{re.escape(label)}\s*[:\-]?\s*([^|;\n]{2,80})", hay, re.I)
         if m:
-            d = re.search(r"\\b\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}\\b", m.group(1))
+            d = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", m.group(1))
             if d:
                 return d.group(0)
     return ""
