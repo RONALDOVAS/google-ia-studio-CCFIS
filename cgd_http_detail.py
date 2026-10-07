@@ -204,14 +204,15 @@ def contract_bundle_http(session, cid, unidade, reps):
         name=_name(aluno_html) or name
 
     rows,done,cur,fut=_classify(rows)
+    domain = _domain_fields(ctext, course_text, schedule_text, aluno_html)
     def num(r,k):
         m=re.search(r"\d+",str(r.get(k) or ""))
         return int(m.group()) if m else -1
     point=max(cur,key=lambda r:(num(r,"modulo"),num(r,"passo"),num(r,"progresso"))) if cur else None
     return {
         "cgd_matricula_id":cid,"nome":name,"contrato":cid,"email":None,"telefone":None,
-        "curso":None,"turma":None,"professor":None,"data_matricula":None,"data_inicio":None,
-        "data_fim":None,"unidade":unidade,"faltas":freq["faltas"],"presencas":freq["presencas"],
+        "curso":domain["curso"],"turma":domain["turma"],"professor":domain["professor"],"data_matricula":domain["data_matricula"],"data_inicio":domain["data_inicio"],
+        "data_fim":domain["data_fim"],"meses_contrato_total":domain["meses_contrato_total"],"unidade":unidade,"faltas":freq["faltas"],"presencas":freq["presencas"],
         "ultimo_acesso":None,"criticidade":None,"dias_desde_ultimo_acesso":None,"status":"ATIVO",
         "cgd_url":cu,"disciplinas":rows,"disciplinas_concluidas":done,
         "disciplinas_em_andamento":cur,"disciplinas_futuras":fut,"progresso_atual":point,
