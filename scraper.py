@@ -865,6 +865,16 @@ def validate_real_detail(aluno, cid, u):
         raise RuntimeError(f"[{u}] ROTAS_CGD_INCOMPLETAS cid={cid} ausentes={','.join(missing)}")
     if not aluno.get("detalhamento_completo"):
         raise RuntimeError(f"[{u}] DETALHAMENTO_NAO_COMPLETO cid={cid}")
+    # As rotas podem estar acessíveis mesmo quando as telas JS devolveram
+    # apenas o shell "Carregando...". Sem estes campos o registro não é
+    # persistível no CFIS; isso força o fallback renderizado, sem inventar dados.
+    obrigatorios = ("curso", "turma", "professor", "data_inicio")
+    ausentes = [campo for campo in obrigatorios if not norm(aluno.get(campo))]
+    if ausentes:
+        raise RuntimeError(
+            f"[{u}] CAMPOS_DOMINIO_NAO_CAPTURADOS cid={cid} "
+            f"ausentes={','.join(ausentes)}"
+        )
     return aluno
 
 
