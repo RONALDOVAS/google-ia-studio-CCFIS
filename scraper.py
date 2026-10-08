@@ -556,6 +556,132 @@ def _capture_route_snapshot(page, unidade, cid, route, index):
     }
 
 
+
+def _wait_ajax_route(page, label, max_wait_s=8):
+    """Aguarda uma rota CGD dinâmica sair do estado de shell/carregando."""
+    deadline = __import__("time").monotonic() + max_wait_s
+    while __import__("time").monotonic() < deadline:
+        texto = low(body(page))
+        tabelas = table_data(page)
+        tem_linhas = any(rows for _, rows in tabelas)
+        if "carregando..." not in texto or tem_linhas:
+            return
+        page.wait_for_timeout(500)
+    print(f"[AJAX] TIMEOUT_RENDER label={label} url={page.url}", flush=True)
+
+
+def _campo_rotulado_texto(texto, rotulos):
+    texto = norm(texto)
+    for rotulo in rotulos:
+        padroes = (
+            rf"\b{re.escape(rotulo)}\s*[:\-]\s*([^|;\\n]{{2,160}})",
+            rf"\b{re.escape(rotulo)}\s+([^|;\\n]{{2,160}})",
+        )
+        for padrao in padroes:
+            m = re.search(padrao, texto, re.I)
+            if m:
+                valor = norm(m.group(1))
+                valor = re.split(
+                    r"\s+(?:Curso|Turma|Professor|Data|Status|Situa[cç][aã]o)\s*[:\-]?\s*",
+                    valor, maxsplit=1, flags=re.I
+                )[0]
+                if valor:
+                    return valor
+    return None
+
+
+def _campo_rotulado_dom(page, rotulos):
+    wanted = [low(x) for x in rotulos]
+    try:
+        labels = page.locator("label")
+        for i in range(labels.count()):
+            label = labels.nth(i)
+            if not any(w in low(label.inner_text()) for w in wanted):
+                continue
+            alvo = label.get_attribute("for")
+            if alvo:
+                loc = page.locator(f"#{alvo}")
+                if loc.count():
+                    try:
+                        valor = norm(loc.first.input_value())
+                    except Exception:
+                        valor = norm(loc.first.inner_text())
+                    if valor:
+                        return valor
+            parent = label.locator("xpath=..")
+            for sel in ("input", "select", "textarea"):
+                loc = parent.locator(sel)
+                if loc.count():
+                    try:
+                        valor = norm(loc.first.input_value())
+                    except Exception:
+                        valor = norm(loc.first.inner_text())
+                    if valor:
+                        return valor
+    except Exception:
+        pass
+    return None
+
+
+def _campo_tabela(tabelas, nomes):
+    for heads, rows in tabelas:
+        idx = col(heads, *nomes)
+        if idx is not None:
+            for row in rows:
+                if idx < len(row):
+                    valor = norm(row[idx])
+                    if valor:
+                        return valor
+    return None
+
+
+def _data_rotulada(texto, rotulos):
+    valor = _campo_rotulado_texto(texto, rotulos)
+    if not valor:
+        return None
+    m = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", valor)
+    if not m:
+        return None
+    d, mth, ano = map(int, m.groups())
+    if ano < 100:
+        ano += 2000
+    try:
+        return f"{ano:04d}-{mth:02d}-{d:02d}"
+    except ValueError:
+        return None
+
+
+def _extrair_campos_dominio_browser(page, ctext, course_text, schedule_text, aluno_raw, snapshots):
+    textos = [ctext, course_text, schedule_text, aluno_raw]
+    for snap in snapshots:
+        textos.append(snap.get("texto_corpo") or "")
+    texto = " | ".join(norm(x) for x in textos if norm(x))
+
+    tabelas = []
+    for snap in snapshots:
+        for table in snap.get("tabelas") or []:
+            tabelas.append((table.get("cabecalhos") or [], table.get("linhas") or []))
+
+    curso = _campo_rotulado_dom(page, ("curso", "curso do aluno", "curso contratado"))
+    turma = _campo_rotulado_dom(page, ("turma", "turma atual", "turma do aluno"))
+    professor = _campo_rotulado_dom(page, ("professor", "professor responsável", "professor responsavel"))
+    curso = curso or _campo_rotulado_texto(texto, ("Curso", "Curso do aluno", "Curso contratado"))
+    turma = turma or _campo_rotulado_texto(texto, ("Turma", "Turma atual", "Turma do aluno"))
+    professor = professor or _campo_rotulado_texto(texto, ("Professor", "Professor responsável", "Professor responsavel"))
+    curso = curso or _campo_tabela(tabelas, ("curso",))
+    turma = turma or _campo_tabela(tabelas, ("turma",))
+    professor = professor or _campo_tabela(tabelas, ("professor", "professor responsável", "professor responsavel"))
+
+    return {
+        "curso": curso,
+        "turma": turma,
+        "professor": professor,
+        "data_matricula": _data_rotulada(texto, ("Data de matrícula", "Data de matricula", "Matrícula", "Matricula")),
+        "data_inicio": _data_rotulada(texto, ("Data de início", "Data de inicio", "Início", "Inicio")),
+        "data_fim": _data_rotulada(texto, ("Data de término", "Data de termino", "Término", "Termino", "Data fim")),
+    }
+
+
 def contract_bundle(page, cid, u, reps):
     print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
     cu = contract_url(cid)
@@ -597,6 +723,15 @@ def contract_bundle(page, cid, u, reps):
         route = {"texto": kind, "url": url, "rota": kind, "origem": "rota_conhecida"}
         if not open_page(page, url, u, f"{kind}_individuais_{cid}", 700):
             continue
+        _wait_ajax_route(page, f"{kind}_{cid}")
+        # A aba Cursos é um shell JS em alguns contratos. O próprio CGD
+        # disponibiliza o modal de demonstrativo como rota renderizada; usamos
+        # essa rota somente quando a aba principal ainda está vazia.
+        if kind == "disciplinas" and "carregando..." in low(body(page)):
+            modal_url = f"{CGD_URL.rstrip('/')}/contratos/cursos/modal-demonstrativo-cursos/{cid}"
+            if open_page(page, modal_url, u, f"cursos_modal_{cid}", 500):
+                _wait_ajax_route(page, f"cursos_modal_{cid}")
+                url = modal_url
         visited.add(url.split("#", 1)[0])
         snapshot = {
             "texto": kind,
@@ -675,6 +810,9 @@ def contract_bundle(page, cid, u, reps):
         raise RuntimeError(f"[{u}] DETALHE_INVALIDO_CLOUDFLARE cid={cid}")
 
     rows, done, cur, fut = classify(rows)
+    domain = _extrair_campos_dominio_browser(
+        page, ctext, course_text, schedule_text, at, route_snapshots
+    )
 
     def num(r, k):
         m = re.search(r"\d+", str(r.get(k) or ""))
@@ -695,7 +833,8 @@ def contract_bundle(page, cid, u, reps):
 
     aluno = {
         "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "email": None, "telefone": None,
-        "curso": None, "turma": None, "professor": None, "data_matricula": None, "data_inicio": None, "data_fim": None,
+        "curso": domain.get("curso"), "turma": domain.get("turma"), "professor": domain.get("professor"),
+        "data_matricula": domain.get("data_matricula"), "data_inicio": domain.get("data_inicio"), "data_fim": domain.get("data_fim"),
         "unidade": u, "faltas": freq["faltas"], "presencas": freq["presencas"], "ultimo_acesso": None,
         "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO", "cgd_url": cu,
         "disciplinas": rows, "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
