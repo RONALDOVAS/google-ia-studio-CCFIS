@@ -607,10 +607,18 @@ def _extract_dom_fields(page):
             tag = str(loc.evaluate("(el) => el.tagName")).lower()
             if tag == "select":
                 selected = loc.locator("option:checked")
-                return norm(selected.first.inner_text()) if selected.count() else norm(loc.input_value())
-            if tag in ("input", "textarea"):
-                return norm(loc.input_value())
-            return norm(loc.inner_text())
+                value = norm(selected.first.inner_text()) if selected.count() else norm(loc.input_value())
+            elif tag in ("input", "textarea"):
+                value = norm(loc.input_value())
+            else:
+                value = norm(loc.inner_text())
+            # Um placeholder ("Selecione", "-", etc.) não prova turma/professor.
+            if _key_norm(value).replace("_", " ") in {
+                "", "-", "--", "selecione", "selecione uma opcao",
+                "escolha", "escolha uma opcao", "nao informado", "nao definida",
+            }:
+                return ""
+            return value
         except Exception:
             return ""
 
