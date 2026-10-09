@@ -47,6 +47,16 @@ def _get(session, url, timeout=45):
     html = r.text
     if any(marker in html.lower() for marker in CF_MARKERS):
         raise RuntimeError(f"HTTP_CLOUDFLARE_OU_BLOQUEIO rota={url}")
+    content_type = (r.headers.get("content-type") or "").lower()
+    if "json" in content_type:
+        try:
+            payload = r.json()
+            if isinstance(payload, (dict, list)):
+                if not hasattr(session, "_cgd_json_payloads"):
+                    session._cgd_json_payloads = []
+                session._cgd_json_payloads.append({"url": r.url, "data": payload})
+        except Exception:
+            pass
     return r.url, html
 
 def _tables(html):
@@ -116,8 +126,82 @@ def _months_from_text(text):
     m = re.search(r"\b(\d{1,2})\s*mes(?:es)?\b", norm(text), re.I)
     return int(m.group(1)) if m else None
 
-def _domain_fields(contract_text, course_text, schedule_text, aluno_text):
+def _structured_fields(html):
+    """Extract domain fields from actual form controls and key/value table cells."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    aliases = {
+        "curso": ("curso", "curso do aluno", "curso contratado", "nome do curso"),
+        "turma": ("turma", "turma atual", "turma do aluno", "enturmacao"),
+        "professor": ("professor", "professor responsavel", "professor titular"),
+        "data_inicio": ("data de inicio", "inicio do contrato", "inicio da matricula", "data inicio"),
+        "data_matricula": ("data de matricula", "matricula em"),
+        "data_fim": ("data de termino", "termino do contrato", "data fim", "data final"),
+        "status_matricula": ("status", "situacao", "situacao da matricula", "status da matricula"),
+    }
+    out = {}
+    def field_for(label):
+        label = scraper._key_norm(label).replace("_", " ")
+        for field, names in aliases.items():
+            if any(label == name or label.startswith(name + " ") for name in names):
+                return field
+        return None
+    def save(label, value):
+        field = field_for(label)
+        value = norm(value)
+        if field and value and not out.get(field):
+            out[field] = value
+    def control_value(el):
+        if not el:
+            return ""
+        if el.name == "select":
+            option = el.select_one("option[selected]") or el.select_one("option")
+            return norm(option.get_text(" ", strip=True) if option else el.get("value"))
+        return norm(el.get("value") or el.get_text(" ", strip=True))
+    for label in soup.select("label"):
+        text = label.get_text(" ", strip=True)
+        if not field_for(text):
+            continue
+        control = None
+        target_id = label.get("for")
+        if target_id:
+            control = soup.find(id=target_id)
+        if not control:
+            control = label.find_next(["input", "select", "textarea"])
+        save(text, control_value(control))
+    for el in soup.select("input,select,textarea"):
+        label = " ".join(str(el.get(k) or "") for k in ("aria-label", "placeholder", "name", "id"))
+        save(label, control_value(el))
+    for row in soup.select("tr"):
+        cells = row.find_all(["th", "td"], recursive=False)
+        if len(cells) >= 2:
+            save(cells[0].get_text(" ", strip=True), cells[1].get_text(" ", strip=True))
+    return out
+
+
+def _embedded_json(html):
+    payloads = []
+    soup = BeautifulSoup(html or "", "html.parser")
+    import json
+    for script in soup.select('script[type="application/json"],script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or script.get_text())
+            if isinstance(data, (dict, list)):
+                payloads.append({"url": "embedded-json", "data": data})
+        except Exception:
+            pass
+    return payloads
+
+
+def _domain_fields(contract_text, course_text, schedule_text, aluno_text, cid=None, sid=None, payloads=None):
     sources = [contract_text, course_text, schedule_text, aluno_text]
+    structured = {}
+    json_payloads = list(payloads or [])
+    for source in sources:
+        for field, value in _structured_fields(source).items():
+            if value and not structured.get(field):
+                structured[field] = value
+        json_payloads.extend(_embedded_json(source))
+    network = scraper._extract_json_domain_fields(json_payloads, cid, sid) if cid else {}
     def first(labels):
         for source in sources:
             value = _label_value(source, labels)
@@ -130,21 +214,24 @@ def _domain_fields(contract_text, course_text, schedule_text, aluno_text):
             if value:
                 return value
         return None
-    def first_months():
-        for source in sources:
-            value = _months_from_text(source)
-            if value:
-                return value
-        return None
-    return {
-        "curso": first(("Curso", "Curso do aluno", "Curso contratado")),
-        "turma": first(("Turma", "Turma atual", "Turma do aluno")),
-        "professor": first(("Professor", "Professor responsável", "Professor responsavel")),
-        "data_matricula": first_date(("Data de matrícula", "Data de matricula")),
-        "data_inicio": first_date(("Data de início", "Data de inicio", "Início", "Inicio")),
-        "data_fim": first_date(("Data de término", "Data de termino", "Término", "Termino", "Data fim")),
-        "meses_contrato_total": first_months(),
-    }
+    domain = {}
+    for field, labels in {
+        "curso": ("Curso", "Curso do aluno", "Curso contratado"),
+        "turma": ("Turma", "Turma atual", "Turma do aluno"),
+        "professor": ("Professor", "Professor responsável", "Professor responsavel"),
+        "data_inicio": ("Data de início", "Data de inicio", "Início", "Inicio", "Data matrícula", "Data matricula"),
+        "data_matricula": ("Data de matrícula", "Data de matricula"),
+        "data_fim": ("Data de término", "Data de termino", "Término", "Termino", "Data fim", "Data final"),
+        "status_matricula": ("Status", "Situação", "Situacao da matrícula", "Status da matrícula"),
+    }.items():
+        value = network.get(field) or structured.get(field)
+        if not value:
+            value = first(labels)
+        if field.startswith("data_"):
+            value = scraper._parse_date_value(value or first_date(labels))
+        domain[field] = value
+    evidence = " ".join([_body(x) for x in sources if x] + [str(domain.get("status_matricula") or "")])
+    return scraper._apply_assignment_fallback(domain, evidence)
 
 def _frequency(html):
     rec, faltas, pres = [], 0, 0
@@ -256,14 +343,17 @@ def contract_bundle_http(session, cid, unidade, reps):
         name=_name(aluno_html) or name
 
     rows,done,cur,fut=_classify(rows)
-    domain = _domain_fields(ctext, course_text, schedule_text, aluno_html)
+    domain = _domain_fields(
+        ctext, course_text, schedule_text, aluno_html,
+        cid=cid, sid=sid, payloads=getattr(session, "_cgd_json_payloads", [])
+    )
     def num(r,k):
         m=re.search(r"\d+",str(r.get(k) or ""))
         return int(m.group()) if m else -1
     point=max(cur,key=lambda r:(num(r,"modulo"),num(r,"passo"),num(r,"progresso"))) if cur else None
     return {
         "cgd_matricula_id":cid,"nome":name,"contrato":cid,"email":None,"telefone":None,
-        "curso":domain["curso"],"turma":domain["turma"],"professor":domain["professor"],"data_matricula":domain["data_matricula"],"data_inicio":domain["data_inicio"],
+        "curso":domain["curso"],"turma":domain["turma"],"professor":domain["professor"],"status_matricula":domain.get("status_matricula"),"data_matricula":domain["data_matricula"],"data_inicio":domain["data_inicio"],
         "data_fim":domain["data_fim"],"meses_contrato_total":domain["meses_contrato_total"],"unidade":unidade,"faltas":freq["faltas"],"presencas":freq["presencas"],
         "ultimo_acesso":None,"criticidade":None,"dias_desde_ultimo_acesso":None,"status":"ATIVO",
         "cgd_url":cu,"disciplinas":rows,"disciplinas_concluidas":done,
