@@ -465,7 +465,7 @@ def _route_is_for_entity(url, cid, sid=None):
         return False
     if path.startswith("/contratos/") and str(cid) in segments:
         return True
-    if sid and path.startswith(f"/alunos/{sid}".lower()):
+    if sid and re.match(r"^/alunos/" + re.escape(str(sid)) + r"(?:/|$)", path):
         return True
     return False
 
