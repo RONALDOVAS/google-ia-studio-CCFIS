@@ -327,9 +327,13 @@ def main():
 
         # Só remove disciplinas antigas depois que os novos registros foram
         # aceitos. Limita cada operação para evitar URLs enormes no PostgREST.
+        # Não apagamos a grade existente quando a captura não trouxe nenhuma
+        # disciplina para o aluno; ausência de linhas pode ser falha de extração.
+        students_with_new_disciplines = {d.get("aluno_id") for d in batch_disciplines}
         cleanup_students = [
             a for a in batch
             if bool(raw_by_id.get(a["id"], {}).get("detalhamento_completo"))
+            and a["id"] in students_with_new_disciplines
         ]
         for cleanup_batch in _chunks(cleanup_students, min(BATCH, 100)):
             cleanup_ids = [a["id"] for a in cleanup_batch]
