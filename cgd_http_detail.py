@@ -154,9 +154,17 @@ def _structured_fields(html):
         if not el:
             return ""
         if el.name == "select":
-            option = el.select_one("option[selected]") or el.select_one("option")
-            return norm(option.get_text(" ", strip=True) if option else el.get("value"))
-        return norm(el.get("value") or el.get_text(" ", strip=True))
+            option = el.select_one("option:checked") or el.select_one("option[selected]")
+            value = norm(option.get_text(" ", strip=True) if option else el.get("value"))
+        else:
+            value = norm(el.get("value") or el.get_text(" ", strip=True))
+        # Não trate placeholders de formulário como valores reais do CGD.
+        if scraper._key_norm(value).replace("_", " ") in {
+            "", "-", "--", "selecione", "selecione uma opcao", "escolha",
+            "escolha uma opcao", "selecione...", "nao informado", "nao definida",
+        }:
+            return ""
+        return value
     for label in soup.select("label"):
         text = label.get_text(" ", strip=True)
         if not field_for(text):
