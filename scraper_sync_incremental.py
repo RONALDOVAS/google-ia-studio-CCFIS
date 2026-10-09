@@ -237,6 +237,9 @@ def refresh_dynamic(page, unidade, cid, aluno, http_session):
     except Exception as http_exc:
         print(f"[{unidade}] DINAMICO_HTTP_FALLBACK_NAVEGADOR cid={cid}: {http_exc!r}", flush=True)
         aluno2 = scraper.contract_bundle(page, cid, unidade, aluno.get("reposicoes") or [])
+        aluno2 = scraper.validate_real_detail(aluno2, cid, unidade)
+        # A assinatura antiga só é preservada depois que o novo detalhe passou
+        # pela validação; uma falha mantém o registro anterior intacto e retryable.
         aluno2["assinatura_universo_cgd"] = aluno.get("assinatura_universo_cgd")
         now = datetime.now(timezone.utc).isoformat()
         aluno2["sincronizado_dinamico_em"] = now
@@ -374,9 +377,18 @@ def main():
                         aluno["assinatura_universo_cgd"] = signatures[cid]
                         aluno["visto_no_cgd_em"] = now
 
+                    # O snapshot guarda apenas assinaturas já confirmadas na base.
+                    # Contratos novos/alterados que falharam na extração não avançam
+                    # o hash e serão redescobertos na próxima execução.
+                    confirmed_signatures = {
+                        cid: by_id[(unidade, cid)].get("assinatura_universo_cgd")
+                        for cid in contracts
+                        if by_id.get((unidade, cid))
+                        and by_id[(unidade, cid)].get("assinatura_universo_cgd")
+                    }
                     snapshot["unidades"][unidade] = {
                         "total": len(contracts),
-                        "contratos": {cid: signatures[cid] for cid in contracts},
+                        "contratos": confirmed_signatures,
                         "novos_detectados": len(new_ids),
                         "alterados_detectados": len(changed_ids),
                         "incompletos_para_retry": len(retry_ids),
@@ -389,7 +401,12 @@ def main():
                         "contratos_capturados_no_lote": sorted(captured_ids),
                         "erros_detalhe": len(detail_errors),
                         "paginas_com_erro": listing_errors,
-                        "pendentes_apos_lote": max(0, len(contracts) - sum(1 for cid in contracts if current[cid] is not None) - captured),
+                        "pendentes_apos_lote": sum(
+                            1 for cid in contracts
+                            if not by_id.get((unidade, cid))
+                            or by_id[(unidade, cid)].get("assinatura_universo_cgd") != signatures[cid]
+                            or not bool(by_id[(unidade, cid)].get("detalhamento_completo"))
+                        ),
                         "detalhe_erros": [{"contrato": cid, "erro": err} for cid, err in detail_errors[:100]],
                         "performance_s": {
                             "descoberta": round(discovery_elapsed, 2),
