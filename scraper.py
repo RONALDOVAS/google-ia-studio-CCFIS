@@ -807,22 +807,28 @@ def _extrair_campos_dominio_browser(page, ctext, course_text, schedule_text, alu
 
 
 def _install_response_capture(page):
-    """Capture XHR/Fetch JSON responses during authenticated navigation."""
-    payloads = []
-    def on_response(response):
-        try:
-            if not same_host(response.url) or response.request.resource_type not in ("xhr", "fetch"):
-                return
-            content_type = (response.headers or {}).get("content-type", "").lower()
-            if "json" not in content_type:
-                return
-            data = response.json()
-            if isinstance(data, (dict, list)) and len(payloads) < 200:
-                payloads.append({"url": response.url, "data": data})
-        except Exception:
-            pass
-    page.on("response", on_response)
-    return payloads
+    """Capture XHR/Fetch JSON without adding one permanent listener per contract."""
+    state = getattr(page, "_cgd_response_capture_state", None)
+    if state is None:
+        state = {"payloads": []}
+        def on_response(response):
+            try:
+                payloads = state["payloads"]
+                if not same_host(response.url) or response.request.resource_type not in ("xhr", "fetch"):
+                    return
+                content_type = (response.headers or {}).get("content-type", "").lower()
+                if "json" not in content_type or len(payloads) >= 200:
+                    return
+                data = response.json()
+                if isinstance(data, (dict, list)):
+                    payloads.append({"url": response.url, "data": data})
+            except Exception:
+                pass
+        page.on("response", on_response)
+        page._cgd_response_capture_state = state
+    else:
+        state["payloads"] = []
+    return state["payloads"]
 
 def contract_bundle(page, cid, u, reps):
     print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
