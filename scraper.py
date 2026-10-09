@@ -560,8 +560,8 @@ def _campo_rotulado_texto(texto, rotulos):
     texto = norm(texto)
     for rotulo in rotulos:
         padroes = (
-            rf"\b{re.escape(rotulo)}\s*[:\-]\s*([^|;\\n]{{2,160}})",
-            rf"\b{re.escape(rotulo)}\s+([^|;\\n]{{2,160}})",
+            rf"\b{re.escape(rotulo)}\s*[:\-]\s*([^|;\n]{{2,160}})",
+            rf"\b{re.escape(rotulo)}\s+([^|;\n]{{2,160}})",
         )
         for padrao in padroes:
             m = re.search(padrao, texto, re.I)
