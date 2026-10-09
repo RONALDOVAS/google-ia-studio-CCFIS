@@ -230,6 +230,11 @@ def _domain_fields(contract_text, course_text, schedule_text, aluno_text, cid=No
         if field.startswith("data_"):
             value = scraper._parse_date_value(value or first_date(labels))
         domain[field] = value
+    # Preserve the contract duration field consumed by contract_bundle_http.
+    domain["meses_contrato_total"] = next(
+        (months for source in sources if (months := _months_from_text(source)) is not None),
+        None,
+    )
     evidence = " ".join([_body(x) for x in sources if x] + [str(domain.get("status_matricula") or "")])
     return scraper._apply_assignment_fallback(domain, evidence)
 
