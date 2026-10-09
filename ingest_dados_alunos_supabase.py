@@ -186,37 +186,185 @@ def normalize(raw):
         })
     return aluno,ds,[]
 
-def main():
-    if not DATA.exists(): raise SystemExit("dados_alunos.json não encontrado")
-    raw=json.loads(DATA.read_text(encoding="utf-8"))
-    if not isinstance(raw,list): raise SystemExit("dados_alunos.json precisa ser lista")
-    alunos=[]; disciplinas=[]; errors=[]; seen=set()
-    for i,r in enumerate(raw):
-        if not isinstance(r,dict): errors.append((i,["registro_invalido"])); continue
-        a,d,e=normalize(r)
-        if not a: errors.append((i,e)); continue
-        if a["cgd_matricula_id"] in seen: raise SystemExit(f"Contrato duplicado: {a['cgd_matricula_id']}")
-        seen.add(a["cgd_matricula_id"]); alunos.append(a); disciplinas.extend(d)
-    print(f"INGESTAO_INTEGRADA_ALUNOS={len(alunos)} DISCIPLINAS={len(disciplinas)} INVALIDOS={len(errors)}",flush=True)
-    if errors:
-        print(f"INGESTAO_INVALIDOS_AMOSTRA={errors[:10]}",flush=True)
-    if not alunos:
-        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
-    url=os.getenv("SUPABASE_URL"); key=os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key: raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios")
-    sb=create_client(url,key)
-    for i in range(0,len(alunos),BATCH):
-        batch=alunos[i:i+BATCH]
-        sb.table("alunos").upsert(batch,on_conflict="cgd_matricula_id").execute()
-        print(f"ALUNOS_PERSISTIDOS={min(i+BATCH,len(alunos))}/{len(alunos)}",flush=True)
-    ids=[a["id"] for a in alunos]
-    for i in range(0,len(ids),BATCH):
-        sb.table("aluno_disciplinas").delete().in_("aluno_id",ids[i:i+BATCH]).execute()
-    for i in range(0,len(disciplinas),BATCH):
-        batch=disciplinas[i:i+BATCH]
-        sb.table("aluno_disciplinas").insert(batch).execute()
-        print(f"DISCIPLINAS_PERSISTIDAS={min(i+BATCH,len(disciplinas))}/{len(disciplinas)}",flush=True)
-    persisted=len(alunos)
-    print(f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted} DISCIPLINAS_PERSISTIDAS={len(disciplinas)}",flush=True)
+def _invalid_record_diagnostic(index, raw, missing):
+    fields = {
+        "contrato": text(raw.get("contrato"), raw.get("cgd_matricula_id"), raw.get("matricula"), raw.get("id_aluno")),
+        "nome": text(raw.get("nome"), raw.get("aluno"), raw.get("nome_aluno")),
+        "unidade": text(raw.get("unidade"), raw.get("filial")),
+        "curso": text(raw.get("curso")),
+        "data_inicio": text(raw.get("data_inicio"), raw.get("data_matricula")),
+        "turma_nome": text(raw.get("turma_nome"), raw.get("turma")),
+        "professor_nome": text(raw.get("professor_nome"), raw.get("professor")),
+        "mes_referencia_faltas": text(raw.get("mes_referencia_faltas"), raw.get("mes_referencia")),
+        "meses_contrato_total": text(raw.get("meses_contrato_total"), raw.get("meses_contrato")),
+    }
+    expected = {
+        "contrato": "ID do contrato CGD não vazio e único",
+        "nome": "nome real do aluno",
+        "unidade": "matriz ou filial",
+        "curso": "nome do curso extraído do contrato/matrícula",
+        "data_inicio": "data válida ISO (AAAA-MM-DD) ou brasileira (DD/MM/AAAA)",
+        "turma_nome": "turma real ou fallback explícito SEM TURMA quando a não alocação estiver comprovada",
+        "professor_nome": "professor real ou fallback explícito NÃO ALOCADO quando a não alocação estiver comprovada",
+        "mes_referencia_faltas": "mês de referência das faltas",
+        "meses_contrato_total": "duração do contrato ou valor padrão definido pelo integrador",
+    }
+    print(
+        "INGESTAO_PRIMEIRO_INVALIDO="
+        + json.dumps({
+            "indice": index, "campos_vazios": missing,
+            "valores_recebidos": fields,
+            "esperado_pelo_schema": {key: expected.get(key) for key in missing},
+        }, ensure_ascii=False),
+        flush=True,
+    )
 
-if __name__=="__main__": main()
+
+def _chunks(values, size):
+    for index in range(0, len(values), size):
+        yield values[index:index + size]
+
+
+def main():
+    if not DATA.exists():
+        raise SystemExit("dados_alunos.json não encontrado")
+    raw = json.loads(DATA.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise SystemExit("dados_alunos.json precisa ser lista")
+
+    total_lido = len(raw)
+    alunos, disciplinas, errors, seen = [], [], [], set()
+    raw_by_id = {}
+    for i, record in enumerate(raw):
+        if not isinstance(record, dict):
+            errors.append({"indice": i, "contrato": None, "motivo": ["registro_invalido"]})
+            continue
+        aluno, rows, missing = normalize(record)
+        cid = text(record.get("contrato"), record.get("cgd_matricula_id"), record.get("matricula"), record.get("id_aluno"))
+        if not aluno:
+            errors.append({"indice": i, "contrato": cid or None, "motivo": missing})
+            if not any(e.get("tipo") == "validacao" for e in errors):
+                _invalid_record_diagnostic(i, record, missing)
+            continue
+        if aluno["cgd_matricula_id"] in seen:
+            errors.append({"indice": i, "contrato": cid, "motivo": ["contrato_duplicado"]})
+            print(f"INGESTAO_REGISTRO_REJEITADO indice={i} contrato={cid} motivo=contrato_duplicado", flush=True)
+            continue
+        seen.add(aluno["cgd_matricula_id"])
+        alunos.append(aluno)
+        disciplinas.extend(rows)
+        raw_by_id[aluno["id"]] = record
+
+    print(
+        f"INGESTAO_TOTAL_LIDO={total_lido} VALIDOS={len(alunos)} "
+        f"INVALIDOS={sum(1 for e in errors if e.get('motivo') != ['contrato_duplicado'])} "
+        f"DUPLICADOS={sum(1 for e in errors if e.get('motivo') == ['contrato_duplicado'])} "
+        f"DISCIPLINAS_NORMALIZADAS={len(disciplinas)}",
+        flush=True,
+    )
+    if errors:
+        print("INGESTAO_ERROS_VALIDACAO=" + json.dumps(errors[:100], ensure_ascii=False), flush=True)
+    if not alunos:
+        print("INGESTAO_PERSISTIDOS_SUCESSO=0", flush=True)
+        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
+
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios")
+    sb = create_client(url, key)
+
+    persisted_ids = set()
+    persisted_students = 0
+    persisted_disciplines = 0
+    persistence_errors = []
+    for batch_number, batch in enumerate(_chunks(alunos, BATCH), 1):
+        batch_ids = {a["id"] for a in batch}
+        try:
+            sb.table("alunos").upsert(batch, on_conflict="cgd_matricula_id").execute()
+            persisted_ids.update(batch_ids)
+            persisted_students += len(batch)
+            print(
+                f"SUPABASE_ALUNOS_LOTE={batch_number} "
+                f"SUCESSO={len(batch)} ACUMULADO={persisted_students}/{len(alunos)}",
+                flush=True,
+            )
+        except Exception as exc:
+            message = f"alunos lote {batch_number}: {type(exc).__name__}: {exc}"
+            persistence_errors.append(message)
+            print(f"SUPABASE_ERRO={message}", flush=True)
+            continue
+
+        batch_disciplines = [d for d in disciplinas if d.get("aluno_id") in batch_ids]
+        discipline_ok = True
+        for d_batch_number, d_batch in enumerate(_chunks(batch_disciplines, BATCH), 1):
+            try:
+                # Upsert é idempotente e ocorre antes de limpar linhas antigas.
+                sb.table("aluno_disciplinas").upsert(d_batch, on_conflict="id").execute()
+                persisted_disciplines += len(d_batch)
+                print(
+                    f"SUPABASE_DISCIPLINAS_LOTE_ALUNOS={batch_number} "
+                    f"SUBLOTE={d_batch_number} SUCESSO={len(d_batch)} "
+                    f"ACUMULADO={persisted_disciplines}/{len(disciplinas)}",
+                    flush=True,
+                )
+            except Exception as exc:
+                discipline_ok = False
+                message = f"aluno_disciplinas lote alunos={batch_number} sublote={d_batch_number}: {type(exc).__name__}: {exc}"
+                persistence_errors.append(message)
+                print(f"SUPABASE_ERRO={message}", flush=True)
+                break
+
+        if not discipline_ok:
+            print(
+                f"SUPABASE_LIMPEZA_ANTIGAS_PULADA lote_alunos={batch_number} "
+                "motivo=upsert_disciplinas_incompleto",
+                flush=True,
+            )
+            continue
+
+        # Só remove disciplinas antigas depois que os novos registros foram
+        # aceitos. Limita cada operação para evitar URLs enormes no PostgREST.
+        cleanup_students = [
+            a for a in batch
+            if bool(raw_by_id.get(a["id"], {}).get("detalhamento_completo"))
+        ]
+        for cleanup_batch in _chunks(cleanup_students, min(BATCH, 100)):
+            cleanup_ids = [a["id"] for a in cleanup_batch]
+            keep_ids = [
+                d["id"] for d in batch_disciplines
+                if d.get("aluno_id") in set(cleanup_ids)
+            ]
+            try:
+                query = sb.table("aluno_disciplinas").delete().in_("aluno_id", cleanup_ids)
+                if keep_ids:
+                    query = query.not_.in_("id", keep_ids)
+                query.execute()
+            except Exception as exc:
+                message = f"limpeza disciplinas antigas alunos={cleanup_ids[:5]}: {type(exc).__name__}: {exc}"
+                persistence_errors.append(message)
+                print(f"SUPABASE_ERRO={message}", flush=True)
+
+    print(
+        f"INGESTAO_TOTAL_LIDO={total_lido} VALIDOS={len(alunos)} "
+        f"PERSISTIDOS_SUCESSO={persisted_students} "
+        f"DISCIPLINAS_NORMALIZADAS={len(disciplinas)} "
+        f"DISCIPLINAS_UPSERT_SUCESSO={persisted_disciplines} "
+        f"ERROS_PERSISTENCIA={len(persistence_errors)} ERROS_VALIDACAO={len(errors)}",
+        flush=True,
+    )
+    if persistence_errors:
+        print("INGESTAO_ERROS_PERSISTENCIA=" + json.dumps(persistence_errors[:100], ensure_ascii=False), flush=True)
+    if persisted_students == 0:
+        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIDOS")
+    if persistence_errors or errors:
+        raise SystemExit("INGESTAO_SUPABASE_CONCLUIDA_COM_ERROS")
+    print(
+        f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted_students} "
+        f"DISCIPLINAS_PERSISTIDAS={persisted_disciplines}",
+        flush=True,
+    )
+
+
+if __name__ == "__main__":
+    main()
