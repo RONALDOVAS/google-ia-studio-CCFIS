@@ -235,6 +235,7 @@ def main():
     total_lido = len(raw)
     alunos, disciplinas, errors, seen = [], [], [], set()
     raw_by_id = {}
+    first_invalid_logged = False
     for i, record in enumerate(raw):
         if not isinstance(record, dict):
             errors.append({"indice": i, "contrato": None, "motivo": ["registro_invalido"]})
@@ -243,8 +244,9 @@ def main():
         cid = text(record.get("contrato"), record.get("cgd_matricula_id"), record.get("matricula"), record.get("id_aluno"))
         if not aluno:
             errors.append({"indice": i, "contrato": cid or None, "motivo": missing})
-            if not any(e.get("tipo") == "validacao" for e in errors):
+            if not first_invalid_logged:
                 _invalid_record_diagnostic(i, record, missing)
+                first_invalid_logged = True
             continue
         if aluno["cgd_matricula_id"] in seen:
             errors.append({"indice": i, "contrato": cid, "motivo": ["contrato_duplicado"]})
