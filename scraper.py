@@ -756,7 +756,8 @@ def _apply_assignment_fallback(domain, evidence_text):
         "aguardando enturmacao", "sem professor", "nao alocado",
         "trancado", "desistente", "evadido"
     ))
-    turma_value, professor_value = low(domain.get("turma")), low(domain.get("professor"))
+    turma_value = _key_norm(domain.get("turma")).replace("_", " ")
+    professor_value = _key_norm(domain.get("professor")).replace("_", " ")
     empty_turma = not turma_value or turma_value in {"-", "--", "selecione", "nao informado", "nao enturmado", "sem turma"}
     empty_professor = not professor_value or professor_value in {"-", "--", "selecione", "nao informado", "nao alocado", "sem professor"}
     if unallocated and empty_turma:
