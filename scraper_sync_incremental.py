@@ -511,6 +511,17 @@ def main():
                         except Exception as exc:
                             detail_errors.append((cid, repr(exc)))
                             print(f"[{unidade}] DINAMICO_ERRO cid={cid}: {exc!r}", flush=True)
+                        now_perf = perf_counter()
+                        if (
+                            idx % CHECKPOINT_EVERY_CONTRACTS == 0
+                            or now_perf - last_checkpoint_at >= CHECKPOINT_INTERVAL_SECONDS
+                            or idx == len(dynamic_targets)
+                        ):
+                            _flush_incremental_checkpoint(
+                                by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                                captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                            )
+                            last_checkpoint_at = now_perf
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
                     print(
