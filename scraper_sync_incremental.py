@@ -14,8 +14,6 @@ import hashlib
 import json
 import os
 import re
-import os
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -188,7 +186,7 @@ def atomic_write(path, value):
     temp_name = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="\\n", dir=str(path.parent),
+            mode="w", encoding="utf-8", newline="\n", dir=str(path.parent),
             prefix=f".{path.name}.", suffix=".tmp", delete=False,
         ) as handle:
             temp_name = handle.name
@@ -222,6 +220,7 @@ def _flush_incremental_checkpoint(by_id, snapshot, pending_frequency, unidade,
     }
     unit_info.update({
         "total": len(contracts),
+        "contratos_detectados": dict(signatures),
         "contratos": confirmed,
         "lote_planejado": planned_count,
         "capturados_no_lote": len(captured_ids),
@@ -537,6 +536,7 @@ def main():
                     }
                     snapshot["unidades"][unidade] = {
                         "total": len(contracts),
+                        "contratos_detectados": dict(signatures),
                         "contratos": confirmed_signatures,
                         "novos_detectados": len(new_ids),
                         "alterados_detectados": len(changed_ids),
@@ -589,7 +589,7 @@ def main():
     base_counts = {}
     for unidade, info in snapshot["unidades"].items():
         base_unit = {key(a) for a in merged if str(a.get("unidade") or "").lower() == unidade and key(a)}
-        universe = set(info["contratos"])
+        universe = set((info.get("contratos_detectados") or info["contratos"]))
         pending += len(universe - base_unit)
         base_counts[unidade] = len(base_unit)
         print(f"[{unidade}] BASE_PRESERVADA={len(base_unit)} UNIVERSO={len(universe)} PENDENTES={len(universe - base_unit)}", flush=True)
