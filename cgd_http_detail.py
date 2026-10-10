@@ -320,6 +320,8 @@ def refresh_frequency(session, cid):
     return freq, final, bool(_body(html) or _tables(html))
 
 def contract_bundle_http(session, cid, unidade, reps):
+    # Evita carregar respostas JSON de contratos anteriores na sessão persistente.
+    session._cgd_json_payloads = []
     cu=scraper.contract_url(cid)
     final_contract, contract_html=_get(session,cu)
     ctext=_body(contract_html)
