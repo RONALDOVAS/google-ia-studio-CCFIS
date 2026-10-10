@@ -312,6 +312,24 @@ def main():
             raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_DUPLICADA id={discipline.get('id')}")
         seen_discipline_ids.add(discipline["id"])
 
+    if sample_test:
+        for aluno in alunos:
+            discipline_count = sum(1 for row in disciplinas if row.get("aluno_id") == aluno["id"])
+            print(
+                "PREFLIGHT_ALUNO_VALIDADO="
+                + json.dumps({
+                    "contrato": aluno.get("cgd_matricula_id"),
+                    "nome": aluno.get("nome"),
+                    "unidade": aluno.get("unidade"),
+                    "curso": aluno.get("curso"),
+                    "turma": aluno.get("turma_nome"),
+                    "professor": aluno.get("professor_nome"),
+                    "data_inicio": aluno.get("data_inicio"),
+                    "disciplinas": discipline_count,
+                }, ensure_ascii=False),
+                flush=True,
+            )
+
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
