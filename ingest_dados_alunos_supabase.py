@@ -284,7 +284,7 @@ def main():
         if discipline["aluno_id"] not in valid_student_ids:
             raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_ALUNO_DESCONHECIDO indice={index}")
         if discipline["id"] in seen_discipline_ids:
-            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_DUPLICADA id={discipline[\"id\"]}")
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_DUPLICADA id={discipline.get('id')}")
         seen_discipline_ids.add(discipline["id"])
 
     url = os.getenv("SUPABASE_URL")
