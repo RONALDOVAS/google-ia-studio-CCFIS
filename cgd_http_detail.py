@@ -4,8 +4,11 @@ O navegador autentica a sessão. Depois, os detalhes acadêmicos obrigatórios
 são obtidos por HTTP e processados como HTML, sem renderizar cada rota.
 """
 import re
+import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+
+DETAIL_TIMEOUT_SECONDS = max(5, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "45")))
 import requests
 from bs4 import BeautifulSoup
 
@@ -38,8 +41,9 @@ def session_from_page(page):
         s.headers["User-Agent"] = ua
     return s
 
-def _get(session, url, timeout=45):
-    r = session.get(url, timeout=timeout, allow_redirects=True)
+def _get(session, url, timeout=None):
+    effective_timeout = max(5, int(timeout or DETAIL_TIMEOUT_SECONDS))
+    r = session.get(url, timeout=effective_timeout, allow_redirects=True)
     path = urlparse(r.url).path.rstrip("/").lower()
     if "/login" == path or path.startswith("/login/"):
         raise RuntimeError(f"sessao redirecionada para login: {url}")
