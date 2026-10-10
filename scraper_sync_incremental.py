@@ -333,6 +333,13 @@ def refresh_dynamic(page, unidade, cid, aluno, http_session):
         aluno["ultima_verificacao_cgd"] = now
         return aluno
     except Exception as http_exc:
+        if not ENABLE_BROWSER_FALLBACK:
+            print(
+                f"[{unidade}] DINAMICO_HTTP_FALHOU_FALLBACK_DESATIVADO "
+                f"cid={cid}: {http_exc!r}",
+                flush=True,
+            )
+            raise
         print(f"[{unidade}] DINAMICO_HTTP_FALLBACK_NAVEGADOR cid={cid}: {http_exc!r}", flush=True)
         aluno2 = scraper.contract_bundle(page, cid, unidade, aluno.get("reposicoes") or [])
         aluno2 = scraper.validate_real_detail(aluno2, cid, unidade)
