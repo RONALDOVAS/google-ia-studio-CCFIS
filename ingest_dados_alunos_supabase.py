@@ -110,7 +110,7 @@ def normalize(raw):
     nome=text(raw.get("nome"),raw.get("aluno"),raw.get("nome_aluno"))
     un=unidade(raw.get("unidade"),raw.get("filial"))
     curso=text(raw.get("curso")) or _label_from_snapshots(raw, ("Curso", "Curso do aluno", "Curso contratado"))
-    inicio=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início do período letivo","Inicio do periodo letivo","Início das aulas","Inicio das aulas","Início do módulo","Inicio do modulo","Início","Inicio")))
+    inicio=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Data de início do período letivo","Data de inicio do periodo letivo","Início do período letivo","Inicio do periodo letivo","Data de início das aulas","Data de inicio das aulas","Início das aulas","Inicio das aulas","Data de início do módulo","Data de inicio do modulo","Início do módulo","Inicio do modulo")))
     turma=text(raw.get("turma_nome"),raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
     professor=text(raw.get("professor_nome"),raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
     mes=text(raw.get("mes_referencia_faltas"),raw.get("mes_referencia"))
@@ -119,7 +119,7 @@ def normalize(raw):
         mes=_date.today().strftime("%m/%Y")
     meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"),_months_snapshot(raw))
     if meses is None:
-        inicio_tmp=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início do período letivo","Inicio do periodo letivo","Início das aulas","Inicio das aulas","Início do módulo","Inicio do modulo","Início","Inicio")))
+        inicio_tmp=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Data de início do período letivo","Data de inicio do periodo letivo","Início do período letivo","Inicio do periodo letivo","Data de início das aulas","Data de inicio das aulas","Início das aulas","Inicio das aulas","Data de início do módulo","Data de inicio do modulo","Início do módulo","Inicio do modulo")))
         fim_tmp=date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")) or date_value(_first_snapshot_date(raw, ("Data de término","Data de termino","Término","Termino","Data fim","Data final")))
         if inicio_tmp and fim_tmp:
             try:
