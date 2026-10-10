@@ -110,7 +110,7 @@ def normalize(raw):
     nome=text(raw.get("nome"),raw.get("aluno"),raw.get("nome_aluno"))
     un=unidade(raw.get("unidade"),raw.get("filial"))
     curso=text(raw.get("curso")) or _label_from_snapshots(raw, ("Curso", "Curso do aluno", "Curso contratado"))
-    inicio=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
+    inicio=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início do período letivo","Inicio do periodo letivo","Início das aulas","Inicio das aulas","Início do módulo","Inicio do modulo","Início","Inicio")))
     turma=text(raw.get("turma_nome"),raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
     professor=text(raw.get("professor_nome"),raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
     mes=text(raw.get("mes_referencia_faltas"),raw.get("mes_referencia"))
@@ -119,7 +119,7 @@ def normalize(raw):
         mes=_date.today().strftime("%m/%Y")
     meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"),_months_snapshot(raw))
     if meses is None:
-        inicio_tmp=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
+        inicio_tmp=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início do período letivo","Inicio do periodo letivo","Início das aulas","Inicio das aulas","Início do módulo","Inicio do modulo","Início","Inicio")))
         fim_tmp=date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")) or date_value(_first_snapshot_date(raw, ("Data de término","Data de termino","Término","Termino","Data fim","Data final")))
         if inicio_tmp and fim_tmp:
             try:
@@ -192,7 +192,7 @@ def _invalid_record_diagnostic(index, raw, missing):
         "nome": text(raw.get("nome"), raw.get("aluno"), raw.get("nome_aluno")),
         "unidade": text(raw.get("unidade"), raw.get("filial")),
         "curso": text(raw.get("curso")),
-        "data_inicio": text(raw.get("data_inicio"), raw.get("data_matricula")),
+        "data_inicio": text(raw.get("data_inicio")),
         "turma_nome": text(raw.get("turma_nome"), raw.get("turma")),
         "professor_nome": text(raw.get("professor_nome"), raw.get("professor")),
         "mes_referencia_faltas": text(raw.get("mes_referencia_faltas"), raw.get("mes_referencia")),
@@ -270,6 +270,23 @@ def main():
         print("INGESTAO_PERSISTIDOS_SUCESSO=0", flush=True)
         raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
 
+    # Validate the complete payload before the first Supabase write.
+    if errors:
+        print("INGESTAO_ABORTADA_ANTES_DO_SUPABASE=ERROS_VALIDACAO", flush=True)
+        raise SystemExit("INGESTAO_PAYLOAD_INVALIDO_NENHUMA_ESCRITA_EXECUTADA")
+
+    valid_student_ids = {a["id"] for a in alunos}
+    seen_discipline_ids = set()
+    for index, discipline in enumerate(disciplinas):
+        missing = [field for field in ("id", "aluno_id", "nome", "carga_horaria") if discipline.get(field) in (None, "")]
+        if missing:
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_INVALIDO indice={index} campos={missing}")
+        if discipline["aluno_id"] not in valid_student_ids:
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_ALUNO_DESCONHECIDO indice={index}")
+        if discipline["id"] in seen_discipline_ids:
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_DUPLICADA id={discipline[\"id\"]}")
+        seen_discipline_ids.add(discipline["id"])
+
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
@@ -298,6 +315,9 @@ def main():
             continue
 
         batch_disciplines = [d for d in disciplinas if d.get("aluno_id") in batch_ids]
+        if not batch_disciplines:
+            print(f"SUPABASE_DISCIPLINAS_PRESERVADAS lote_alunos={batch_number} motivo=payload_vazio; nenhum DELETE executado", flush=True)
+            continue
         discipline_ok = True
         for d_batch_number, d_batch in enumerate(_chunks(batch_disciplines, BATCH), 1):
             try:
@@ -325,31 +345,8 @@ def main():
             )
             continue
 
-        # Só remove disciplinas antigas depois que os novos registros foram
-        # aceitos. Limita cada operação para evitar URLs enormes no PostgREST.
-        # Não apagamos a grade existente quando a captura não trouxe nenhuma
-        # disciplina para o aluno; ausência de linhas pode ser falha de extração.
-        students_with_new_disciplines = {d.get("aluno_id") for d in batch_disciplines}
-        cleanup_students = [
-            a for a in batch
-            if bool(raw_by_id.get(a["id"], {}).get("detalhamento_completo"))
-            and a["id"] in students_with_new_disciplines
-        ]
-        for cleanup_batch in _chunks(cleanup_students, min(BATCH, 100)):
-            cleanup_ids = [a["id"] for a in cleanup_batch]
-            keep_ids = [
-                d["id"] for d in batch_disciplines
-                if d.get("aluno_id") in set(cleanup_ids)
-            ]
-            try:
-                query = sb.table("aluno_disciplinas").delete().in_("aluno_id", cleanup_ids)
-                if keep_ids:
-                    query = query.not_.in_("id", keep_ids)
-                query.execute()
-            except Exception as exc:
-                message = f"limpeza disciplinas antigas alunos={cleanup_ids[:5]}: {type(exc).__name__}: {exc}"
-                persistence_errors.append(message)
-                print(f"SUPABASE_ERRO={message}", flush=True)
+        # Preserva integralmente disciplinas antigas: não há DELETE neste integrador.
+        # O upsert por id é idempotente e payload vazio nunca remove linhas.
 
     print(
         f"INGESTAO_TOTAL_LIDO={total_lido} VALIDOS={len(alunos)} "
