@@ -510,14 +510,28 @@ def main():
                                 f"[{unidade}] CIRCUIT_BREAKER_ABERTO motivo={consecutive_reason} "
                                 f"falhas_consecutivas={consecutive_failures}; lote interrompido com checkpoint."
                             )
+                    dynamic_consecutive_reason = None
+                    dynamic_consecutive_failures = 0
                     for idx, cid in enumerate(dynamic_targets, 1):
                         try:
                             aluno = by_id[(unidade, cid)]
                             by_id[(unidade, cid)] = refresh_dynamic(page, unidade, cid, aluno, http_session)
+                            dynamic_consecutive_reason = None
+                            dynamic_consecutive_failures = 0
                             print(f"[{unidade}] DINAMICO_OK {idx}/{len(dynamic_targets)} cid={cid}", flush=True)
                         except Exception as exc:
                             detail_errors.append((cid, repr(exc)))
-                            print(f"[{unidade}] DINAMICO_ERRO cid={cid}: {exc!r}", flush=True)
+                            reason = _failure_reason(exc)
+                            if reason == dynamic_consecutive_reason:
+                                dynamic_consecutive_failures += 1
+                            else:
+                                dynamic_consecutive_reason = reason
+                                dynamic_consecutive_failures = 1
+                            print(
+                                f"[{unidade}] DINAMICO_ERRO cid={cid} motivo={reason} "
+                                f"sequencia_mesmo_motivo={dynamic_consecutive_failures}: {exc!r}",
+                                flush=True,
+                            )
                         now_perf = perf_counter()
                         if (
                             idx % CHECKPOINT_EVERY_CONTRACTS == 0
@@ -529,6 +543,16 @@ def main():
                                 captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
                             )
                             last_checkpoint_at = now_perf
+                        if dynamic_consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                            _flush_incremental_checkpoint(
+                                by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                                captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                            )
+                            raise CircuitBreakerError(
+                                f"[{unidade}] CIRCUIT_BREAKER_ABERTO_DINAMICO "
+                                f"motivo={dynamic_consecutive_reason} "
+                                f"falhas_consecutivas={dynamic_consecutive_failures}; checkpoint salvo."
+                            )
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
                     print(
