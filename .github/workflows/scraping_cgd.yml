@@ -2,6 +2,12 @@ name: Sincronização Automática e Manual Scraping CGD
 
 on:
   workflow_dispatch:
+    inputs:
+      cgd_sample_test:
+        description: 'Executar preflight autenticado com até 3 contratos por unidade'
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '5 20 * * *'
       timezone: 'America/Belem'
@@ -83,7 +89,13 @@ jobs:
           CGD_DETAIL_INTERVAL_MS: '50'
           CGD_DETAIL_WORKERS: '4'
           CGD_PAGE_WAIT_MS: '100'
-          CGD_HEADLESS: 'false'
+          CGD_HEADLESS: 'true'
+          CGD_ENABLE_BROWSER_FALLBACK: 'false'
+          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
+          CGD_LIMIT_CONTRATOS: '3'
+          CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
+          CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
+          CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
           CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
@@ -91,15 +103,17 @@ jobs:
           Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
           Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
           Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
-          Write-Host '=== NAVEGADOR SOMENTE PARA LOGIN/FALLBACK; DETALHE PRINCIPAL VIA HTTP ==='
+          Write-Host '=== CHROMIUM HEADLESS; FALLBACK DE NAVEGADOR DESATIVADO POR PADRAO ==='
+          Write-Host "=== MODO AMOSTRA: $env:CGD_SAMPLE_TEST ==="
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
-          python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
+          python scraper_sync_incremental.py
       - name: Integrar alunos e disciplinas no Supabase
         shell: powershell
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CFIS_IMPORT_BATCH_SIZE: '500'
+          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
         run: |
           Write-Host '=== CFIS: INGESTAO INTEGRADA NO MESMO FLUXO ==='
           python ingest_dados_alunos_supabase.py
@@ -237,7 +251,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push do progresso persistido
-        if: success()
+        if: success() && github.ref == 'refs/heads/main' && inputs.cgd_sample_test != true
         shell: powershell
         run: |
           git config --global user.name 'github-actions[bot]'
