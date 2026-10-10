@@ -177,7 +177,7 @@ def normalize(raw):
         status="concluida" if "concl" in st else ("em_andamento" if "andamento" in st else "pendente")
         ritmo="concluida" if status=="concluida" else ("excesso_tempo" if exc>0 else ("avanco_lento" if perc<50 and esp>=20 else "normal"))
         ds.append({
-          "id":uuid_from_key(f"{aluno['id']}:disciplina:{i}:{dn}"),"aluno_id":aluno["id"],"nome":dn,
+          "id":uuid_from_key(f"{aluno['id']}:disciplina:{dn.casefold()}"),"aluno_id":aluno["id"],"nome":dn,
           "carga_horaria":round(carga),"status":status,"nota":nullable_num(d.get("nota")),
           "frequencia_percent":nullable_num(d.get("frequencia_percent"),d.get("frequencia")),
           "data_conclusao":date_value(d.get("data_conclusao")),"ordem":int(num(d.get("ordem"),i+1)),
