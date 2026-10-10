@@ -759,19 +759,22 @@ def _parse_date_value(value):
 def _apply_assignment_fallback(domain, evidence_text):
     evidence = unicodedata.normalize("NFD", low(evidence_text))
     evidence = "".join(ch for ch in evidence if unicodedata.category(ch) != "Mn")
-    # Status de matrícula (trancado/desistente/evadido) não comprovam,
-    # isoladamente, ausência de turma ou professor.
-    unallocated = any(marker in evidence for marker in (
+    # Só inferimos cada campo quando existe evidência explícita para aquele
+    # campo. Status trancado/desistente/evadido não comprovam não alocação.
+    turma_unallocated = any(marker in evidence for marker in (
         "sem turma", "nao enturmado", "pendente de enturmacao",
-        "aguardando enturmacao", "sem professor", "nao alocado"
+        "aguardando enturmacao",
+    ))
+    professor_unallocated = any(marker in evidence for marker in (
+        "sem professor", "nao alocado",
     ))
     turma_value = _key_norm(domain.get("turma")).replace("_", " ")
     professor_value = _key_norm(domain.get("professor")).replace("_", " ")
     empty_turma = not turma_value or turma_value in {"-", "--", "selecione", "nao informado", "nao enturmado", "sem turma"}
     empty_professor = not professor_value or professor_value in {"-", "--", "selecione", "nao informado", "nao alocado", "sem professor"}
-    if unallocated and empty_turma:
+    if turma_unallocated and empty_turma:
         domain["turma"] = "SEM TURMA"
-    if unallocated and empty_professor:
+    if professor_unallocated and empty_professor:
         domain["professor"] = "NÃO ALOCADO"
     return domain
 
