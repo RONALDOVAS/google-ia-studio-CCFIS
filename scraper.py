@@ -29,7 +29,7 @@ DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
 PAGE_WAIT_MS = max(0, int(os.getenv("CGD_PAGE_WAIT_MS", "500")))
 PAGE_TIMEOUT_MS = max(10000, int(os.getenv("CGD_PAGE_TIMEOUT_MS", "30000")))
 DIAGNOSTICO = os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim")
-HEADLESS = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
+HEADLESS = True
 
 
 def norm(v):
@@ -705,7 +705,7 @@ def _extract_json_domain_fields(payloads, cid, sid=None):
         "curso": {"curso", "curso_nome", "nome_curso", "curso_contratado", "course", "course_name"},
         "turma": {"turma", "turma_nome", "nome_turma", "turma_atual", "class", "class_name"},
         "professor": {"professor", "professor_nome", "nome_professor", "professor_responsavel", "teacher", "teacher_name"},
-        "data_inicio": {"data_inicio", "inicio", "inicio_matricula", "data_matricula", "data_inicio_contrato", "start_date", "enrollment_date"},
+        "data_inicio": {"data_inicio", "inicio", "inicio_periodo_letivo", "inicio_aulas", "inicio_modulo", "data_inicio_contrato", "start_date"},
         "data_matricula": {"data_matricula", "matricula_em", "enrollment_date"},
         "data_fim": {"data_fim", "data_termino", "termino", "fim_contrato", "end_date"},
         "status_matricula": {"status_matricula", "situacao_matricula", "status", "situacao", "state"},
@@ -759,10 +759,11 @@ def _parse_date_value(value):
 def _apply_assignment_fallback(domain, evidence_text):
     evidence = unicodedata.normalize("NFD", low(evidence_text))
     evidence = "".join(ch for ch in evidence if unicodedata.category(ch) != "Mn")
+    # Status de matrícula (trancado/desistente/evadido) não comprovam,
+    # isoladamente, ausência de turma ou professor.
     unallocated = any(marker in evidence for marker in (
         "sem turma", "nao enturmado", "pendente de enturmacao",
-        "aguardando enturmacao", "sem professor", "nao alocado",
-        "trancado", "desistente", "evadido"
+        "aguardando enturmacao", "sem professor", "nao alocado"
     ))
     turma_value = _key_norm(domain.get("turma")).replace("_", " ")
     professor_value = _key_norm(domain.get("professor")).replace("_", " ")
@@ -1064,7 +1065,7 @@ def detail_worker(args):
     profile.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+            browser = pw.chromium.launch(headless=True)
             context = browser.new_context(storage_state=storage_state)
             page = context.new_page()
             aluno = contract_bundle(page, cid, u, reps)
@@ -1134,7 +1135,7 @@ def run_unit(u, cfg, pw):
         raise RuntimeError(f"PATCH_FREQUENCIA_REAL_ERRO: {type(exc).__name__}: {exc}") from exc
     profile = EDGE_PROFILE_BASE / u
     profile.mkdir(parents=True, exist_ok=True)
-    browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+    browser = pw.chromium.launch(headless=True)
     context = browser.new_context()
     page = context.new_page()
     try:
