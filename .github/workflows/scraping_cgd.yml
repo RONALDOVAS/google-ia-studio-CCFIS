@@ -40,8 +40,8 @@ jobs:
       - name: Validar parser de frequência determinístico
         shell: powershell
         run: |
-          python -m unittest -v test_frequencia_parser_cgd.py
-          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py frequency_runtime_patch.py frequencia_parser_cgd.py
+          python -m unittest -v test_frequencia_parser_cgd.py test_cgd_domain_semantics.py
+          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py browser_runtime_patch.py frequency_runtime_patch.py frequencia_parser_cgd.py test_cgd_domain_semantics.py
           python -c "import sitecustomize; import frequency_runtime_patch; print('PREFLIGHT_IMPORTS_CGD=OK')"
       - name: Validar Secrets obrigatórios
         shell: powershell
