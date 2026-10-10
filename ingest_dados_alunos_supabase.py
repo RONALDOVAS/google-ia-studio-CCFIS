@@ -232,6 +232,31 @@ def main():
     if not isinstance(raw, list):
         raise SystemExit("dados_alunos.json precisa ser lista")
 
+    sample_test = os.getenv("CGD_SAMPLE_TEST", "0").lower() in ("1", "true", "yes", "sim")
+    if sample_test:
+        snapshot_path = ROOT / "dados_universo_cgd.json"
+        if not snapshot_path.exists():
+            raise SystemExit("PREFLIGHT_AMOSTRA_SEM_SNAPSHOT")
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        selected = {
+            (str(unit).lower(), str(cid).strip())
+            for unit, ids in (snapshot.get("sample_test_contracts") or {}).items()
+            for cid in ids
+        }
+        if not selected:
+            raise SystemExit("PREFLIGHT_AMOSTRA_SEM_CONTRATOS_VALIDOS; nenhuma escrita no Supabase")
+        raw = [
+            record for record in raw
+            if isinstance(record, dict)
+            and (
+                str(record.get("unidade") or "").lower(),
+                str(record.get("contrato") or record.get("cgd_matricula_id") or "").strip(),
+            ) in selected
+        ]
+        print(f"PREFLIGHT_AMOSTRA_INGESTAO_CONTRATOS={len(raw)} ids={sorted(selected)}", flush=True)
+        if not raw:
+            raise SystemExit("PREFLIGHT_AMOSTRA_CONTRATOS_NAO_ENCONTRADOS_NA_BASE")
+
     total_lido = len(raw)
     alunos, disciplinas, errors, seen = [], [], [], set()
     raw_by_id = {}
