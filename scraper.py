@@ -705,7 +705,7 @@ def _extract_json_domain_fields(payloads, cid, sid=None):
         "curso": {"curso", "curso_nome", "nome_curso", "curso_contratado", "course", "course_name"},
         "turma": {"turma", "turma_nome", "nome_turma", "turma_atual", "class", "class_name"},
         "professor": {"professor", "professor_nome", "nome_professor", "professor_responsavel", "teacher", "teacher_name"},
-        "data_inicio": {"data_inicio", "inicio", "inicio_periodo_letivo", "inicio_aulas", "inicio_modulo", "data_inicio_contrato", "start_date"},
+        "data_inicio": {"data_inicio", "inicio_periodo_letivo", "inicio_aulas", "inicio_modulo", "start_date"},
         "data_matricula": {"data_matricula", "matricula_em", "enrollment_date"},
         "data_fim": {"data_fim", "data_termino", "termino", "fim_contrato", "end_date"},
         "status_matricula": {"status_matricula", "situacao_matricula", "status", "situacao", "state"},
