@@ -2,6 +2,12 @@ name: Sincronização Automática e Manual Scraping CGD
 
 on:
   workflow_dispatch:
+    inputs:
+      cgd_sample_test:
+        description: 'Executar preflight autenticado com até 3 contratos por unidade'
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '5 20 * * *'
       timezone: 'America/Belem'
@@ -34,8 +40,8 @@ jobs:
       - name: Validar parser de frequência determinístico
         shell: powershell
         run: |
-          python -m unittest -v test_frequencia_parser_cgd.py
-          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py frequency_runtime_patch.py frequencia_parser_cgd.py
+          python -m unittest -v test_frequencia_parser_cgd.py test_cgd_domain_semantics.py
+          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py browser_runtime_patch.py frequency_runtime_patch.py frequencia_parser_cgd.py test_cgd_domain_semantics.py
           python -c "import sitecustomize; import frequency_runtime_patch; print('PREFLIGHT_IMPORTS_CGD=OK')"
       - name: Validar Secrets obrigatórios
         shell: powershell
@@ -83,7 +89,13 @@ jobs:
           CGD_DETAIL_INTERVAL_MS: '50'
           CGD_DETAIL_WORKERS: '4'
           CGD_PAGE_WAIT_MS: '100'
-          CGD_HEADLESS: 'false'
+          CGD_HEADLESS: 'true'
+          CGD_ENABLE_BROWSER_FALLBACK: 'false'
+          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
+          CGD_LIMIT_CONTRATOS: '3'
+          CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
+          CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
+          CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
           CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
@@ -91,15 +103,35 @@ jobs:
           Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
           Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
           Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
-          Write-Host '=== NAVEGADOR SOMENTE PARA LOGIN/FALLBACK; DETALHE PRINCIPAL VIA HTTP ==='
+          Write-Host '=== CHROMIUM HEADLESS; FALLBACK DE NAVEGADOR DESATIVADO POR PADRAO ==='
+          Write-Host "=== MODO AMOSTRA: $env:CGD_SAMPLE_TEST ==="
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
-          python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
+          python scraper_sync_incremental.py
+      - name: Validar amostra real das duas unidades
+        if: inputs.cgd_sample_test == true
+        shell: powershell
+        env:
+          CGD_SAMPLE_TEST: '1'
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snapshot = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          samples = snapshot.get('sample_test_contracts') or {}
+          for unit in ('matriz', 'filial'):
+              ids = samples.get(unit) or []
+              print(f'PREFLIGHT_AMOSTRA_{unit.upper()}={len(ids)} CONTRATOS={ids}')
+              if not 2 <= len(ids) <= 3:
+                  raise SystemExit(f'Preflight reprovado: {unit} precisa de 2 a 3 contratos capturados; obtido={len(ids)}')
+          print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
+          '@ | python
       - name: Integrar alunos e disciplinas no Supabase
         shell: powershell
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CFIS_IMPORT_BATCH_SIZE: '500'
+          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
         run: |
           Write-Host '=== CFIS: INGESTAO INTEGRADA NO MESMO FLUXO ==='
           python ingest_dados_alunos_supabase.py
@@ -184,7 +216,7 @@ jobs:
           seen = set()
           for unidade in ('matriz', 'filial'):
               info = unidades[unidade]
-              universe = set(info.get('contratos', {}).keys())
+              universe = set((info.get('contratos_detectados') or info.get('contratos', {})).keys())
               total = int(info.get('total', 0))
               lote = int(info.get('lote_planejado', 0))
               capturados = int(info.get('capturados_no_lote', 0))
@@ -237,7 +269,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push do progresso persistido
-        if: success()
+        if: success() && github.ref == 'refs/heads/main' && inputs.cgd_sample_test != true
         shell: powershell
         run: |
           git config --global user.name 'github-actions[bot]'

@@ -110,7 +110,7 @@ def normalize(raw):
     nome=text(raw.get("nome"),raw.get("aluno"),raw.get("nome_aluno"))
     un=unidade(raw.get("unidade"),raw.get("filial"))
     curso=text(raw.get("curso")) or _label_from_snapshots(raw, ("Curso", "Curso do aluno", "Curso contratado"))
-    inicio=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
+    inicio=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Data de início do período letivo","Data de inicio do periodo letivo","Início do período letivo","Inicio do periodo letivo","Data de início das aulas","Data de inicio das aulas","Início das aulas","Inicio das aulas","Data de início do módulo","Data de inicio do modulo","Início do módulo","Inicio do modulo")))
     turma=text(raw.get("turma_nome"),raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
     professor=text(raw.get("professor_nome"),raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
     mes=text(raw.get("mes_referencia_faltas"),raw.get("mes_referencia"))
@@ -119,7 +119,7 @@ def normalize(raw):
         mes=_date.today().strftime("%m/%Y")
     meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"),_months_snapshot(raw))
     if meses is None:
-        inicio_tmp=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
+        inicio_tmp=date_value(raw.get("data_inicio")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Data de início do período letivo","Data de inicio do periodo letivo","Início do período letivo","Inicio do periodo letivo","Data de início das aulas","Data de inicio das aulas","Início das aulas","Inicio das aulas","Data de início do módulo","Data de inicio do modulo","Início do módulo","Inicio do modulo")))
         fim_tmp=date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")) or date_value(_first_snapshot_date(raw, ("Data de término","Data de termino","Término","Termino","Data fim","Data final")))
         if inicio_tmp and fim_tmp:
             try:
@@ -177,7 +177,7 @@ def normalize(raw):
         status="concluida" if "concl" in st else ("em_andamento" if "andamento" in st else "pendente")
         ritmo="concluida" if status=="concluida" else ("excesso_tempo" if exc>0 else ("avanco_lento" if perc<50 and esp>=20 else "normal"))
         ds.append({
-          "id":uuid_from_key(f"{aluno['id']}:disciplina:{i}:{dn}"),"aluno_id":aluno["id"],"nome":dn,
+          "id":uuid_from_key(f"{aluno['id']}:disciplina:{dn.casefold()}"),"aluno_id":aluno["id"],"nome":dn,
           "carga_horaria":round(carga),"status":status,"nota":nullable_num(d.get("nota")),
           "frequencia_percent":nullable_num(d.get("frequencia_percent"),d.get("frequencia")),
           "data_conclusao":date_value(d.get("data_conclusao")),"ordem":int(num(d.get("ordem"),i+1)),
@@ -186,37 +186,231 @@ def normalize(raw):
         })
     return aluno,ds,[]
 
-def main():
-    if not DATA.exists(): raise SystemExit("dados_alunos.json não encontrado")
-    raw=json.loads(DATA.read_text(encoding="utf-8"))
-    if not isinstance(raw,list): raise SystemExit("dados_alunos.json precisa ser lista")
-    alunos=[]; disciplinas=[]; errors=[]; seen=set()
-    for i,r in enumerate(raw):
-        if not isinstance(r,dict): errors.append((i,["registro_invalido"])); continue
-        a,d,e=normalize(r)
-        if not a: errors.append((i,e)); continue
-        if a["cgd_matricula_id"] in seen: raise SystemExit(f"Contrato duplicado: {a['cgd_matricula_id']}")
-        seen.add(a["cgd_matricula_id"]); alunos.append(a); disciplinas.extend(d)
-    print(f"INGESTAO_INTEGRADA_ALUNOS={len(alunos)} DISCIPLINAS={len(disciplinas)} INVALIDOS={len(errors)}",flush=True)
-    if errors:
-        print(f"INGESTAO_INVALIDOS_AMOSTRA={errors[:10]}",flush=True)
-    if not alunos:
-        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
-    url=os.getenv("SUPABASE_URL"); key=os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key: raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios")
-    sb=create_client(url,key)
-    for i in range(0,len(alunos),BATCH):
-        batch=alunos[i:i+BATCH]
-        sb.table("alunos").upsert(batch,on_conflict="cgd_matricula_id").execute()
-        print(f"ALUNOS_PERSISTIDOS={min(i+BATCH,len(alunos))}/{len(alunos)}",flush=True)
-    ids=[a["id"] for a in alunos]
-    for i in range(0,len(ids),BATCH):
-        sb.table("aluno_disciplinas").delete().in_("aluno_id",ids[i:i+BATCH]).execute()
-    for i in range(0,len(disciplinas),BATCH):
-        batch=disciplinas[i:i+BATCH]
-        sb.table("aluno_disciplinas").insert(batch).execute()
-        print(f"DISCIPLINAS_PERSISTIDAS={min(i+BATCH,len(disciplinas))}/{len(disciplinas)}",flush=True)
-    persisted=len(alunos)
-    print(f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted} DISCIPLINAS_PERSISTIDAS={len(disciplinas)}",flush=True)
+def _invalid_record_diagnostic(index, raw, missing):
+    fields = {
+        "contrato": text(raw.get("contrato"), raw.get("cgd_matricula_id"), raw.get("matricula"), raw.get("id_aluno")),
+        "nome": text(raw.get("nome"), raw.get("aluno"), raw.get("nome_aluno")),
+        "unidade": text(raw.get("unidade"), raw.get("filial")),
+        "curso": text(raw.get("curso")),
+        "data_inicio": text(raw.get("data_inicio")),
+        "turma_nome": text(raw.get("turma_nome"), raw.get("turma")),
+        "professor_nome": text(raw.get("professor_nome"), raw.get("professor")),
+        "mes_referencia_faltas": text(raw.get("mes_referencia_faltas"), raw.get("mes_referencia")),
+        "meses_contrato_total": text(raw.get("meses_contrato_total"), raw.get("meses_contrato")),
+    }
+    expected = {
+        "contrato": "ID do contrato CGD não vazio e único",
+        "nome": "nome real do aluno",
+        "unidade": "matriz ou filial",
+        "curso": "nome do curso extraído do contrato/matrícula",
+        "data_inicio": "data válida ISO (AAAA-MM-DD) ou brasileira (DD/MM/AAAA)",
+        "turma_nome": "turma real ou fallback explícito SEM TURMA quando a não alocação estiver comprovada",
+        "professor_nome": "professor real ou fallback explícito NÃO ALOCADO quando a não alocação estiver comprovada",
+        "mes_referencia_faltas": "mês de referência das faltas",
+        "meses_contrato_total": "duração do contrato ou valor padrão definido pelo integrador",
+    }
+    print(
+        "INGESTAO_PRIMEIRO_INVALIDO="
+        + json.dumps({
+            "indice": index, "campos_vazios": missing,
+            "valores_recebidos": fields,
+            "esperado_pelo_schema": {key: expected.get(key) for key in missing},
+        }, ensure_ascii=False),
+        flush=True,
+    )
 
-if __name__=="__main__": main()
+
+def _chunks(values, size):
+    for index in range(0, len(values), size):
+        yield values[index:index + size]
+
+
+def main():
+    if not DATA.exists():
+        raise SystemExit("dados_alunos.json não encontrado")
+    raw = json.loads(DATA.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise SystemExit("dados_alunos.json precisa ser lista")
+
+    sample_test = os.getenv("CGD_SAMPLE_TEST", "0").lower() in ("1", "true", "yes", "sim")
+    if sample_test:
+        snapshot_path = ROOT / "dados_universo_cgd.json"
+        if not snapshot_path.exists():
+            raise SystemExit("PREFLIGHT_AMOSTRA_SEM_SNAPSHOT")
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        selected = {
+            (str(unit).lower(), str(cid).strip())
+            for unit, ids in (snapshot.get("sample_test_contracts") or {}).items()
+            for cid in ids
+        }
+        if not selected:
+            raise SystemExit("PREFLIGHT_AMOSTRA_SEM_CONTRATOS_VALIDOS; nenhuma escrita no Supabase")
+        raw = [
+            record for record in raw
+            if isinstance(record, dict)
+            and (
+                str(record.get("unidade") or "").lower(),
+                str(record.get("contrato") or record.get("cgd_matricula_id") or "").strip(),
+            ) in selected
+        ]
+        print(f"PREFLIGHT_AMOSTRA_INGESTAO_CONTRATOS={len(raw)} ids={sorted(selected)}", flush=True)
+        if not raw:
+            raise SystemExit("PREFLIGHT_AMOSTRA_CONTRATOS_NAO_ENCONTRADOS_NA_BASE")
+
+    total_lido = len(raw)
+    alunos, disciplinas, errors, seen = [], [], [], set()
+    raw_by_id = {}
+    first_invalid_logged = False
+    for i, record in enumerate(raw):
+        if not isinstance(record, dict):
+            errors.append({"indice": i, "contrato": None, "motivo": ["registro_invalido"]})
+            continue
+        aluno, rows, missing = normalize(record)
+        cid = text(record.get("contrato"), record.get("cgd_matricula_id"), record.get("matricula"), record.get("id_aluno"))
+        if not aluno:
+            errors.append({"indice": i, "contrato": cid or None, "motivo": missing})
+            if not first_invalid_logged:
+                _invalid_record_diagnostic(i, record, missing)
+                first_invalid_logged = True
+            continue
+        if aluno["cgd_matricula_id"] in seen:
+            errors.append({"indice": i, "contrato": cid, "motivo": ["contrato_duplicado"]})
+            print(f"INGESTAO_REGISTRO_REJEITADO indice={i} contrato={cid} motivo=contrato_duplicado", flush=True)
+            continue
+        seen.add(aluno["cgd_matricula_id"])
+        alunos.append(aluno)
+        disciplinas.extend(rows)
+        raw_by_id[aluno["id"]] = record
+
+    print(
+        f"INGESTAO_TOTAL_LIDO={total_lido} VALIDOS={len(alunos)} "
+        f"INVALIDOS={sum(1 for e in errors if e.get('motivo') != ['contrato_duplicado'])} "
+        f"DUPLICADOS={sum(1 for e in errors if e.get('motivo') == ['contrato_duplicado'])} "
+        f"DISCIPLINAS_NORMALIZADAS={len(disciplinas)}",
+        flush=True,
+    )
+    if errors:
+        print("INGESTAO_ERROS_VALIDACAO=" + json.dumps(errors[:100], ensure_ascii=False), flush=True)
+    if not alunos:
+        print("INGESTAO_PERSISTIDOS_SUCESSO=0", flush=True)
+        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
+
+    # Validate the complete payload before the first Supabase write.
+    if errors:
+        print("INGESTAO_ABORTADA_ANTES_DO_SUPABASE=ERROS_VALIDACAO", flush=True)
+        raise SystemExit("INGESTAO_PAYLOAD_INVALIDO_NENHUMA_ESCRITA_EXECUTADA")
+
+    valid_student_ids = {a["id"] for a in alunos}
+    seen_discipline_ids = set()
+    for index, discipline in enumerate(disciplinas):
+        missing = [field for field in ("id", "aluno_id", "nome", "carga_horaria") if discipline.get(field) in (None, "")]
+        if missing:
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_INVALIDO indice={index} campos={missing}")
+        if discipline["aluno_id"] not in valid_student_ids:
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_ALUNO_DESCONHECIDO indice={index}")
+        if discipline["id"] in seen_discipline_ids:
+            raise SystemExit(f"INGESTAO_PAYLOAD_DISCIPLINA_DUPLICADA id={discipline.get('id')}")
+        seen_discipline_ids.add(discipline["id"])
+
+    if sample_test:
+        for aluno in alunos:
+            discipline_count = sum(1 for row in disciplinas if row.get("aluno_id") == aluno["id"])
+            print(
+                "PREFLIGHT_ALUNO_VALIDADO="
+                + json.dumps({
+                    "contrato": aluno.get("cgd_matricula_id"),
+                    "nome": aluno.get("nome"),
+                    "unidade": aluno.get("unidade"),
+                    "curso": aluno.get("curso"),
+                    "turma": aluno.get("turma_nome"),
+                    "professor": aluno.get("professor_nome"),
+                    "data_inicio": aluno.get("data_inicio"),
+                    "disciplinas": discipline_count,
+                }, ensure_ascii=False),
+                flush=True,
+            )
+
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios")
+    sb = create_client(url, key)
+
+    persisted_ids = set()
+    persisted_students = 0
+    persisted_disciplines = 0
+    persistence_errors = []
+    for batch_number, batch in enumerate(_chunks(alunos, BATCH), 1):
+        batch_ids = {a["id"] for a in batch}
+        try:
+            sb.table("alunos").upsert(batch, on_conflict="cgd_matricula_id").execute()
+            persisted_ids.update(batch_ids)
+            persisted_students += len(batch)
+            print(
+                f"SUPABASE_ALUNOS_LOTE={batch_number} "
+                f"SUCESSO={len(batch)} ACUMULADO={persisted_students}/{len(alunos)}",
+                flush=True,
+            )
+        except Exception as exc:
+            message = f"alunos lote {batch_number}: {type(exc).__name__}: {exc}"
+            persistence_errors.append(message)
+            print(f"SUPABASE_ERRO={message}", flush=True)
+            continue
+
+        batch_disciplines = [d for d in disciplinas if d.get("aluno_id") in batch_ids]
+        if not batch_disciplines:
+            print(f"SUPABASE_DISCIPLINAS_PRESERVADAS lote_alunos={batch_number} motivo=payload_vazio; nenhum DELETE executado", flush=True)
+            continue
+        discipline_ok = True
+        for d_batch_number, d_batch in enumerate(_chunks(batch_disciplines, BATCH), 1):
+            try:
+                # Upsert é idempotente e ocorre antes de limpar linhas antigas.
+                sb.table("aluno_disciplinas").upsert(d_batch, on_conflict="id").execute()
+                persisted_disciplines += len(d_batch)
+                print(
+                    f"SUPABASE_DISCIPLINAS_LOTE_ALUNOS={batch_number} "
+                    f"SUBLOTE={d_batch_number} SUCESSO={len(d_batch)} "
+                    f"ACUMULADO={persisted_disciplines}/{len(disciplinas)}",
+                    flush=True,
+                )
+            except Exception as exc:
+                discipline_ok = False
+                message = f"aluno_disciplinas lote alunos={batch_number} sublote={d_batch_number}: {type(exc).__name__}: {exc}"
+                persistence_errors.append(message)
+                print(f"SUPABASE_ERRO={message}", flush=True)
+                break
+
+        if not discipline_ok:
+            print(
+                f"SUPABASE_LIMPEZA_ANTIGAS_PULADA lote_alunos={batch_number} "
+                "motivo=upsert_disciplinas_incompleto",
+                flush=True,
+            )
+            continue
+
+        # Preserva integralmente disciplinas antigas: não há DELETE neste integrador.
+        # O upsert por id é idempotente e payload vazio nunca remove linhas.
+
+    print(
+        f"INGESTAO_TOTAL_LIDO={total_lido} VALIDOS={len(alunos)} "
+        f"PERSISTIDOS_SUCESSO={persisted_students} "
+        f"DISCIPLINAS_NORMALIZADAS={len(disciplinas)} "
+        f"DISCIPLINAS_UPSERT_SUCESSO={persisted_disciplines} "
+        f"ERROS_PERSISTENCIA={len(persistence_errors)} ERROS_VALIDACAO={len(errors)}",
+        flush=True,
+    )
+    if persistence_errors:
+        print("INGESTAO_ERROS_PERSISTENCIA=" + json.dumps(persistence_errors[:100], ensure_ascii=False), flush=True)
+    if persisted_students == 0:
+        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIDOS")
+    if persistence_errors or errors:
+        raise SystemExit("INGESTAO_SUPABASE_CONCLUIDA_COM_ERROS")
+    print(
+        f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted_students} "
+        f"DISCIPLINAS_PERSISTIDAS={persisted_disciplines}",
+        flush=True,
+    )
+
+
+if __name__ == "__main__":
+    main()
