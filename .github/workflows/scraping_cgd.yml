@@ -198,7 +198,7 @@ jobs:
           seen = set()
           for unidade in ('matriz', 'filial'):
               info = unidades[unidade]
-              universe = set(info.get('contratos', {}).keys())
+              universe = set((info.get('contratos_detectados') or info.get('contratos', {})).keys())
               total = int(info.get('total', 0))
               lote = int(info.get('lote_planejado', 0))
               capturados = int(info.get('capturados_no_lote', 0))
