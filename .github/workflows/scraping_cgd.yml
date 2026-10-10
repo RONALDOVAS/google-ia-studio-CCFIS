@@ -107,6 +107,24 @@ jobs:
           Write-Host "=== MODO AMOSTRA: $env:CGD_SAMPLE_TEST ==="
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python scraper_sync_incremental.py
+      - name: Validar amostra real das duas unidades
+        if: inputs.cgd_sample_test == true
+        shell: powershell
+        env:
+          CGD_SAMPLE_TEST: '1'
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snapshot = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          samples = snapshot.get('sample_test_contracts') or {}
+          for unit in ('matriz', 'filial'):
+              ids = samples.get(unit) or []
+              print(f'PREFLIGHT_AMOSTRA_{unit.upper()}={len(ids)} CONTRATOS={ids}')
+              if not 2 <= len(ids) <= 3:
+                  raise SystemExit(f'Preflight reprovado: {unit} precisa de 2 a 3 contratos capturados; obtido={len(ids)}')
+          print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
+          '@ | python
       - name: Integrar alunos e disciplinas no Supabase
         shell: powershell
         env:
