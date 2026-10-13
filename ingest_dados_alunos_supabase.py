@@ -13,6 +13,17 @@ ROOT=Path(__file__).resolve().parent
 DATA=ROOT/"dados_alunos.json"
 BATCH=max(50,int(os.getenv("CFIS_IMPORT_BATCH_SIZE","500")))
 
+# Schema remoto não pôde ser consultado: o projeto Supabase está INACTIVE.
+# Padrão seguro: strings vazias evitam violar NOT NULL; use NULL só após confirmar nullable.
+ALLOW_NULL_ASSIGNMENTS = os.getenv("CGD_NULL_UNASSIGNED_FIELDS", "false").strip().lower() in ("1", "true", "yes", "sim")
+
+def assignment_value(value):
+    value = text(value) if "text" in globals() else (str(value).strip() if value is not None else "")
+    if value:
+        return value
+    return None if ALLOW_NULL_ASSIGNMENTS else ""
+
+
 def text(*values):
     for v in values:
         if v is None: continue
@@ -181,8 +192,8 @@ def normalize(raw):
     aluno={
       "id":uuid_from_key(f"{un}:{cid}"),"cgd_matricula_id":cid,"nome":nome,"contrato":cid,
       "email":text(raw.get("email")) or None,"telefone":text(raw.get("telefone"),raw.get("celular")) or None,
-      "curso":curso,"turma_nome":turma or None,"professor_responsavel_id":text(raw.get("professor_responsavel_id")) or None,
-      "professor_nome":professor or None,"data_inicio":inicio,"data_termino_contrato":date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")),
+      "curso":curso,"turma_nome":assignment_value(turma),"professor_responsavel_id":text(raw.get("professor_responsavel_id")) or None,
+      "professor_nome":assignment_value(professor),"data_inicio":inicio,"data_termino_contrato":date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")),
       "dias_contrato_total":nullable_num(raw.get("dias_contrato_total")),"meses_contrato_total":meses,
       "ultima_aula":date_value(raw.get("ultima_aula")),"ultimo_acesso":timestamp(raw.get("ultimo_acesso")),
       "faltas_totais":max(0,faltas),"faltas_mes_atual":max(0,faltas_mes),"mes_referencia_faltas":mes,
@@ -200,7 +211,12 @@ def normalize(raw):
         if not isinstance(d,dict): continue
         dn=text(d.get("nome"),d.get("disciplina"))
         carga=num(d.get("carga_horaria"))
-        if not dn or carga<=0: continue
+        # A coluna recebe sempre número positivo normalizado, nunca None ou "32h".
+        if not dn or not isinstance(carga, (int, float)) or carga <= 0:
+            continue
+        carga_horaria_db = int(round(carga))
+        if carga_horaria_db <= 0:
+            continue
         curs=max(0,num(d.get("horas_cursadas"),d.get("horas_cumpridas")))
         esp=max(0,num(d.get("horas_esperadas"),d.get("horas_planejadas")))
         perc=max(0,min(100,curs/carga*100))
@@ -210,7 +226,7 @@ def normalize(raw):
         ritmo="concluida" if status=="concluida" else ("excesso_tempo" if exc>0 else ("avanco_lento" if perc<50 and esp>=20 else "normal"))
         ds.append({
           "id":uuid_from_key(f"{aluno['id']}:disciplina:{dn.casefold()}"),"aluno_id":aluno["id"],"nome":dn,
-          "carga_horaria":round(carga),"status":status,"nota":nullable_num(d.get("nota")),
+          "carga_horaria":carga_horaria_db,"status":status,"nota":nullable_num(d.get("nota")),
           "frequencia_percent":nullable_num(d.get("frequencia_percent"),d.get("frequencia")),
           "data_conclusao":date_value(d.get("data_conclusao")),"ordem":int(num(d.get("ordem"),i+1)),
           "horas_cursadas":curs,"horas_esperadas":esp,"percentual_avanco":perc,"horas_excedentes":exc,
