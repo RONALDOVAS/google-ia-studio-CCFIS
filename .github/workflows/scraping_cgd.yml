@@ -92,7 +92,8 @@ jobs:
           CGD_HEADLESS: 'true'
           CGD_ENABLE_BROWSER_FALLBACK: 'false'
           CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
-          CGD_LIMIT_CONTRATOS: '2'
+          CGD_NULL_UNASSIGNED_FIELDS: 'false'
+          CGD_LIMIT_CONTRATOS: ${{ inputs.cgd_sample_test && '2' || '750' }}
           CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
           CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
           CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
