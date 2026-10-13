@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       cgd_sample_test:
-        description: 'Executar preflight autenticado com até 3 contratos por unidade'
+        description: 'Executar preflight autenticado com exatamente 2 contratos por unidade'
         required: false
         default: false
         type: boolean
@@ -92,7 +92,7 @@ jobs:
           CGD_HEADLESS: 'true'
           CGD_ENABLE_BROWSER_FALLBACK: 'false'
           CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
-          CGD_LIMIT_CONTRATOS: '3'
+          CGD_LIMIT_CONTRATOS: '2'
           CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
           CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
           CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
@@ -121,8 +121,8 @@ jobs:
           for unit in ('matriz', 'filial'):
               ids = samples.get(unit) or []
               print(f'PREFLIGHT_AMOSTRA_{unit.upper()}={len(ids)} CONTRATOS={ids}')
-              if not 2 <= len(ids) <= 3:
-                  raise SystemExit(f'Preflight reprovado: {unit} precisa de 2 a 3 contratos capturados; obtido={len(ids)}')
+              if len(ids) != 2:
+                  raise SystemExit(f'Preflight reprovado: {unit} precisa de exatamente 2 contratos capturados; obtido={len(ids)}')
           print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
           '@ | python
       - name: Integrar alunos e disciplinas no Supabase
