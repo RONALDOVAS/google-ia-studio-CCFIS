@@ -1040,13 +1040,23 @@ def validate_real_detail(aluno, cid, u):
     # As rotas podem estar acessíveis mesmo quando as telas JS devolveram
     # apenas o shell "Carregando...". Sem estes campos o registro não é
     # persistível no CFIS; isso força o fallback renderizado, sem inventar dados.
-    obrigatorios = ("curso", "turma", "professor", "data_inicio")
+    # Curso e início acadêmico continuam obrigatórios. Turma/professor podem
+    # legitimamente estar ausentes; só o fallback semântico, com evidência explícita,
+    # deve preencher SEM TURMA/NÃO ALOCADO.
+    for canonical, alias in (("turma", "turma_nome"), ("professor", "professor_nome")):
+        if not norm(aluno.get(canonical)) and norm(aluno.get(alias)):
+            aluno[canonical] = aluno.get(alias)
+    obrigatorios = ("curso", "data_inicio")
     ausentes = [campo for campo in obrigatorios if not norm(aluno.get(campo))]
     if ausentes:
         raise RuntimeError(
             f"[{u}] CAMPOS_DOMINIO_NAO_CAPTURADOS cid={cid} "
             f"ausentes={','.join(ausentes)}"
         )
+    if not norm(aluno.get("turma")):
+        aluno["turma"] = None
+    if not norm(aluno.get("professor")):
+        aluno["professor"] = None
     return aluno
 
 
