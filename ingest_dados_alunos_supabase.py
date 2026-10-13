@@ -134,7 +134,10 @@ def normalize(raw):
     total_grade=nullable_num(raw.get("total_disciplinas_grade"),raw.get("total_disciplinas"))
     if total_grade is None: total_grade=len(disciplinas_raw)
     erros=[]
-    for value,label in ((cid,"contrato"),(nome,"nome"),(un,"unidade"),(curso,"curso"),(inicio,"data_inicio"),(turma,"turma_nome"),(professor,"professor_nome"),(mes,"mes_referencia_faltas")):
+    # Turma e professor são opcionais em contratos sem alocação confirmada.
+    # Identidade, unidade, curso e data de início continuam exigidos para evitar
+    # persistir um contrato sem dados acadêmicos mínimos.
+    for value,label in ((cid,"contrato"),(nome,"nome"),(un,"unidade"),(curso,"curso"),(inicio,"data_inicio"),(mes,"mes_referencia_faltas")):
         if not value: erros.append(label)
     if meses is None: erros.append("meses_contrato_total")
     if erros: return None,[],erros
@@ -149,8 +152,8 @@ def normalize(raw):
     aluno={
       "id":uuid_from_key(f"{un}:{cid}"),"cgd_matricula_id":cid,"nome":nome,"contrato":cid,
       "email":text(raw.get("email")) or None,"telefone":text(raw.get("telefone"),raw.get("celular")) or None,
-      "curso":curso,"turma_nome":turma,"professor_responsavel_id":text(raw.get("professor_responsavel_id")) or None,
-      "professor_nome":professor,"data_inicio":inicio,"data_termino_contrato":date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")),
+      "curso":curso,"turma_nome":turma or None,"professor_responsavel_id":text(raw.get("professor_responsavel_id")) or None,
+      "professor_nome":professor or None,"data_inicio":inicio,"data_termino_contrato":date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")),
       "dias_contrato_total":nullable_num(raw.get("dias_contrato_total")),"meses_contrato_total":meses,
       "ultima_aula":date_value(raw.get("ultima_aula")),"ultimo_acesso":timestamp(raw.get("ultimo_acesso")),
       "faltas_totais":max(0,faltas),"faltas_mes_atual":max(0,faltas_mes),"mes_referencia_faltas":mes,
@@ -295,10 +298,18 @@ def main():
         print("INGESTAO_PERSISTIDOS_SUCESSO=0", flush=True)
         raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
 
-    # Validate the complete payload before the first Supabase write.
+    # No modo de amostra, qualquer inválido reprova o preflight antes de tocar
+    # o banco. Na rodada normal, persistimos os registros válidos e mantemos os
+    # inválidos reportados para retry, sem bloquear o lote inteiro.
+    if errors and sample_test:
+        print("INGESTAO_ABORTADA_ANTES_DO_SUPABASE=ERROS_VALIDACAO_MODO_AMOSTRA", flush=True)
+        raise SystemExit("PREFLIGHT_INGESTAO_AMOSTRA_INVALIDA_NENHUMA_ESCRITA_EXECUTADA")
     if errors:
-        print("INGESTAO_ABORTADA_ANTES_DO_SUPABASE=ERROS_VALIDACAO", flush=True)
-        raise SystemExit("INGESTAO_PAYLOAD_INVALIDO_NENHUMA_ESCRITA_EXECUTADA")
+        print(
+            f"INGESTAO_PERSISTENCIA_PARCIAL_PERMITIDA validos={len(alunos)} "
+            f"invalidos={len(errors)}; registros inválidos não serão enviados ao Supabase",
+            flush=True,
+        )
 
     valid_student_ids = {a["id"] for a in alunos}
     seen_discipline_ids = set()
