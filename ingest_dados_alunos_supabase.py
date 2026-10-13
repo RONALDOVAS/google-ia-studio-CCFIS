@@ -93,10 +93,25 @@ def _label_from_snapshots(raw, labels):
         _snapshot_text(raw, {"contrato","disciplinas","horarios"}),
         text(raw.get("aluno_raw")),
     ])
-    for label in labels:
-        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{2,120})", hay, re.I)
-        if m:
-            return text(m.group(1))
+    known_labels = (
+        "Curso contratado", "Curso do aluno", "Nome do curso", "Curso",
+        "Turma atual", "Turma do aluno", "Turma",
+        "Professor responsável", "Professor responsavel", "Professor titular", "Professor",
+        "Data de início do período letivo", "Data de inicio do periodo letivo",
+        "Início do período letivo", "Inicio do periodo letivo",
+        "Data de início das aulas", "Data de inicio das aulas",
+        "Data de início do módulo", "Data de inicio do modulo",
+        "Data de início", "Data de inicio", "Data de matrícula", "Data de matricula",
+        "Data de término", "Data de termino", "Data fim", "Data final", "Status",
+    )
+    boundary = "|".join(re.escape(x) for x in sorted(set(known_labels), key=len, reverse=True))
+    for label in sorted(labels, key=len, reverse=True):
+        pattern = rf"(?<!\w){re.escape(label)}\s*[:\-]\s*(.*?)(?=\s+(?:{boundary})\s*[:\-]|[|;\n]|$)"
+        match = re.search(pattern, hay, re.I)
+        if match:
+            value = text(match.group(1))
+            if value:
+                return value[:120]
     return ""
 
 def _first_snapshot_date(raw, labels):
