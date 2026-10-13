@@ -116,13 +116,13 @@ def _label_value(text, labels):
     known_labels = (
         "Curso contratado", "Curso do aluno", "Nome do curso", "Curso",
         "Turma atual", "Turma do aluno", "Enturmacao", "Turma",
-        "Professor responsavel", "Professor titular", "Professor",
-        "Data de inicio do periodo letivo", "Inicio do periodo letivo",
-        "Data de inicio das aulas", "Inicio das aulas",
-        "Data de inicio do modulo", "Inicio do modulo", "Data de inicio", "Data inicio",
-        "Data de matricula", "Matricula em", "Data de termino", "Termino do contrato",
-        "Data fim", "Data final", "Status da matricula", "Situacao da matricula",
-        "Situacao", "Status",
+        "Professor responsável", "Professor responsavel", "Professor titular", "Professor",
+        "Data de início do período letivo", "Data de inicio do periodo letivo", "Início do período letivo", "Inicio do periodo letivo",
+        "Data de início das aulas", "Data de inicio das aulas", "Início das aulas", "Inicio das aulas",
+        "Data de início do módulo", "Data de inicio do modulo", "Início do módulo", "Inicio do modulo", "Data de início", "Data de inicio", "Data inicio",
+        "Data de matrícula", "Data de matricula", "Matrícula em", "Matricula em", "Data de término", "Data de termino", "Término do contrato", "Termino do contrato",
+        "Data fim", "Data final", "Status da matrícula", "Status da matricula", "Situação da matrícula", "Situacao da matricula",
+        "Situação", "Situacao", "Status",
     )
     boundary = "|".join(re.escape(x) for x in sorted(set(known_labels), key=len, reverse=True))
     for label in sorted(labels, key=len, reverse=True):
@@ -358,7 +358,7 @@ def contract_bundle_http(session, cid, unidade, reps):
         snapshots.append(snap)
         # Acessar um shell JS com "Carregando..." não comprova que a rota carregou.
         body_text = low(snap["texto_corpo"])
-        valid = bool(snap["tabelas"] or (snap["texto_corpo"] and "carregando..." not in body_text))
+        valid = bool((snap["tabelas"] or snap["texto_corpo"]) and "carregando..." not in body_text)
         status[kind]=valid
         if kind=="disciplinas":
             course_text=snap["texto_corpo"][:30000]
