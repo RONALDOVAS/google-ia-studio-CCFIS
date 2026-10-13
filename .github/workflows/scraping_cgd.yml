@@ -126,6 +126,41 @@ jobs:
                   raise SystemExit(f'Preflight reprovado: {unit} precisa de exatamente 2 contratos capturados; obtido={len(ids)}')
           print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
           '@ | python
+      - name: Validar campos estruturados da amostra antes do Supabase
+        if: inputs.cgd_sample_test == true
+        shell: powershell
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snapshot = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          data = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          samples = snapshot.get('sample_test_contracts') or {}
+          errors = []
+          for unit in ('matriz', 'filial'):
+              info = (snapshot.get('unidades') or {}).get(unit) or {}
+              detail_errors = int(info.get('erros_detalhe', 0))
+              print(f'PREFLIGHT_{unit.upper()}_ERROS_DETALHE={detail_errors}')
+              if detail_errors:
+                  errors.append((unit, 'erros_detalhe', detail_errors))
+              ids = set(str(cid).strip() for cid in (samples.get(unit) or []))
+              records = [a for a in data if str(a.get('unidade') or '').lower() == unit and str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip() in ids]
+              by_id = {str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip(): a for a in records}
+              if len(ids) != 2 or len(by_id) != 2:
+                  errors.append((unit, 'amostra_nao_tem_dois_registros_distintos', sorted(ids), sorted(by_id)))
+              for cid in ids:
+                  row = by_id.get(cid)
+                  if not row:
+                      continue
+                  missing = [key for key in ('nome', 'curso', 'data_inicio') if not str(row.get(key) or '').strip()]
+                  print(f'PREFLIGHT_REGISTRO unidade={unit} contrato={cid} curso={bool(row.get("curso"))} data_inicio={bool(row.get("data_inicio"))} disciplinas={len(row.get("disciplinas") or [])}')
+                  if missing:
+                      errors.append((unit, cid, 'campos_estruturados_ausentes', missing))
+          print(f'PREFLIGHT_ERROS_ESTRUTURADOS={len(errors)}')
+          if errors:
+              raise SystemExit(f'Preflight reprovado antes do Supabase: {errors[:10]}')
+          print('PREFLIGHT_CAMPOS_ESTRUTURADOS=OK')
+          '@ | python
       - name: Integrar alunos e disciplinas no Supabase
         shell: powershell
         env:
