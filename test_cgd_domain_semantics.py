@@ -29,6 +29,41 @@ class CGDDomainSemanticsTests(unittest.TestCase):
         fields = cgd_http_detail._structured_fields(html)
         self.assertEqual(fields.get("data_inicio"), "10/02/2026")
 
+    def test_domain_fields_parse_original_structured_html(self):
+        html = """
+        <table>
+          <tr><th>Curso contratado</th><td>Windows</td></tr>
+          <tr><th>Turma atual</th><td>Turma Noite A</td></tr>
+          <tr><th>Professor responsável</th><td>Maria Silva</td></tr>
+          <tr><th>Data de início das aulas</th><td>10/02/2026</td></tr>
+        </table>
+        """
+        fields = cgd_http_detail._domain_fields(html, "", "", "", cid=None)
+        self.assertEqual(fields.get("curso"), "Windows")
+        self.assertEqual(fields.get("turma"), "Turma Noite A")
+        self.assertEqual(fields.get("professor"), "Maria Silva")
+        self.assertEqual(fields.get("data_inicio"), "2026-02-10")
+
+    def test_flattened_labels_do_not_swallow_following_fields(self):
+        text = "Curso: Windows Turma: Noite A Professor: Maria Silva Data de início: 10/02/2026"
+        self.assertEqual(cgd_http_detail._label_value(text, ("Curso",)), "Windows")
+        self.assertEqual(cgd_http_detail._label_value(text, ("Turma",)), "Noite A")
+        self.assertEqual(cgd_http_detail._label_value(text, ("Professor",)), "Maria Silva")
+
+    def test_ingestor_accepts_missing_turma_and_professor(self):
+        from ingest_dados_alunos_supabase import normalize
+        aluno, disciplines, errors = normalize({
+            "contrato": "TESTE-123", "cgd_matricula_id": "TESTE-123",
+            "nome": "Aluno Teste", "unidade": "matriz", "curso": "Windows",
+            "data_inicio": "2026-02-10", "turma": None, "professor": None,
+            "meses_contrato_total": 12, "disciplinas": [],
+        })
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(aluno)
+        self.assertIsNone(aluno["turma_nome"])
+        self.assertIsNone(aluno["professor_nome"])
+        self.assertEqual(disciplines, [])
+
     def test_status_alone_does_not_infer_missing_assignment(self):
         domain = {"turma": None, "professor": None, "status_matricula": "trancado"}
         result = scraper._apply_assignment_fallback(domain, "matrícula trancada")
