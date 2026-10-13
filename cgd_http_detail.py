@@ -109,13 +109,29 @@ def _student_id(html):
     return m.group(1) if m else None
 
 def _label_value(text, labels):
+    """Extract a labeled value without swallowing the next field in flattened body text."""
     text = norm(text)
-    for label in labels:
-        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{2,120})", text, re.I)
-        if m:
-            value = norm(m.group(1))
+    if not text:
+        return None
+    known_labels = (
+        "Curso contratado", "Curso do aluno", "Nome do curso", "Curso",
+        "Turma atual", "Turma do aluno", "Enturmacao", "Turma",
+        "Professor responsavel", "Professor titular", "Professor",
+        "Data de inicio do periodo letivo", "Inicio do periodo letivo",
+        "Data de inicio das aulas", "Inicio das aulas",
+        "Data de inicio do modulo", "Inicio do modulo", "Data de inicio", "Data inicio",
+        "Data de matricula", "Matricula em", "Data de termino", "Termino do contrato",
+        "Data fim", "Data final", "Status da matricula", "Situacao da matricula",
+        "Situacao", "Status",
+    )
+    boundary = "|".join(re.escape(x) for x in sorted(set(known_labels), key=len, reverse=True))
+    for label in sorted(labels, key=len, reverse=True):
+        pattern = rf"(?<!\w){re.escape(label)}\s*[:\-]\s*(.*?)(?=\s+(?:{boundary})\s*[:\-]|[|;\n]|$)"
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = norm(match.group(1)).strip(" :-|;")
             if value:
-                return value
+                return value[:120]
     return None
 
 def _first_date(text, labels):
@@ -327,7 +343,7 @@ def contract_bundle_http(session, cid, unidade, reps):
     ctext=_body(contract_html)
     name=_name(contract_html) or f"Contrato {cid}"
     sid=_student_id(contract_html)
-    rows=[]; course_text=""; schedule_text=""; st=""
+    rows=[]; course_text=""; course_html=""; schedule_text=""; schedule_html=""; st=""
     freq={"faltas":0,"presencas":0,"registros":[]}
     snapshots=[]; status={"contrato":bool(ctext),"disciplinas":False,"horarios":False,"frequencia":False}
 
@@ -340,14 +356,18 @@ def contract_bundle_http(session, cid, unidade, reps):
         final,html=_get(session,url)
         snap=_snapshot(kind,final,html)
         snapshots.append(snap)
-        valid=bool(snap["tabelas"] or snap["texto_corpo"])
+        # Acessar um shell JS com "Carregando..." não comprova que a rota carregou.
+        body_text = low(snap["texto_corpo"])
+        valid = bool(snap["tabelas"] or (snap["texto_corpo"] and "carregando..." not in body_text))
         status[kind]=valid
         if kind=="disciplinas":
             course_text=snap["texto_corpo"][:30000]
+            course_html=html
             rows.extend(_disciplines(html,url))
             name=name if name != f"Contrato {cid}" else (_name(html) or name)
         elif kind=="horarios":
             schedule_text=snap["texto_corpo"][:30000]
+            schedule_html=html
             st=schedule_text[:20000]
             name=name if name != f"Contrato {cid}" else (_name(html) or name)
         else:
@@ -362,8 +382,10 @@ def contract_bundle_http(session, cid, unidade, reps):
         name=_name(aluno_html) or name
 
     rows,done,cur,fut=_classify(rows)
+    # Passar HTML original: ctext/course_text/schedule_text são texto achatado e
+    # impediam _structured_fields e _embedded_json de lerem DOM e JSON embutido.
     domain = _domain_fields(
-        ctext, course_text, schedule_text, aluno_html,
+        contract_html, course_html, schedule_html, aluno_html,
         cid=cid, sid=sid, payloads=getattr(session, "_cgd_json_payloads", [])
     )
     def num(r,k):
