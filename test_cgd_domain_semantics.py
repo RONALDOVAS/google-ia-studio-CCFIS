@@ -60,8 +60,9 @@ class CGDDomainSemanticsTests(unittest.TestCase):
         })
         self.assertEqual(errors, [])
         self.assertIsNotNone(aluno)
-        self.assertIsNone(aluno["turma_nome"])
-        self.assertIsNone(aluno["professor_nome"])
+        # Schema remoto indisponível: padrão NOT NULL-safe é string vazia.
+        self.assertEqual(aluno["turma_nome"], "")
+        self.assertEqual(aluno["professor_nome"], "")
         self.assertEqual(disciplines, [])
 
     def test_ingestor_parses_cgd_hour_values_with_units(self):
