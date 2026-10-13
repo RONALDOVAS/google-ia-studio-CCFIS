@@ -84,7 +84,7 @@ jobs:
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
-          CGD_DETAIL_TIMEOUT_S: '45'
+          CGD_DETAIL_TIMEOUT_S: '20'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_INTERVAL_MS: '50'
           CGD_DETAIL_WORKERS: '4'
