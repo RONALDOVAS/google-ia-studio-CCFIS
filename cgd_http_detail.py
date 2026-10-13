@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-DETAIL_TIMEOUT_SECONDS = max(5, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "45")))
+DETAIL_TIMEOUT_SECONDS = max(5, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "20")))
 import requests
 from bs4 import BeautifulSoup
 
