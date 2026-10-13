@@ -161,7 +161,12 @@ jobs:
               raise SystemExit(f'Preflight reprovado antes do Supabase: {errors[:10]}')
           print('PREFLIGHT_CAMPOS_ESTRUTURADOS=OK')
           '@ | python
+      - name: Confirmar preflight sem escrita no Supabase
+        if: inputs.cgd_sample_test == true
+        shell: powershell
+        run: Write-Host 'PREFLIGHT AMOSTRA: escrita no Supabase desativada; nenhum aluno ou disciplina será gravado.'
       - name: Integrar alunos e disciplinas no Supabase
+        if: inputs.cgd_sample_test != true
         shell: powershell
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
