@@ -64,6 +64,12 @@ class CGDDomainSemanticsTests(unittest.TestCase):
         self.assertIsNone(aluno["professor_nome"])
         self.assertEqual(disciplines, [])
 
+    def test_ingestor_parses_cgd_hour_values_with_units(self):
+        from ingest_dados_alunos_supabase import num, nullable_num
+        self.assertEqual(num("32h"), 32)
+        self.assertEqual(num("24 horas"), 24)
+        self.assertEqual(nullable_num("12,5 horas"), 12.5)
+
     def test_status_alone_does_not_infer_missing_assignment(self):
         domain = {"turma": None, "professor": None, "status_matricula": "trancado"}
         result = scraper._apply_assignment_fallback(domain, "matrícula trancada")
