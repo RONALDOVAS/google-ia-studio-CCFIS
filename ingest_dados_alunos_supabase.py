@@ -29,7 +29,7 @@ def _numeric_value(value):
     except (TypeError, ValueError):
         pass
     # O CGD pode exibir carga como "32h", "32 horas" ou decimal com vírgula.
-    match = re.search(r"[-+]?\\d+(?:[.,]\\d+)?", str(value).replace("\\xa0", " "))
+    match = re.search(r"[-+]?\d+(?:[.,]\d+)?", str(value).replace("\xa0", " "))
     if not match:
         return None
     try:
