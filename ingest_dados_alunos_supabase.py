@@ -20,22 +20,36 @@ def text(*values):
         if s: return s
     return ""
 
+def _numeric_value(value):
+    if value in (None, ""):
+        return None
+    try:
+        x = float(value)
+        return x if x == x else None
+    except (TypeError, ValueError):
+        pass
+    # O CGD pode exibir carga como "32h", "32 horas" ou decimal com vírgula.
+    match = re.search(r"[-+]?\\d+(?:[.,]\\d+)?", str(value).replace("\\xa0", " "))
+    if not match:
+        return None
+    try:
+        x = float(match.group(0).replace(",", "."))
+        return x if x == x else None
+    except (TypeError, ValueError):
+        return None
+
 def num(*values):
-    for v in values:
-        if v in (None,""): continue
-        try:
-            x=float(v)
-            if x==x: return x
-        except: pass
+    for value in values:
+        parsed = _numeric_value(value)
+        if parsed is not None:
+            return parsed
     return 0
 
 def nullable_num(*values):
-    for v in values:
-        if v in (None,""): continue
-        try:
-            x=float(v)
-            if x==x: return x
-        except: pass
+    for value in values:
+        parsed = _numeric_value(value)
+        if parsed is not None:
+            return parsed
     return None
 
 def date_value(*values):
