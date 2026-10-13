@@ -117,6 +117,25 @@ def discover_universe(page, unidade):
     if not first_ids:
         raise RuntimeError(f"[{unidade}] primeira pagina sem contratos")
 
+    # Preflight restrito: não varrer centenas de páginas para testar quatro contratos.
+    # A amostra vem de contratos reais visíveis na primeira página autenticada.
+    if SAMPLE_TEST:
+        selected_ids = sorted(first_ids)[:SAMPLE_LIMIT]
+        if len(selected_ids) != SAMPLE_LIMIT:
+            raise RuntimeError(
+                f"[{unidade}] PREFLIGHT_AMOSTRA_INSUFICIENTE "
+                f"esperados={SAMPLE_LIMIT} encontrados_primeira_pagina={len(selected_ids)}"
+            )
+        selected = {cid: scraper.contract_url(cid) for cid in selected_ids}
+        signatures = {cid: listing_signature(first_html, cid) for cid in selected_ids}
+        elapsed = perf_counter() - started
+        print(
+            f"[{unidade}] PREFLIGHT_UNIVERSO_RESTRITO={len(selected)} "
+            f"ids={selected_ids} paginas=1 TEMPO_DESCOBERTA={elapsed:.2f}s",
+            flush=True,
+        )
+        return selected, signatures, 0, elapsed
+
     session = scraper_runner._session_from_page(page)
     cookies = {c.name: c.value for c in session.cookies}
     headers = dict(session.headers)
