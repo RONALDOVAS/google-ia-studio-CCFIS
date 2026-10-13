@@ -55,7 +55,7 @@ PENDING_FREQUENCY_PATH = PROJECT_ROOT / "dados_frequencias_a_registrar.json"
 HEADLESS = True
 ENABLE_BROWSER_FALLBACK = os.getenv("CGD_ENABLE_BROWSER_FALLBACK", "false").lower() in ("1", "true", "yes", "sim")
 SAMPLE_TEST = os.getenv("CGD_SAMPLE_TEST", "0").lower() in ("1", "true", "yes", "sim")
-SAMPLE_LIMIT = min(3, max(2, int(os.getenv("CGD_LIMIT_CONTRATOS", "3")))) if SAMPLE_TEST else 0
+SAMPLE_LIMIT = 2 if SAMPLE_TEST else 0
 CHECKPOINT_EVERY_CONTRACTS = max(1, int(os.getenv("CGD_CHECKPOINT_EVERY_CONTRACTS", "10")))
 CHECKPOINT_INTERVAL_SECONDS = max(10, int(os.getenv("CGD_CHECKPOINT_INTERVAL_SECONDS", "60")))
 CIRCUIT_BREAKER_THRESHOLD = max(2, int(os.getenv("CGD_CIRCUIT_BREAKER_THRESHOLD", "5")))
@@ -452,6 +452,7 @@ def main():
                     consecutive_reason = None
                     consecutive_failures = 0
                     last_checkpoint_at = perf_counter()
+                    last_checkpoint_captured = 0
                     http_session = cgd_http_detail.session_from_page(page)
                     if SAMPLE_TEST:
                         priority_targets = list(contracts)[:SAMPLE_LIMIT]
@@ -492,7 +493,7 @@ def main():
                         print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(priority_targets)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
                         now_perf = perf_counter()
                         if (
-                            (captured > 0 and captured % CHECKPOINT_EVERY_CONTRACTS == 0)
+                            (captured - last_checkpoint_captured >= CHECKPOINT_EVERY_CONTRACTS)
                             or now_perf - last_checkpoint_at >= CHECKPOINT_INTERVAL_SECONDS
                             or idx == len(priority_targets)
                         ):
@@ -501,6 +502,7 @@ def main():
                                 captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
                             )
                             last_checkpoint_at = now_perf
+                            last_checkpoint_captured = captured
                         if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
                             _flush_incremental_checkpoint(
                                 by_id, snapshot, pending_frequency, unidade, contracts, signatures,
