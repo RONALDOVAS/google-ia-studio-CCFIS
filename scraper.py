@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
@@ -28,7 +29,7 @@ DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
 PAGE_WAIT_MS = max(0, int(os.getenv("CGD_PAGE_WAIT_MS", "500")))
 PAGE_TIMEOUT_MS = max(10000, int(os.getenv("CGD_PAGE_TIMEOUT_MS", "30000")))
 DIAGNOSTICO = os.getenv("CGD_DIAGNOSTICO", "0").lower() in ("1", "true", "yes", "sim")
-HEADLESS = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
+HEADLESS = True
 
 
 def norm(v):
@@ -454,93 +455,77 @@ def _route_kind(text, href):
     return "outra"
 
 
-def discover_contract_routes(page, cid):
-    """Descobre as rotas que o próprio contrato expõe, sem inventar URLs."""
+def _route_is_for_entity(url, cid, sid=None):
+    """Accept only routes whose path identifies this contract or student."""
+    if not url or not same_host(url):
+        return False
+    path = urlparse(url).path.rstrip("/").lower()
+    segments = [segment for segment in path.split("/") if segment]
+    if any(part in {"delete", "destroy", "excluir", "logout", "encerrar", "cancelar", "remover", "deletar", "salvar", "save", "update"} for part in segments):
+        return False
+    if path.startswith("/contratos/") and str(cid) in segments:
+        return True
+    if sid and re.match(r"^/alunos/" + re.escape(str(sid)) + r"(?:/|$)", path):
+        return True
+    return False
+
+
+def discover_contract_routes(page, cid, sid=None):
+    """Discover only routes directly tied to the current contract/student."""
     routes = []
     seen = set()
+    if not sid:
+        for _, href in links(page):
+            found_sid = student_id(href)
+            if found_sid:
+                sid = found_sid
+                break
+    if not sid:
+        try:
+            match = re.search(r"/alunos/(\d+)", page.content(), re.I)
+            sid = match.group(1) if match else None
+        except Exception:
+            sid = None
 
     def add(text, href, source="link"):
         href = abs_url(page, href)
-        if not href or not same_host(href):
-            return
-        path = urlparse(href).path.rstrip("/").lower()
-        # Nunca seguir ações potencialmente destrutivas/admin como parte do scrape.
-        if any(x in path for x in ("/delete", "/destroy", "/excluir", "/logout")):
+        if not _route_is_for_entity(href, cid, sid):
             return
         key = href.split("#", 1)[0]
         if key in seen:
             return
         seen.add(key)
         routes.append({
-            "texto": norm(text),
-            "url": key,
-            "rota": _route_kind(text, key),
-            "origem": source,
+            "texto": norm(text), "url": key, "rota": _route_kind(text, key),
+            "origem": source, "contrato_id": str(cid),
+            "aluno_id": str(sid) if sid else None,
         })
 
     for text, href in links(page):
-        path = urlparse(href).path.lower()
-        relevant = (
-            f"/contratos/{cid}" in path
-            or f"/alunos/" in path
-            or f"/turmas/" in path
-            or any(token in low(f"{text} {path}") for token in (
-                "frequenc", "horario", "curso", "disciplina", "ocorr",
-                "pend", "assin", "document", "finance", "pagamento",
-                "turma", "nota", "historico", "cadastro", "tag",
-                "imprimir", "certificado",
-            ))
-        )
-        if relevant:
-            add(text, href, "link")
-
-    # Algumas interfaces colocam a rota em atributos/data-* ou onclick,
-    # sem um href convencional.
+        add(text, href, "link")
     try:
         loc = page.locator("[data-href],[data-url],[href],[onclick]")
         for i in range(min(loc.count(), 5000)):
             el = loc.nth(i)
-            text = norm(el.inner_text())
+            label = norm(el.inner_text())
             for attr in ("href", "data-href", "data-url"):
                 value = el.get_attribute(attr)
                 if value:
-                    add(text, value, f"attribute:{attr}")
+                    add(label, value, f"attribute:{attr}")
             onclick = el.get_attribute("onclick") or ""
             for match in re.findall(r"""['"]((?:https?://|/)[^'"]+)['"]""", onclick):
-                add(text, match, "onclick")
+                add(label, match, "onclick")
     except Exception:
         pass
-
     return routes
 
 
-def _safe_contract_route(route, cid):
-    url = route.get("url") or ""
-    path = urlparse(url).path.lower()
-    if not same_host(url):
-        return False
-    blocked = (
-        "/delete", "/destroy", "/excluir", "/logout",
-        "/encerrar", "/cancelar", "/remover", "/deletar",
-        "/salvar", "/save", "/update", "/editar/confirm",
-    )
-    if any(x in path for x in blocked):
-        return False
-    return (
-        f"/contratos/{cid}" in path
-        or "/alunos/" in path
-        or "/turmas/" in path
-        or route.get("rota") in {
-            "frequencia", "horarios", "disciplinas", "ocorrencias",
-            "pendencias", "assinaturas", "documentos", "financeiro",
-            "turmas", "notas", "historico", "cadastro_aluno", "tags",
-            "imprimir_certificado", "contrato",
-        }
-    )
+def _safe_contract_route(route, cid, sid=None):
+    return _route_is_for_entity(route.get("url") or "", cid, sid)
 
 
-def _capture_route_snapshot(page, unidade, cid, route, index):
-    if not _safe_contract_route(route, cid):
+def _capture_route_snapshot(page, unidade, cid, route, index, sid=None):
+    if not _safe_contract_route(route, cid, sid):
         return None
     if not open_page(page, route["url"], unidade, f"contrato_{cid}_rota_{index}", 500):
         return None
@@ -552,6 +537,7 @@ def _capture_route_snapshot(page, unidade, cid, route, index):
         "rota": route["rota"],
         "origem": route["origem"],
         "tabelas": tables,
+        "campos_dom": _extract_dom_fields(page),
         "texto_corpo": text[:60000],
     }
 
@@ -574,8 +560,8 @@ def _campo_rotulado_texto(texto, rotulos):
     texto = norm(texto)
     for rotulo in rotulos:
         padroes = (
-            rf"\b{re.escape(rotulo)}\s*[:\-]\s*([^|;\\n]{{2,160}})",
-            rf"\b{re.escape(rotulo)}\s+([^|;\\n]{{2,160}})",
+            rf"\b{re.escape(rotulo)}\s*[:\-]\s*([^|;\n]{{2,160}})",
+            rf"\b{re.escape(rotulo)}\s+([^|;\n]{{2,160}})",
         )
         for padrao in padroes:
             m = re.search(padrao, texto, re.I)
@@ -590,262 +576,422 @@ def _campo_rotulado_texto(texto, rotulos):
     return None
 
 
-def _campo_rotulado_dom(page, rotulos):
-    wanted = [low(x) for x in rotulos]
+def _key_norm(value):
+    value = unicodedata.normalize("NFD", norm(value).lower())
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+    return re.sub(r"[^a-z0-9]+", "_", value).strip("_")
+
+
+def _extract_dom_fields(page):
+    """Read labels, disabled controls, selects and key/value table rows."""
+    aliases = {
+        "curso": ("curso", "curso do aluno", "curso contratado", "nome do curso"),
+        "turma": ("turma", "turma atual", "turma do aluno", "enturmacao"),
+        "professor": ("professor", "professor responsavel", "professor titular"),
+        "data_inicio": ("data de inicio", "inicio do contrato", "inicio da matricula", "data inicio"),
+        "data_matricula": ("data de matricula", "matricula em"),
+        "data_fim": ("data de termino", "termino do contrato", "data fim", "data final"),
+        "status_matricula": ("status", "situacao", "situacao da matricula", "status da matricula"),
+    }
+    out = {}
+
+    def field_for(label):
+        label_norm = _key_norm(label).replace("_", " ")
+        for field, names in aliases.items():
+            if any(label_norm == name or label_norm.startswith(name + " ") for name in names):
+                return field
+        return None
+
+    def value_of(loc):
+        try:
+            tag = str(loc.evaluate("(el) => el.tagName")).lower()
+            if tag == "select":
+                selected = loc.locator("option:checked")
+                value = norm(selected.first.inner_text()) if selected.count() else norm(loc.input_value())
+            elif tag in ("input", "textarea"):
+                value = norm(loc.input_value())
+            else:
+                value = norm(loc.inner_text())
+            # Um placeholder ("Selecione", "-", etc.) não prova turma/professor.
+            if _key_norm(value).replace("_", " ") in {
+                "", "-", "--", "selecione", "selecione uma opcao",
+                "escolha", "escolha uma opcao", "nao informado", "nao definida",
+            }:
+                return ""
+            return value
+        except Exception:
+            return ""
+
+    def save(label, value):
+        field = field_for(label)
+        value = norm(value)
+        if field and value and not out.get(field):
+            out[field] = value
+
     try:
         labels = page.locator("label")
-        for i in range(labels.count()):
+        for i in range(min(labels.count(), 500)):
             label = labels.nth(i)
-            if not any(w in low(label.inner_text()) for w in wanted):
+            if not field_for(label.inner_text()):
                 continue
-            alvo = label.get_attribute("for")
-            if alvo:
-                loc = page.locator(f"#{alvo}")
+            target = None
+            target_id = label.get_attribute("for")
+            if target_id:
+                loc = page.locator("#" + target_id)
                 if loc.count():
-                    try:
-                        valor = norm(loc.first.input_value())
-                    except Exception:
-                        valor = norm(loc.first.inner_text())
-                    if valor:
-                        return valor
-            parent = label.locator("xpath=..")
-            for sel in ("input", "select", "textarea"):
-                loc = parent.locator(sel)
-                if loc.count():
-                    try:
-                        valor = norm(loc.first.input_value())
-                    except Exception:
-                        valor = norm(loc.first.inner_text())
-                    if valor:
-                        return valor
+                    target = loc.first
+            if target is None:
+                parent = label.locator("xpath=..")
+                for selector in ("input", "select", "textarea"):
+                    loc = parent.locator(selector)
+                    if loc.count():
+                        target = loc.first
+                        break
+            if target is not None:
+                save(label.inner_text(), value_of(target))
     except Exception:
         pass
-    return None
 
-
-def _campo_tabela(tabelas, nomes):
-    for heads, rows in tabelas:
-        idx = col(heads, *nomes)
-        if idx is not None:
-            for row in rows:
-                if idx < len(row):
-                    valor = norm(row[idx])
-                    if valor:
-                        return valor
-    return None
-
-
-def _data_rotulada(texto, rotulos):
-    valor = _campo_rotulado_texto(texto, rotulos)
-    if not valor:
-        return None
-    m = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", valor)
-    if not m:
-        return None
-    d, mth, ano = map(int, m.groups())
-    if ano < 100:
-        ano += 2000
     try:
-        return f"{ano:04d}-{mth:02d}-{d:02d}"
+        for selector in ("input", "select", "textarea"):
+            controls = page.locator(selector)
+            for i in range(min(controls.count(), 2000)):
+                el = controls.nth(i)
+                label = " ".join(filter(None, [
+                    el.get_attribute("aria-label"), el.get_attribute("placeholder"),
+                    el.get_attribute("name"), el.get_attribute("id")
+                ]))
+                save(label, value_of(el))
+    except Exception:
+        pass
+
+    try:
+        tables = page.locator("table")
+        for ti in range(min(tables.count(), 100)):
+            rows = tables.nth(ti).locator("tr")
+            for i in range(min(rows.count(), 2000)):
+                cells = rows.nth(i).locator("th,td")
+                if cells.count() >= 2:
+                    save(cells.nth(0).inner_text(), cells.nth(1).inner_text())
+    except Exception:
+        pass
+    return out
+
+
+def _json_payload_matches(payload, url, cid, sid=None):
+    url_text = str(url or "")
+    if str(cid) and re.search(r"(?<!\d)" + re.escape(str(cid)) + r"(?!\d)", url_text):
+        return True
+    if sid and re.search(r"(?<!\d)" + re.escape(str(sid)) + r"(?!\d)", url_text):
+        return True
+    target_ids = {str(cid)} | ({str(sid)} if sid else set())
+    stack = [payload]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            for key, value in item.items():
+                k = _key_norm(key)
+                if k in {"contrato", "contrato_id", "matricula", "matricula_id", "cgd_matricula_id", "student_id", "aluno_id", "contract_id"} and str(value) in target_ids:
+                    return True
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(item, list):
+            stack.extend(item[:1000])
+    return False
+
+
+def _extract_json_domain_fields(payloads, cid, sid=None):
+    aliases = {
+        "curso": {"curso", "curso_nome", "nome_curso", "curso_contratado", "course", "course_name"},
+        "turma": {"turma", "turma_nome", "nome_turma", "turma_atual", "class", "class_name"},
+        "professor": {"professor", "professor_nome", "nome_professor", "professor_responsavel", "teacher", "teacher_name"},
+        "data_inicio": {"data_inicio", "data_inicio_periodo_letivo", "data_inicio_aulas", "data_inicio_modulo", "inicio_periodo_letivo", "inicio_aulas", "inicio_modulo", "data_inicio_curso", "start_date", "academic_start_date"},
+        "data_matricula": {"data_matricula", "matricula_em", "enrollment_date"},
+        "data_fim": {"data_fim", "data_termino", "termino", "fim_contrato", "end_date"},
+        "status_matricula": {"status_matricula", "situacao_matricula", "status", "situacao", "state"},
+    }
+    found = {}
+    for item in payloads or []:
+        if not isinstance(item, dict):
+            continue
+        payload, url = item.get("data"), item.get("url") or ""
+        if not _json_payload_matches(payload, url, cid, sid):
+            continue
+        stack = [payload]
+        while stack:
+            obj = stack.pop()
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    k = _key_norm(key)
+                    for field, names in aliases.items():
+                        if k in names and not found.get(field) and isinstance(value, (str, int, float)):
+                            value_text = norm(value)
+                            if value_text:
+                                found[field] = value_text
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+            elif isinstance(obj, list):
+                stack.extend(obj[:1000])
+    return found
+
+
+def _parse_date_value(value):
+    value = norm(value)
+    if not value:
+        return None
+    match = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", value)
+    if match:
+        y, m, d = map(int, match.groups())
+    else:
+        match = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", value)
+        if not match:
+            return None
+        d, m, y = map(int, match.groups())
+        if y < 100:
+            y += 2000
+    try:
+        from datetime import date
+        return date(y, m, d).isoformat()
     except ValueError:
         return None
 
 
-def _extrair_campos_dominio_browser(page, ctext, course_text, schedule_text, aluno_raw, snapshots):
+def _apply_assignment_fallback(domain, evidence_text):
+    evidence = unicodedata.normalize("NFD", low(evidence_text))
+    evidence = "".join(ch for ch in evidence if unicodedata.category(ch) != "Mn")
+    # Só inferimos cada campo quando existe evidência explícita para aquele
+    # campo. Status trancado/desistente/evadido não comprovam não alocação.
+    turma_unallocated = any(marker in evidence for marker in (
+        "sem turma", "nao enturmado", "pendente de enturmacao",
+        "aguardando enturmacao",
+    ))
+    professor_unallocated = any(marker in evidence for marker in (
+        "sem professor", "nao alocado",
+    ))
+    turma_value = _key_norm(domain.get("turma")).replace("_", " ")
+    professor_value = _key_norm(domain.get("professor")).replace("_", " ")
+    empty_turma = not turma_value or turma_value in {"-", "--", "selecione", "nao informado", "nao enturmado", "sem turma"}
+    empty_professor = not professor_value or professor_value in {"-", "--", "selecione", "nao informado", "nao alocado", "sem professor"}
+    if turma_unallocated and empty_turma:
+        domain["turma"] = "SEM TURMA"
+    if professor_unallocated and empty_professor:
+        domain["professor"] = "NÃO ALOCADO"
+    return domain
+
+
+def _extrair_campos_dominio_browser(page, ctext, course_text, schedule_text, aluno_raw, snapshots,
+                                     response_payloads=None, cid=None, sid=None):
     textos = [ctext, course_text, schedule_text, aluno_raw]
+    tabelas, dom_fields = [], {}
     for snap in snapshots:
         textos.append(snap.get("texto_corpo") or "")
-    texto = " | ".join(norm(x) for x in textos if norm(x))
-
-    tabelas = []
-    for snap in snapshots:
+        for field, value in (snap.get("campos_dom") or {}).items():
+            if value and not dom_fields.get(field):
+                dom_fields[field] = value
         for table in snap.get("tabelas") or []:
             tabelas.append((table.get("cabecalhos") or [], table.get("linhas") or []))
+    texto = " | ".join(norm(x) for x in textos if norm(x))
+    for field, value in _extract_dom_fields(page).items():
+        if value and not dom_fields.get(field):
+            dom_fields[field] = value
+    network = _extract_json_domain_fields(response_payloads or [], cid, sid)
+    domain = {}
+    for field in ("curso", "turma", "professor", "data_inicio", "data_matricula", "data_fim", "status_matricula"):
+        value = network.get(field) or dom_fields.get(field)
+        if not value and field in {"curso", "turma", "professor"}:
+            labels = {
+                "curso": ("Curso", "Curso do aluno", "Curso contratado"),
+                "turma": ("Turma", "Turma atual", "Turma do aluno"),
+                "professor": ("Professor", "Professor responsável", "Professor responsavel"),
+            }[field]
+            value = _campo_rotulado_texto(texto, labels) or _campo_tabela(tabelas, (field,))
+        if not value and field in {"data_inicio", "data_matricula", "data_fim"}:
+            labels = {
+                "data_inicio": ("Data de início", "Data de inicio", "Início", "Inicio"),
+                "data_matricula": ("Data de matrícula", "Data de matricula", "Matrícula", "Matricula"),
+                "data_fim": ("Data de término", "Data de termino", "Término", "Termino", "Data fim"),
+            }[field]
+            value = _campo_rotulado_texto(texto, labels)
+        domain[field] = value
+    for field in ("data_inicio", "data_matricula", "data_fim"):
+        domain[field] = _parse_date_value(domain.get(field))
+    return _apply_assignment_fallback(domain, texto + " " + str(domain.get("status_matricula") or ""))
 
-    curso = _campo_rotulado_dom(page, ("curso", "curso do aluno", "curso contratado"))
-    turma = _campo_rotulado_dom(page, ("turma", "turma atual", "turma do aluno"))
-    professor = _campo_rotulado_dom(page, ("professor", "professor responsável", "professor responsavel"))
-    curso = curso or _campo_rotulado_texto(texto, ("Curso", "Curso do aluno", "Curso contratado"))
-    turma = turma or _campo_rotulado_texto(texto, ("Turma", "Turma atual", "Turma do aluno"))
-    professor = professor or _campo_rotulado_texto(texto, ("Professor", "Professor responsável", "Professor responsavel"))
-    curso = curso or _campo_tabela(tabelas, ("curso",))
-    turma = turma or _campo_tabela(tabelas, ("turma",))
-    professor = professor or _campo_tabela(tabelas, ("professor", "professor responsável", "professor responsavel"))
 
-    return {
-        "curso": curso,
-        "turma": turma,
-        "professor": professor,
-        "data_matricula": _data_rotulada(texto, ("Data de matrícula", "Data de matricula", "Matrícula", "Matricula")),
-        "data_inicio": _data_rotulada(texto, ("Data de início", "Data de inicio", "Início", "Inicio")),
-        "data_fim": _data_rotulada(texto, ("Data de término", "Data de termino", "Término", "Termino", "Data fim")),
-    }
-
+def _install_response_capture(page):
+    """Capture XHR/Fetch JSON without adding one permanent listener per contract."""
+    state = getattr(page, "_cgd_response_capture_state", None)
+    if state is None:
+        state = {"payloads": []}
+        def on_response(response):
+            try:
+                payloads = state["payloads"]
+                if not same_host(response.url) or response.request.resource_type not in ("xhr", "fetch"):
+                    return
+                content_type = (response.headers or {}).get("content-type", "").lower()
+                if "json" not in content_type or len(payloads) >= 200:
+                    return
+                data = response.json()
+                if isinstance(data, (dict, list)):
+                    payloads.append({"url": response.url, "data": data})
+            except Exception:
+                pass
+        page.on("response", on_response)
+        page._cgd_response_capture_state = state
+    else:
+        state["payloads"] = []
+    return state["payloads"]
 
 def contract_bundle(page, cid, u, reps):
-    print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
+    """Coleta cirúrgica: somente contrato, cursos, turmas e frequência."""
+    print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}", flush=True)
     cu = contract_url(cid)
-    open_page(page, cu, u, f"contrato_{cid}")
-    ctext = body(page)
-    routes = discover_contract_routes(page, cid)
-    print(f"[{u}] ROTAS_CONTRATO_DESCUBERTAS cid={cid} total={len(routes)}")
+    response_payloads = _install_response_capture(page)
 
-    sl = [h for _, h in links(page) if student_id(h)]
-    sid = student_id(sl[0]) if sl else None
-    rows, st, name = [], "", None
-    course_text = ""
-    schedule_text = ""
-    freq = {"faltas": 0, "presencas": 0, "registros": []}
-    route_snapshots = []
-    visited = set()
+    if not open_page(page, cu, u, f"contrato_{cid}", 300):
+        raise RuntimeError(f"[{u}] ROTA_CONTRATO_INACESSIVEL cid={cid}")
+    ctext = body(page)
+    if not ctext:
+        raise RuntimeError(f"[{u}] CONTRATO_SEM_CONTEUDO cid={cid}")
+
+    sid = None
+    for _, href in links(page):
+        sid = student_id(href)
+        if sid:
+            break
+    if not sid:
+        try:
+            match = re.search(r"/alunos/(\d+)", page.content(), re.I)
+            sid = match.group(1) if match else None
+        except Exception:
+            sid = None
 
     name = extract_name(page)
-    for sel in ("h1, h2, h3, h4, .content-header, .box-title, .card-title, .breadcrumb li"):
-        if name:
-            break
-        try:
-            for t in page.locator(sel).all_inner_texts():
-                cand = extract_name_from_text(t)
-                if cand:
-                    name = cand
-                    break
-        except Exception:
-            pass
+    if not name:
+        name = extract_name_from_sources(page, ctext)
 
-    # Primeiro, as três rotas conhecidas e necessárias. Elas recebem
-    # tratamento específico porque seus campos alimentam o domínio do CFIS.
-    known = [
+    route_snapshots = [{
+        "texto": "contrato",
+        "url": page.url,
+        "rota": "contrato",
+        "origem": "rota_essencial",
+        "tabelas": [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)],
+        "campos_dom": _extract_dom_fields(page),
+        "texto_corpo": ctext[:60000],
+    }]
+
+    rows = []
+    course_text = ""
+    turmas_text = ""
+    freq = {"faltas": 0, "presencas": 0, "registros": []}
+    route_status = {"contrato": True, "disciplinas": False, "turmas": False, "frequencia": False}
+
+    known_routes = (
         ("disciplinas", child_url(cid, "cursos")),
-        ("horarios", child_url(cid, "horarios")),
+        ("turmas", child_url(cid, "turmas")),
         ("frequencia", child_url(cid, "frequencias")),
-    ]
-    for kind, url in known:
-        route = {"texto": kind, "url": url, "rota": kind, "origem": "rota_conhecida"}
-        if not open_page(page, url, u, f"{kind}_individuais_{cid}", 700):
+    )
+    for kind, url in known_routes:
+        if not open_page(page, url, u, f"{kind}_{cid}", 300):
+            print(f"[{u}] ROTA_ESSENCIAL_INACESSIVEL cid={cid} tipo={kind} url={url}", flush=True)
             continue
-        _wait_ajax_route(page, f"{kind}_{cid}")
-        # A aba Cursos é um shell JS em alguns contratos. O próprio CGD
-        # disponibiliza o modal de demonstrativo como rota renderizada; usamos
-        # essa rota somente quando a aba principal ainda está vazia.
-        if kind == "disciplinas" and "carregando..." in low(body(page)):
-            modal_url = f"{CGD_URL.rstrip('/')}/contratos/cursos/modal-demonstrativo-cursos/{cid}"
-            if open_page(page, modal_url, u, f"cursos_modal_{cid}", 500):
-                _wait_ajax_route(page, f"cursos_modal_{cid}")
-                url = modal_url
-        visited.add(url.split("#", 1)[0])
+        _wait_ajax_route(page, f"{kind}_{cid}", max_wait_s=6)
+        text = body(page)
+        tables = [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)]
         snapshot = {
             "texto": kind,
             "url": page.url,
             "rota": kind,
-            "origem": "rota_conhecida",
-            "tabelas": [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)],
-            "texto_corpo": body(page)[:60000],
+            "origem": "rota_essencial",
+            "tabelas": tables,
+            "campos_dom": _extract_dom_fields(page),
+            "texto_corpo": text[:60000],
         }
         route_snapshots.append(snapshot)
+        # Status indica que a rota respondeu com conteúdo; não afirma que todos
+        # os campos de negócio foram extraídos corretamente.
+        route_status[kind] = bool((text or tables) and "carregando..." not in low(text))
+
         if kind == "disciplinas":
-            course_text = snapshot["texto_corpo"][:30000]
-            rows += extract_disciplines(page, url)
+            course_text = text[:30000]
+            rows.extend(extract_disciplines(page, page.url))
             name = name or extract_name(page)
-        elif kind == "horarios":
-            schedule_text = snapshot["texto_corpo"][:30000]
-            st = schedule_text[:20000]
+        elif kind == "turmas":
+            turmas_text = text[:30000]
             name = name or extract_name(page)
         elif kind == "frequencia":
             freq = extract_frequency(page, cid)
             name = name or extract_name(page)
 
-    # Depois das rotas conhecidas, visita as demais rotas que o contrato
-    # realmente apresentou. Isso permite descobrir novos botões/abas do CGD
-    # sem hard-code e sem sair do escopo do contrato.
-    for idx, route in enumerate(routes, 1):
-        normalized = route["url"].split("#", 1)[0]
-        if normalized in visited:
-            continue
-        # O certificado/impressão fica disponível como link para a aplicação,
-        # mas não deve ser aberto no scraping: pode gerar PDF/download e não
-        # agrega dados acadêmicos ao universo do aluno.
-        if route.get("rota") == "imprimir_certificado":
-            print(f"[{u}] ROTA_SOMENTE_LINK cid={cid} tipo=imprimir_certificado url={normalized}", flush=True)
-            visited.add(normalized)
-            continue
-        snapshot = _capture_route_snapshot(page, u, cid, route, idx)
-        if snapshot:
-            route_snapshots.append(snapshot)
-            visited.add(normalized)
-
-            # Se uma aba foi descoberta com outro URL, aproveitamos seus dados
-            # para reforçar a captura das três áreas sem duplicar registros.
-            if route["rota"] == "disciplinas":
-                before = len(rows)
-                rows += extract_disciplines(page, normalized)
-                if len(rows) != before:
-                    course_text = snapshot["texto_corpo"][:30000]
-            elif route["rota"] == "horarios":
-                if not st:
-                    st = snapshot["texto_corpo"][:20000]
-                    schedule_text = snapshot["texto_corpo"][:30000]
-            elif route["rota"] == "frequencia":
-                extra = extract_frequency(page, cid)
-                if extra["registros"]:
-                    freq = extra
-
-    # Localiza o aluno relacionado ao contrato depois que as rotas já foram
-    # visitadas, mantendo a mesma sessão autenticada.
-    if not sid:
-        html_content = page.content()
-        m = re.search(r"/alunos/(\d+)", html_content, re.I)
-        sid = m.group(1) if m else None
-
-    at = ""
-    if sid and open_page(page, f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit", u, f"aluno_{sid}", 500):
-        name = extract_name(page, name)
-        at = body(page)[:25000]
-
-    if not name:
-        name = extract_name_from_sources(page, schedule_text, course_text, ctext)
-    if page_is_blocked(page) or any(flag for flag in (
-        "Sorry, you have been blocked" in ctext,
-        "You are unable to access" in ctext,
-    )):
-        raise RuntimeError(f"[{u}] DETALHE_INVALIDO_CLOUDFLARE cid={cid}")
+    # Usar somente evidências das quatro rotas essenciais. Não executar
+    # discover_contract_routes nem navegar por links/abas adicionais.
+    domain = _extrair_campos_dominio_browser(
+        page, ctext, course_text, turmas_text, "",
+        route_snapshots, response_payloads=response_payloads, cid=cid, sid=sid
+    )
+    # A rota /contratos/turmas/{cid} é a fonte definida para turma/curso/professor.
+    # Se o extractor de domínio não encontrar os campos, tenta explicitamente
+    # os snapshots dessas mesmas rotas, sem inventar valores.
+    all_text = " | ".join(
+        snap.get("texto_corpo") or "" for snap in route_snapshots
+    )
+    all_tables = []
+    for snap in route_snapshots:
+        for table in snap.get("tabelas") or []:
+            all_tables.append((table.get("cabecalhos") or [], table.get("linhas") or []))
+    for field, labels in {
+        "curso": ("Curso", "Curso do aluno", "Curso contratado"),
+        "turma": ("Turma", "Turma atual", "Turma do aluno"),
+        "professor": ("Professor", "Professor responsável", "Professor responsavel"),
+    }.items():
+        if not norm(domain.get(field)):
+            domain[field] = _campo_rotulado_texto(all_text, labels) or _campo_tabela(all_tables, (field,))
+    domain = _apply_assignment_fallback(domain, all_text)
 
     rows, done, cur, fut = classify(rows)
-    domain = _extrair_campos_dominio_browser(
-        page, ctext, course_text, schedule_text, at, route_snapshots
-    )
-
-    def num(r, k):
-        m = re.search(r"\d+", str(r.get(k) or ""))
-        return int(m.group()) if m else -1
-
-    point = max(cur, key=lambda r: (num(r, "modulo"), num(r, "passo"), num(r, "progresso"))) if cur else None
-
-    # Evidência de captura: não confundimos "rota acessível" com "dados
-    # realmente extraídos". A validação posterior decide se o detalhe pode
-    # ser considerado completo.
-    rota_status = {
-        "contrato": bool(ctext),
-        "disciplinas": any(r.get("rota") == "disciplinas" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
-        "horarios": any(r.get("rota") == "horarios" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
-        "frequencia": any(r.get("rota") == "frequencia" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
-    }
+    def num(item, key):
+        match = re.search(r"\d+", str(item.get(key) or ""))
+        return int(match.group()) if match else -1
+    point = max(cur, key=lambda item: (num(item, "modulo"), num(item, "passo"), num(item, "progresso"))) if cur else None
     frequencia_status = "COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR"
+    route_complete = bool(all(route_status.values()))
 
     aluno = {
-        "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "email": None, "telefone": None,
-        "curso": domain.get("curso"), "turma": domain.get("turma"), "professor": domain.get("professor"),
-        "data_matricula": domain.get("data_matricula"), "data_inicio": domain.get("data_inicio"), "data_fim": domain.get("data_fim"),
-        "unidade": u, "faltas": freq["faltas"], "presencas": freq["presencas"], "ultimo_acesso": None,
-        "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO", "cgd_url": cu,
-        "disciplinas": rows, "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
-        "progresso_atual": point, "horarios": st, "aluno_raw": at, "frequencia_raw": freq["registros"],
+        "cgd_matricula_id": cid,
+        "nome": name or f"Contrato {cid}",
+        "contrato": cid,
+        "email": None,
+        "telefone": None,
+        "curso": domain.get("curso"),
+        "turma": domain.get("turma"),
+        "professor": domain.get("professor"),
+        "status_matricula": domain.get("status_matricula"),
+        "data_matricula": domain.get("data_matricula"),
+        "data_inicio": domain.get("data_inicio"),
+        "data_fim": domain.get("data_fim"),
+        "unidade": u,
+        "faltas": freq["faltas"],
+        "presencas": freq["presencas"],
+        "ultimo_acesso": None,
+        "criticidade": None,
+        "dias_desde_ultimo_acesso": None,
+        "status": "ATIVO",
+        "cgd_url": cu,
+        "disciplinas": rows,
+        "disciplinas_concluidas": done,
+        "disciplinas_em_andamento": cur,
+        "disciplinas_futuras": fut,
+        "progresso_atual": point,
+        "horarios": "",
+        "aluno_raw": "",
+        "frequencia_raw": freq["registros"],
         "frequencia_status": frequencia_status,
         "rotas_cgd": route_snapshots,
-        "rotas_cgd_descobertas": routes,
-        "rotas_cgd_status": rota_status,
-        "detalhamento_completo": bool(all(rota_status.values())),
+        "rotas_cgd_descobertas": [],
+        "rotas_cgd_status": route_status,
+        "detalhamento_completo": route_complete,
         "reposicoes": [r for r in reps if belongs(r, cid, sid, name)],
-        "capturado_em": datetime.utcnow().isoformat() + "Z"
+        "capturado_em": datetime.utcnow().isoformat() + "Z",
     }
     return aluno
 
@@ -859,7 +1005,7 @@ def validate_real_detail(aluno, cid, u):
     if status not in ("COM_FREQUENCIA_REAL", "SEM_FREQUENCIA_A_INVESTIGAR"):
         raise RuntimeError(f"[{u}] FREQUENCIA_NAO_PROCESSADA cid={cid} status={status!r}")
     routes = aluno.get("rotas_cgd_status") or {}
-    required = ("contrato", "disciplinas", "horarios", "frequencia")
+    required = ("contrato", "disciplinas", "turmas", "frequencia")
     missing = [k for k in required if not routes.get(k)]
     if missing:
         raise RuntimeError(f"[{u}] ROTAS_CGD_INCOMPLETAS cid={cid} ausentes={','.join(missing)}")
@@ -868,13 +1014,23 @@ def validate_real_detail(aluno, cid, u):
     # As rotas podem estar acessíveis mesmo quando as telas JS devolveram
     # apenas o shell "Carregando...". Sem estes campos o registro não é
     # persistível no CFIS; isso força o fallback renderizado, sem inventar dados.
-    obrigatorios = ("curso", "turma", "professor", "data_inicio")
+    # Curso e início acadêmico continuam obrigatórios. Turma/professor podem
+    # legitimamente estar ausentes; só o fallback semântico, com evidência explícita,
+    # deve preencher SEM TURMA/NÃO ALOCADO.
+    for canonical, alias in (("turma", "turma_nome"), ("professor", "professor_nome")):
+        if not norm(aluno.get(canonical)) and norm(aluno.get(alias)):
+            aluno[canonical] = aluno.get(alias)
+    obrigatorios = ("curso", "data_inicio")
     ausentes = [campo for campo in obrigatorios if not norm(aluno.get(campo))]
     if ausentes:
         raise RuntimeError(
             f"[{u}] CAMPOS_DOMINIO_NAO_CAPTURADOS cid={cid} "
             f"ausentes={','.join(ausentes)}"
         )
+    if not norm(aluno.get("turma")):
+        aluno["turma"] = None
+    if not norm(aluno.get("professor")):
+        aluno["professor"] = None
     return aluno
 
 
@@ -896,7 +1052,7 @@ def detail_worker(args):
     profile.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+            browser = pw.chromium.launch(headless=True)
             context = browser.new_context(storage_state=storage_state)
             page = context.new_page()
             aluno = contract_bundle(page, cid, u, reps)
@@ -966,7 +1122,7 @@ def run_unit(u, cfg, pw):
         raise RuntimeError(f"PATCH_FREQUENCIA_REAL_ERRO: {type(exc).__name__}: {exc}") from exc
     profile = EDGE_PROFILE_BASE / u
     profile.mkdir(parents=True, exist_ok=True)
-    browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+    browser = pw.chromium.launch(headless=True)
     context = browser.new_context()
     page = context.new_page()
     try:

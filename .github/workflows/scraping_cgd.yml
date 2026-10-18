@@ -34,8 +34,8 @@ jobs:
       - name: Validar parser de frequência determinístico
         shell: powershell
         run: |
-          python -m unittest -v test_frequencia_parser_cgd.py
-          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py frequency_runtime_patch.py frequencia_parser_cgd.py
+          python -m unittest -v test_frequencia_parser_cgd.py test_cgd_domain_semantics.py
+          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py browser_runtime_patch.py frequency_runtime_patch.py frequencia_parser_cgd.py test_cgd_domain_semantics.py
           python -c "import sitecustomize; import frequency_runtime_patch; print('PREFLIGHT_IMPORTS_CGD=OK')"
       - name: Validar Secrets obrigatórios
         shell: powershell
@@ -49,8 +49,14 @@ jobs:
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: |
-          $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
+          $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL')
+          if ($env:CGD_SAMPLE_TEST -ne '1') {
+            $required += @('SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
+          } else {
+            Write-Host 'MODO AMOSTRA: secrets do Supabase não são necessários porque não haverá escrita.'
+          }
           foreach ($name in $required) {
             $value = [Environment]::GetEnvironmentVariable($name)
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
@@ -78,12 +84,19 @@ jobs:
           CGD_LISTING_PAGES: '831'
           CGD_LISTING_HTTP_WORKERS: '12'
           CGD_LISTING_TIMEOUT_S: '30'
-          CGD_DETAIL_TIMEOUT_S: '45'
+          CGD_DETAIL_TIMEOUT_S: '20'
           CGD_DETAIL_RETRIES: '0'
           CGD_DETAIL_INTERVAL_MS: '50'
           CGD_DETAIL_WORKERS: '4'
           CGD_PAGE_WAIT_MS: '100'
-          CGD_HEADLESS: 'false'
+          CGD_HEADLESS: 'true'
+          CGD_ENABLE_BROWSER_FALLBACK: 'false'
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          CGD_NULL_UNASSIGNED_FIELDS: 'false'
+          CGD_LIMIT_CONTRATOS: ${{ github.event_name == 'workflow_dispatch' && '2' || '750' }}
+          CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
+          CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
+          CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
           CGD_DIAGNOSTICO: '0'
           PYTHONUNBUFFERED: '1'
         run: |
@@ -91,20 +104,139 @@ jobs:
           Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
           Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
           Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
-          Write-Host '=== NAVEGADOR SOMENTE PARA LOGIN/FALLBACK; DETALHE PRINCIPAL VIA HTTP ==='
+          Write-Host '=== CHROMIUM HEADLESS; FALLBACK DE NAVEGADOR DESATIVADO POR PADRAO ==='
+          Write-Host "=== MODO AMOSTRA: $env:CGD_SAMPLE_TEST ==="
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
-          python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
+          python scraper_sync_incremental.py
+      - name: Validar amostra real das duas unidades
+        if: github.event_name == 'workflow_dispatch'
+        shell: powershell
+        env:
+          CGD_SAMPLE_TEST: '1'
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snapshot = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          samples = snapshot.get('sample_test_contracts') or {}
+          for unit in ('matriz', 'filial'):
+              ids = samples.get(unit) or []
+              print(f'PREFLIGHT_AMOSTRA_{unit.upper()}={len(ids)} CONTRATOS={ids}')
+              if len(ids) != 2:
+                  raise SystemExit(f'Preflight reprovado: {unit} precisa de exatamente 2 contratos capturados; obtido={len(ids)}')
+          print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
+          '@ | python
+      - name: Validar campos estruturados da amostra antes do Supabase
+        if: github.event_name == 'workflow_dispatch'
+        shell: powershell
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snapshot = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          data = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          samples = snapshot.get('sample_test_contracts') or {}
+          errors = []
+          for unit in ('matriz', 'filial'):
+              info = (snapshot.get('unidades') or {}).get(unit) or {}
+              detail_errors = int(info.get('erros_detalhe', 0))
+              print(f'PREFLIGHT_{unit.upper()}_ERROS_DETALHE={detail_errors}')
+              if detail_errors:
+                  errors.append((unit, 'erros_detalhe', detail_errors))
+              ids = set(str(cid).strip() for cid in (samples.get(unit) or []))
+              records = [a for a in data if str(a.get('unidade') or '').lower() == unit and str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip() in ids]
+              by_id = {str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip(): a for a in records}
+              if len(ids) != 2 or len(by_id) != 2:
+                  errors.append((unit, 'amostra_nao_tem_dois_registros_distintos', sorted(ids), sorted(by_id)))
+              for cid in ids:
+                  row = by_id.get(cid)
+                  if not row:
+                      continue
+                  missing = [key for key in ('nome', 'curso', 'data_inicio') if not str(row.get(key) or '').strip()]
+                  routes = row.get('rotas_cgd_status') or {}
+                  expected_routes = ('contrato', 'disciplinas', 'turmas', 'frequencia')
+                  missing_routes = [route for route in expected_routes if routes.get(route) is not True]
+                  print(f'PREFLIGHT_REGISTRO unidade={unit} contrato={cid} curso={bool(row.get("curso"))} data_inicio={bool(row.get("data_inicio"))} disciplinas={len(row.get("disciplinas") or [])} rotas={routes} frequencia_status={row.get("frequencia_status")}')
+                  if missing:
+                      errors.append((unit, cid, 'campos_estruturados_ausentes', missing))
+                  if not row.get('detalhamento_completo') or missing_routes:
+                      errors.append((unit, cid, 'rotas_detalhe_incompletas', missing_routes, routes))
+          print(f'PREFLIGHT_ERROS_ESTRUTURADOS={len(errors)}')
+          if errors:
+              raise SystemExit(f'Preflight reprovado antes do Supabase: {errors[:10]}')
+          print('PREFLIGHT_CAMPOS_ESTRUTURADOS=OK')
+          '@ | python
+      - name: Validar frequência da amostra
+        if: github.event_name == 'workflow_dispatch'
+        shell: powershell
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snap = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          data = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          samples = snap.get('sample_test_contracts') or {}
+          errors = []
+          checked = 0
+          def classify(record):
+              if not isinstance(record, dict):
+                  return None
+              c = str(record.get('classificacao') or '').strip().lower()
+              if c in ('presenca', 'falta', 'reposicao', 'reposicao_faltou'):
+                  return c
+              status = str(record.get('status') or '').strip().lower().replace('ç', 'c').replace('ã', 'a')
+              if 'faltou' in status or 'ausente' in status or 'nao compareceu' in status:
+                  return 'falta'
+              if 'presente' in status or 'compareceu' in status:
+                  return 'presenca'
+              return None
+          for unit in ('matriz', 'filial'):
+              ids = set(str(cid).strip() for cid in (samples.get(unit) or []))
+              for cid in ids:
+                  rows = [a for a in data if str(a.get('unidade') or '').lower() == unit and str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip() == cid]
+                  if len(rows) != 1:
+                      errors.append((unit, cid, 'registro_ausente_ou_duplicado', len(rows)))
+                      continue
+                  row = rows[0]
+                  status = str(row.get('frequencia_status') or '').strip()
+                  raw = row.get('frequencia_raw') or []
+                  classified = [classify(r) for r in raw]
+                  valid = [x for x in classified if x in ('presenca', 'falta', 'reposicao', 'reposicao_faltou')]
+                  print(f'PREFLIGHT_FREQUENCIA unidade={unit} contrato={cid} status={status} registros={len(raw)} classificaveis={len(valid)}')
+                  if status == 'COM_FREQUENCIA_REAL' and not valid:
+                      errors.append((unit, cid, 'status_com_frequencia_sem_registros_classificaveis'))
+                  elif status == 'SEM_FREQUENCIA_A_INVESTIGAR' and valid:
+                      errors.append((unit, cid, 'status_sem_frequencia_com_registros'))
+                  elif status not in ('COM_FREQUENCIA_REAL', 'SEM_FREQUENCIA_A_INVESTIGAR'):
+                      errors.append((unit, cid, 'status_frequencia_invalido', status))
+                  checked += 1
+          print(f'PREFLIGHT_FREQUENCIAS_VERIFICADAS={checked}')
+          if checked != 4 or errors:
+              raise SystemExit(f'Validação de frequência da amostra reprovada: {errors[:10]}')
+          print('PREFLIGHT_FREQUENCIA_AMOSTRA=OK')
+          '@ | python
+      - name: Confirmar preflight sem escrita no Supabase
+        if: github.event_name == 'workflow_dispatch'
+        shell: powershell
+        run: Write-Host 'PREFLIGHT AMOSTRA: escrita no Supabase desativada; nenhum aluno ou disciplina será gravado.'
+      - name: Confirmar integração Supabase habilitada no fluxo normal
+        if: github.event_name != 'workflow_dispatch'
+        shell: powershell
+        run: Write-Host 'FLUXO NORMAL: integração Supabase habilitada; o ingestor será executado após a captura e validação dos dados.'
       - name: Integrar alunos e disciplinas no Supabase
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CFIS_IMPORT_BATCH_SIZE: '500'
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: |
           Write-Host '=== CFIS: INGESTAO INTEGRADA NO MESMO FLUXO ==='
           python ingest_dados_alunos_supabase.py
 
       - name: Validar frequências reais capturadas no lote
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           @'
@@ -167,6 +299,7 @@ jobs:
           print('VALIDACAO_FREQUENCIA_LOTE=OK')
           '@ | python
       - name: Validar lote persistido e avanço incremental
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
@@ -184,7 +317,7 @@ jobs:
           seen = set()
           for unidade in ('matriz', 'filial'):
               info = unidades[unidade]
-              universe = set(info.get('contratos', {}).keys())
+              universe = set((info.get('contratos_detectados') or info.get('contratos', {})).keys())
               total = int(info.get('total', 0))
               lote = int(info.get('lote_planejado', 0))
               capturados = int(info.get('capturados_no_lote', 0))
@@ -212,9 +345,11 @@ jobs:
           print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
           '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: python build_reposicoes_from_alunos.py
       - name: Validar reposições capturadas
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
@@ -237,7 +372,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push do progresso persistido
-        if: success()
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           git config --global user.name 'github-actions[bot]'

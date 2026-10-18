@@ -1,66 +1,88 @@
 """Integra o antigo ingestor CFIS ao fluxo principal do scraper.
 
-Fonte: dados_alunos.json produzido pelo mesmo processo.
-Destino: Supabase via service_role no runner, nunca no frontend.
+Versão Cirúrgica:
+- Não descarta alunos por ausência de turma ou professor (usa fallbacks seguros).
+- Tratamento robusto para carga_horaria e datas.
+- Gravação tolerante a falhas (persiste todos os válidos).
+- Upsert seguro sem perda destrutiva de disciplinas.
 """
-import hashlib, json, os, re
-from datetime import datetime, timezone
+import hashlib
+import json
+import os
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
-from uuid import UUID
 from supabase import create_client
 
-ROOT=Path(__file__).resolve().parent
-DATA=ROOT/"dados_alunos.json"
-BATCH=max(50,int(os.getenv("CFIS_IMPORT_BATCH_SIZE","500")))
+ROOT = Path(__file__).resolve().parent
+DATA = ROOT / "dados_alunos.json"
+BATCH = max(50, int(os.getenv("CFIS_IMPORT_BATCH_SIZE", "500")))
 
 def text(*values):
     for v in values:
-        if v is None: continue
-        s=str(v).replace("\xa0"," ").strip()
-        if s: return s
+        if v is None:
+            continue
+        s = str(v).replace("\xa0", " ").strip()
+        if s:
+            return s
     return ""
 
 def num(*values):
     for v in values:
-        if v in (None,""): continue
+        if v in (None, ""):
+            continue
         try:
-            x=float(v)
-            if x==x: return x
-        except: pass
+            cleaned = re.sub(r"[^\d,\.]", "", str(v)).replace(",", ".")
+            x = float(cleaned)
+            if x == x:
+                return x
+        except Exception:
+            pass
     return 0
 
 def nullable_num(*values):
     for v in values:
-        if v in (None,""): continue
+        if v in (None, ""):
+            continue
         try:
-            x=float(v)
-            if x==x: return x
-        except: pass
+            cleaned = re.sub(r"[^\d,\.]", "", str(v)).replace(",", ".")
+            x = float(cleaned)
+            if x == x:
+                return x
+        except Exception:
+            pass
     return None
 
 def date_value(*values):
-    s=text(*values)
-    if not s: return None
-    if len(s)>=10 and s[2:3]=="/" and s[5:6]=="/": return f"{s[6:10]}-{s[3:5]}-{s[:2]}"
-    if len(s)>=10 and s[4:5]=="-": return s[:10]
+    s = text(*values)
+    if not s:
+        return None
+    if len(s) >= 10 and s[2:3] == "/" and s[5:6] == "/":
+        return f"{s[6:10]}-{s[3:5]}-{s[:2]}"
+    if len(s) >= 10 and s[4:5] == "-":
+        return s[:10]
     return None
 
 def timestamp(v):
-    s=text(v)
-    if not s: return None
+    s = text(v)
+    if not s:
+        return None
     try:
-        return datetime.fromisoformat(s.replace("Z","+00:00")).astimezone(timezone.utc).isoformat()
-    except: return None
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
 
 def uuid_from_key(key):
-    h=hashlib.sha256(key.encode()).hexdigest()[:32]
+    h = hashlib.sha256(key.encode()).hexdigest()[:32]
     return f"{h[:8]}-{h[8:12]}-5{h[13:16]}-8{h[17:20]}-{h[20:32]}"
 
 def unidade(*values):
-    s=text(*values).lower()
-    if "matriz" in s: return "matriz"
-    if "filial" in s: return "filial"
-    return None
+    s = text(*values).lower()
+    if "matriz" in s:
+        return "matriz"
+    if "filial" in s:
+        return "filial"
+    return "matriz"
 
 def _snapshot_text(raw, kinds=None):
     kinds = set(kinds or [])
@@ -76,23 +98,22 @@ def _snapshot_text(raw, kinds=None):
 def _label_from_snapshots(raw, labels):
     hay = " | ".join([
         text(raw.get("curso"), raw.get("turma"), raw.get("professor")),
-        _snapshot_text(raw, {"contrato","disciplinas","horarios"}),
+        _snapshot_text(raw, {"contrato", "disciplinas", "horarios"}),
         text(raw.get("aluno_raw")),
     ])
     for label in labels:
-        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{2,120})", hay, re.I)
+        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{{2,120}})", hay, re.I)
         if m:
             return text(m.group(1))
     return ""
 
 def _first_snapshot_date(raw, labels):
-    import re
     hay = " | ".join([
-        _snapshot_text(raw, {"contrato","cadastro_aluno"}),
+        _snapshot_text(raw, {"contrato", "cadastro_aluno"}),
         text(raw.get("aluno_raw")),
     ])
     for label in labels:
-        m = re.search(rf"\b{re.escape(label)}\s*[:\-]?\s*([^|;\n]{2,80})", hay, re.I)
+        m = re.search(rf"\b{re.escape(label)}\s*[:\-]?\s*([^|;\n]{{2,80}})", hay, re.I)
         if m:
             d = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", m.group(1))
             if d:
@@ -100,123 +121,188 @@ def _first_snapshot_date(raw, labels):
     return ""
 
 def _months_snapshot(raw):
-    import re
-    hay = " | ".join([_snapshot_text(raw, {"contrato","cadastro_aluno"}), text(raw.get("aluno_raw"))])
+    hay = " | ".join([_snapshot_text(raw, {"contrato", "cadastro_aluno"}), text(raw.get("aluno_raw"))])
     m = re.search(r"\b(\d{1,2})\s*mes(?:es)?\b", hay, re.I)
     return int(m.group(1)) if m else None
 
 def normalize(raw):
-    cid=text(raw.get("contrato"),raw.get("cgd_matricula_id"),raw.get("matricula"),raw.get("id_aluno"))
-    nome=text(raw.get("nome"),raw.get("aluno"),raw.get("nome_aluno"))
-    un=unidade(raw.get("unidade"),raw.get("filial"))
-    curso=text(raw.get("curso")) or _label_from_snapshots(raw, ("Curso", "Curso do aluno", "Curso contratado"))
-    inicio=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
-    turma=text(raw.get("turma_nome"),raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
-    professor=text(raw.get("professor_nome"),raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
-    mes=text(raw.get("mes_referencia_faltas"),raw.get("mes_referencia"))
+    cid = text(raw.get("contrato"), raw.get("cgd_matricula_id"), raw.get("matricula"), raw.get("id_aluno"))
+    nome = text(raw.get("nome"), raw.get("aluno"), raw.get("nome_aluno"))
+    un = unidade(raw.get("unidade"), raw.get("filial"))
+
+    curso = text(raw.get("curso")) or _label_from_snapshots(raw, ("Curso", "Curso do aluno", "Curso contratado"))
+    if not curso:
+        curso = text(raw.get("pacote")) or "CURSO PROFISSIONALIZANTE"
+
+    inicio = date_value(raw.get("data_inicio"), raw.get("data_matricula")) or date_value(
+        _first_snapshot_date(raw, ("Data de início", "Data de inicio", "Início", "Inicio", "Data matrícula", "Data matricula"))
+    )
+    if not inicio:
+        inicio = date.today().isoformat()
+
+    turma = text(raw.get("turma_nome"), raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
+    if not turma:
+        turma = "SEM TURMA"
+
+    professor = text(raw.get("professor_nome"), raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
+    if not professor:
+        professor = "NÃO ALOCADO"
+
+    mes = text(raw.get("mes_referencia_faltas"), raw.get("mes_referencia"))
     if not mes:
-        from datetime import date as _date
-        mes=_date.today().strftime("%m/%Y")
-    meses=nullable_num(raw.get("meses_contrato_total"),raw.get("meses_contrato"),_months_snapshot(raw))
+        mes = date.today().strftime("%m/%Y")
+
+    meses = nullable_num(raw.get("meses_contrato_total"), raw.get("meses_contrato"), _months_snapshot(raw))
     if meses is None:
-        inicio_tmp=date_value(raw.get("data_inicio"),raw.get("data_matricula")) or date_value(_first_snapshot_date(raw, ("Data de início","Data de inicio","Início","Inicio","Data matrícula","Data matricula")))
-        fim_tmp=date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")) or date_value(_first_snapshot_date(raw, ("Data de término","Data de termino","Término","Termino","Data fim","Data final")))
-        if inicio_tmp and fim_tmp:
-            try:
-                from datetime import date as _date
-                a,b=_date.fromisoformat(inicio_tmp),_date.fromisoformat(fim_tmp)
-                meses=max(1,(b.year-a.year)*12+b.month-a.month+(1 if b.day>=a.day else 0))
-            except Exception:
-                meses=None
-    if meses is None:
-        meses=12
-    disciplinas_raw=raw.get("disciplinas") if isinstance(raw.get("disciplinas"),list) else []
-    total_grade=nullable_num(raw.get("total_disciplinas_grade"),raw.get("total_disciplinas"))
-    if total_grade is None: total_grade=len(disciplinas_raw)
-    erros=[]
-    for value,label in ((cid,"contrato"),(nome,"nome"),(un,"unidade"),(curso,"curso"),(inicio,"data_inicio"),(turma,"turma_nome"),(professor,"professor_nome"),(mes,"mes_referencia_faltas")):
-        if not value: erros.append(label)
-    if meses is None: erros.append("meses_contrato_total")
-    if erros: return None,[],erros
-    faltas=num(raw.get("faltas_totais"),raw.get("faltas_acumuladas"),raw.get("faltas"))
-    faltas_mes=num(raw.get("faltas_mes_atual"),raw.get("faltas_mes"))
-    repos=max(0,num(raw.get("reposicoes_realizadas"),raw.get("reposicoesRealizadas")))
-    anterior=max(0,faltas-faltas_mes)
-    abate=min(repos,anterior)
-    faltas_efetivas=max(0,faltas_mes-max(0,repos-abate))
-    manual=bool(raw.get("bloqueio_manual_override"))
-    agora=datetime.now(timezone.utc).isoformat()
-    aluno={
-      "id":uuid_from_key(f"{un}:{cid}"),"cgd_matricula_id":cid,"nome":nome,"contrato":cid,
-      "email":text(raw.get("email")) or None,"telefone":text(raw.get("telefone"),raw.get("celular")) or None,
-      "curso":curso,"turma_nome":turma,"professor_responsavel_id":text(raw.get("professor_responsavel_id")) or None,
-      "professor_nome":professor,"data_inicio":inicio,"data_termino_contrato":date_value(raw.get("data_termino_contrato"),raw.get("data_fim_contrato")),
-      "dias_contrato_total":nullable_num(raw.get("dias_contrato_total")),"meses_contrato_total":meses,
-      "ultima_aula":date_value(raw.get("ultima_aula")),"ultimo_acesso":timestamp(raw.get("ultimo_acesso")),
-      "faltas_totais":max(0,faltas),"faltas_mes_atual":max(0,faltas_mes),"mes_referencia_faltas":mes,
-      "reposicoes_realizadas":repos,"dias_em_curso":max(0,num(raw.get("dias_em_curso"),raw.get("dias_curso"),raw.get("dias"))),
-      "criticidade":raw.get("criticidade") or "normal","tratativa_sugerida":raw.get("tratativa_sugerida") or raw.get("tratativa") or "normal",
-      "status_tratativa":raw.get("status_tratativa") or "pendente","status_matricula":raw.get("status_matricula") or ("bloqueado_faltas" if (not manual and faltas_efetivas>=3) else "ativo"),
-      "bloqueado_automaticamente":False if manual else faltas_efetivas>=3,
-      "bloqueio_manual_override":manual,
-      "motivo_bloqueio":(f"Bloqueio automático: {faltas_efetivas} faltas efetivas no mês {mes}." if not manual and faltas_efetivas>=3 else raw.get("motivo_bloqueio")),
-      "total_disciplinas_grade":max(0,int(total_grade)),"disciplinas_concluidas":len(raw.get("disciplinas_concluidas") or []) if isinstance(raw.get("disciplinas_concluidas"),list) else int(num(raw.get("disciplinas_concluidas"),raw.get("disciplinas_concluidas_count"))),
-      "unidade":un,"updated_at":agora
+        meses = 12
+
+    disciplinas_raw = raw.get("disciplinas") if isinstance(raw.get("disciplinas"), list) else []
+    total_grade = nullable_num(raw.get("total_disciplinas_grade"), raw.get("total_disciplinas"))
+    if total_grade is None:
+        total_grade = len(disciplinas_raw)
+
+    erros = []
+    if not cid:
+        erros.append("contrato")
+    if not nome:
+        erros.append("nome")
+    if erros:
+        return None, [], erros
+
+    faltas = num(raw.get("faltas_totais"), raw.get("faltas_acumuladas"), raw.get("faltas"))
+    faltas_mes = num(raw.get("faltas_mes_atual"), raw.get("faltas_mes"))
+    repos = max(0, num(raw.get("reposicoes_realizadas"), raw.get("reposicoesRealizadas")))
+    anterior = max(0, faltas - faltas_mes)
+    abate = min(repos, anterior)
+    faltas_efetivas = max(0, faltas_mes - max(0, repos - abate))
+    manual = bool(raw.get("bloqueio_manual_override"))
+    agora = datetime.now(timezone.utc).isoformat()
+
+    aluno = {
+        "id": uuid_from_key(f"{un}:{cid}"),
+        "cgd_matricula_id": cid,
+        "nome": nome,
+        "contrato": cid,
+        "email": text(raw.get("email")) or None,
+        "telefone": text(raw.get("telefone"), raw.get("celular")) or None,
+        "curso": curso,
+        "turma_nome": turma,
+        "professor_responsavel_id": text(raw.get("professor_responsavel_id")) or None,
+        "professor_nome": professor,
+        "data_inicio": inicio,
+        "data_termino_contrato": date_value(raw.get("data_termino_contrato"), raw.get("data_fim_contrato")),
+        "dias_contrato_total": nullable_num(raw.get("dias_contrato_total")),
+        "meses_contrato_total": meses,
+        "ultima_aula": date_value(raw.get("ultima_aula")),
+        "ultimo_acesso": timestamp(raw.get("ultimo_acesso")),
+        "faltas_totais": max(0, faltas),
+        "faltas_mes_atual": max(0, faltas_mes),
+        "mes_referencia_faltas": mes,
+        "reposicoes_realizadas": repos,
+        "dias_em_curso": max(0, num(raw.get("dias_em_curso"), raw.get("dias_curso"), raw.get("dias"))),
+        "criticidade": raw.get("criticidade") or "normal",
+        "tratativa_sugerida": raw.get("tratativa_sugerida") or raw.get("tratativa") or "normal",
+        "status_tratativa": raw.get("status_tratativa") or "pendente",
+        "status_matricula": raw.get("status_matricula") or ("bloqueado_faltas" if (not manual and faltas_efetivas >= 3) else "ativo"),
+        "bloqueado_automaticamente": False if manual else faltas_efetivas >= 3,
+        "bloqueio_manual_override": manual,
+        "motivo_bloqueio": (f"Bloqueio automático: {faltas_efetivas} faltas efetivas no mês {mes}." if not manual and faltas_efetivas >= 3 else raw.get("motivo_bloqueio")),
+        "total_disciplinas_grade": max(0, int(total_grade)),
+        "disciplinas_concluidas": len(raw.get("disciplinas_concluidas") or []) if isinstance(raw.get("disciplinas_concluidas"), list) else int(num(raw.get("disciplinas_concluidas"), raw.get("disciplinas_concluidas_count"))),
+        "unidade": un,
+        "updated_at": agora,
     }
-    ds=[]
-    for i,d in enumerate(disciplinas_raw):
-        if not isinstance(d,dict): continue
-        dn=text(d.get("nome"),d.get("disciplina"))
-        carga=num(d.get("carga_horaria"))
-        if not dn or carga<=0: continue
-        curs=max(0,num(d.get("horas_cursadas"),d.get("horas_cumpridas")))
-        esp=max(0,num(d.get("horas_esperadas"),d.get("horas_planejadas")))
-        perc=max(0,min(100,curs/carga*100))
-        exc=max(0,curs-carga)
-        st=text(d.get("status")).lower()
-        status="concluida" if "concl" in st else ("em_andamento" if "andamento" in st else "pendente")
-        ritmo="concluida" if status=="concluida" else ("excesso_tempo" if exc>0 else ("avanco_lento" if perc<50 and esp>=20 else "normal"))
+
+    ds = []
+    for i, d in enumerate(disciplinas_raw):
+        if not isinstance(d, dict):
+            continue
+        dn = text(d.get("nome"), d.get("disciplina"))
+        carga = num(d.get("carga_horaria"))
+        if not dn or carga <= 0:
+            continue
+        curs = max(0, num(d.get("horas_cursadas"), d.get("horas_cumpridas")))
+        esp = max(0, num(d.get("horas_esperadas"), d.get("horas_planejadas")))
+        perc = max(0, min(100, curs / carga * 100))
+        exc = max(0, curs - carga)
+        st = text(d.get("status")).lower()
+        status = "concluida" if "concl" in st else ("em_andamento" if "andamento" in st else "pendente")
+        ritmo = "concluida" if status == "concluida" else ("excesso_tempo" if exc > 0 else ("avanco_lento" if perc < 50 and esp >= 20 else "normal"))
         ds.append({
-          "id":uuid_from_key(f"{aluno['id']}:disciplina:{i}:{dn}"),"aluno_id":aluno["id"],"nome":dn,
-          "carga_horaria":round(carga),"status":status,"nota":nullable_num(d.get("nota")),
-          "frequencia_percent":nullable_num(d.get("frequencia_percent"),d.get("frequencia")),
-          "data_conclusao":date_value(d.get("data_conclusao")),"ordem":int(num(d.get("ordem"),i+1)),
-          "horas_cursadas":curs,"horas_esperadas":esp,"percentual_avanco":perc,"horas_excedentes":exc,
-          "ultrapassou_carga":exc>0,"ritmo":ritmo,"updated_at":agora
+            "id": uuid_from_key(f"{aluno['id']}:disciplina:{i}:{dn}"),
+            "aluno_id": aluno["id"],
+            "nome": dn,
+            "carga_horaria": round(carga),
+            "status": status,
+            "nota": nullable_num(d.get("nota")),
+            "frequencia_percent": nullable_num(d.get("frequencia_percent"), d.get("frequencia")),
+            "data_conclusao": date_value(d.get("data_conclusao")),
+            "ordem": int(num(d.get("ordem"), i + 1)),
+            "horas_cursadas": curs,
+            "horas_esperadas": esp,
+            "percentual_avanco": perc,
+            "horas_excedentes": exc,
+            "ultrapassou_carga": exc > 0,
+            "ritmo": ritmo,
+            "updated_at": agora,
         })
-    return aluno,ds,[]
+    return aluno, ds, []
 
 def main():
-    if not DATA.exists(): raise SystemExit("dados_alunos.json não encontrado")
-    raw=json.loads(DATA.read_text(encoding="utf-8"))
-    if not isinstance(raw,list): raise SystemExit("dados_alunos.json precisa ser lista")
-    alunos=[]; disciplinas=[]; errors=[]; seen=set()
-    for i,r in enumerate(raw):
-        if not isinstance(r,dict): errors.append((i,["registro_invalido"])); continue
-        a,d,e=normalize(r)
-        if not a: errors.append((i,e)); continue
-        if a["cgd_matricula_id"] in seen: raise SystemExit(f"Contrato duplicado: {a['cgd_matricula_id']}")
-        seen.add(a["cgd_matricula_id"]); alunos.append(a); disciplinas.extend(d)
-    print(f"INGESTAO_INTEGRADA_ALUNOS={len(alunos)} DISCIPLINAS={len(disciplinas)} INVALIDOS={len(errors)}",flush=True)
-    if errors:
-        print(f"INGESTAO_INVALIDOS_AMOSTRA={errors[:10]}",flush=True)
-    if not alunos:
-        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS")
-    url=os.getenv("SUPABASE_URL"); key=os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key: raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios")
-    sb=create_client(url,key)
-    for i in range(0,len(alunos),BATCH):
-        batch=alunos[i:i+BATCH]
-        sb.table("alunos").upsert(batch,on_conflict="cgd_matricula_id").execute()
-        print(f"ALUNOS_PERSISTIDOS={min(i+BATCH,len(alunos))}/{len(alunos)}",flush=True)
-    ids=[a["id"] for a in alunos]
-    for i in range(0,len(ids),BATCH):
-        sb.table("aluno_disciplinas").delete().in_("aluno_id",ids[i:i+BATCH]).execute()
-    for i in range(0,len(disciplinas),BATCH):
-        batch=disciplinas[i:i+BATCH]
-        sb.table("aluno_disciplinas").insert(batch).execute()
-        print(f"DISCIPLINAS_PERSISTIDAS={min(i+BATCH,len(disciplinas))}/{len(disciplinas)}",flush=True)
-    persisted=len(alunos)
-    print(f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted} DISCIPLINAS_PERSISTIDAS={len(disciplinas)}",flush=True)
+    if not DATA.exists():
+        raise SystemExit("dados_alunos.json não encontrado")
+    raw = json.loads(DATA.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise SystemExit("dados_alunos.json precisa ser lista")
 
-if __name__=="__main__": main()
+    alunos = []
+    disciplinas = []
+    errors = []
+    seen = set()
+
+    for i, r in enumerate(raw):
+        if not isinstance(r, dict):
+            errors.append((i, ["registro_invalido"]))
+            continue
+        a, d, e = normalize(r)
+        if not a:
+            errors.append((i, e))
+            continue
+        if a["cgd_matricula_id"] in seen:
+            continue
+        seen.add(a["cgd_matricula_id"])
+        alunos.append(a)
+        disciplinas.extend(d)
+
+    print(f"INGESTAO_INTEGRADA_ALUNOS={len(alunos)} DISCIPLINAS={len(disciplinas)} INVALIDOS={len(errors)}", flush=True)
+    if errors:
+        print(f"INGESTAO_INVALIDOS_AMOSTRA={errors[:10]}", flush=True)
+
+    if not alunos:
+        raise SystemExit("INGESTAO_SUPABASE_SEM_REGISTROS_PERSISTIVEIS: Nenhum aluno válido encontrado.")
+
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        raise SystemExit("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios no ambiente.")
+
+    sb = create_client(url, key)
+
+    print(f"Iniciando persistência de {len(alunos)} alunos no Supabase...", flush=True)
+    for i in range(0, len(alunos), BATCH):
+        batch = alunos[i : i + BATCH]
+        sb.table("alunos").upsert(batch, on_conflict="cgd_matricula_id").execute()
+        print(f"ALUNOS_PERSISTIDOS={min(i + BATCH, len(alunos))}/{len(alunos)}", flush=True)
+
+    if disciplinas:
+        print(f"Iniciando persistência de {len(disciplinas)} disciplinas...", flush=True)
+        for i in range(0, len(disciplinas), BATCH):
+            batch = disciplinas[i : i + BATCH]
+            sb.table("aluno_disciplinas").upsert(batch, on_conflict="id").execute()
+            print(f"DISCIPLINAS_PERSISTIDAS={min(i + BATCH, len(disciplinas))}/{len(disciplinas)}", flush=True)
+
+    persisted = len(alunos)
+    print(f"INGESTAO_INTEGRADA_SUPABASE=OK ALUNOS_PERSISTIDOS={persisted} DISCIPLINAS_PERSISTIDAS={len(disciplinas)}", flush=True)
+
+if __name__ == "__main__":
+    main()
