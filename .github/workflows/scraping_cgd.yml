@@ -167,6 +167,55 @@ jobs:
               raise SystemExit(f'Preflight reprovado antes do Supabase: {errors[:10]}')
           print('PREFLIGHT_CAMPOS_ESTRUTURADOS=OK')
           '@ | python
+      - name: Validar frequência da amostra
+        if: inputs.cgd_sample_test == true
+        shell: powershell
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          snap = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          data = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          samples = snap.get('sample_test_contracts') or {}
+          errors = []
+          checked = 0
+          def classify(record):
+              if not isinstance(record, dict):
+                  return None
+              c = str(record.get('classificacao') or '').strip().lower()
+              if c in ('presenca', 'falta'):
+                  return c
+              status = str(record.get('status') or '').strip().lower().replace('ç', 'c').replace('ã', 'a')
+              if 'faltou' in status or 'ausente' in status or 'nao compareceu' in status:
+                  return 'falta'
+              if 'presente' in status or 'compareceu' in status:
+                  return 'presenca'
+              return None
+          for unit in ('matriz', 'filial'):
+              ids = set(str(cid).strip() for cid in (samples.get(unit) or []))
+              for cid in ids:
+                  rows = [a for a in data if str(a.get('unidade') or '').lower() == unit and str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip() == cid]
+                  if len(rows) != 1:
+                      errors.append((unit, cid, 'registro_ausente_ou_duplicado', len(rows)))
+                      continue
+                  row = rows[0]
+                  status = str(row.get('frequencia_status') or '').strip()
+                  raw = row.get('frequencia_raw') or []
+                  classified = [classify(r) for r in raw]
+                  valid = [x for x in classified if x in ('presenca', 'falta')]
+                  print(f'PREFLIGHT_FREQUENCIA unidade={unit} contrato={cid} status={status} registros={len(raw)} classificaveis={len(valid)}')
+                  if status == 'COM_FREQUENCIA_REAL' and not valid:
+                      errors.append((unit, cid, 'status_com_frequencia_sem_registros_classificaveis'))
+                  elif status == 'SEM_FREQUENCIA_A_INVESTIGAR' and raw:
+                      errors.append((unit, cid, 'status_sem_frequencia_com_registros'))
+                  elif status not in ('COM_FREQUENCIA_REAL', 'SEM_FREQUENCIA_A_INVESTIGAR'):
+                      errors.append((unit, cid, 'status_frequencia_invalido', status))
+                  checked += 1
+          print(f'PREFLIGHT_FREQUENCIAS_VERIFICADAS={checked}')
+          if checked != 4 or errors:
+              raise SystemExit(f'Validação de frequência da amostra reprovada: {errors[:10]}')
+          print('PREFLIGHT_FREQUENCIA_AMOSTRA=OK')
+          '@ | python
       - name: Confirmar preflight sem escrita no Supabase
         if: inputs.cgd_sample_test == true
         shell: powershell
