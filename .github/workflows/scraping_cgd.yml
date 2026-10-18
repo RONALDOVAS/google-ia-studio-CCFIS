@@ -55,8 +55,14 @@ jobs:
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
         run: |
-          $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
+          $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL')
+          if ($env:CGD_SAMPLE_TEST -ne '1') {
+            $required += @('SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
+          } else {
+            Write-Host 'MODO AMOSTRA: secrets do Supabase não são necessários porque não haverá escrita.'
+          }
           foreach ($name in $required) {
             $value = [Environment]::GetEnvironmentVariable($name)
             if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
@@ -165,6 +171,10 @@ jobs:
         if: inputs.cgd_sample_test == true
         shell: powershell
         run: Write-Host 'PREFLIGHT AMOSTRA: escrita no Supabase desativada; nenhum aluno ou disciplina será gravado.'
+      - name: Confirmar integração Supabase habilitada no fluxo normal
+        if: inputs.cgd_sample_test != true
+        shell: powershell
+        run: Write-Host 'FLUXO NORMAL: integração Supabase habilitada; o ingestor será executado após a captura e validação dos dados.'
       - name: Integrar alunos e disciplinas no Supabase
         if: inputs.cgd_sample_test != true
         shell: powershell
@@ -178,6 +188,7 @@ jobs:
           python ingest_dados_alunos_supabase.py
 
       - name: Validar frequências reais capturadas no lote
+        if: inputs.cgd_sample_test != true
         shell: powershell
         run: |
           @'
@@ -240,6 +251,7 @@ jobs:
           print('VALIDACAO_FREQUENCIA_LOTE=OK')
           '@ | python
       - name: Validar lote persistido e avanço incremental
+        if: inputs.cgd_sample_test != true
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
@@ -285,9 +297,11 @@ jobs:
           print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
           '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
+        if: inputs.cgd_sample_test != true
         shell: powershell
         run: python build_reposicoes_from_alunos.py
       - name: Validar reposições capturadas
+        if: inputs.cgd_sample_test != true
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
