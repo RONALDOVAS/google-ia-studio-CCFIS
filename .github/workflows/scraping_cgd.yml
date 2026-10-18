@@ -20,6 +20,12 @@ jobs:
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
+      - name: Bloquear execução manual da versão antiga na main
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        shell: powershell
+        run: |
+          Write-Error 'EXECUÇÃO MANUAL BLOQUEADA: a main ainda não contém a implementação validada do scraper. Selecione a branch fix/cgd-scraper-integrador-cirurgico para executar a amostra controlada.'
+          exit 1
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
