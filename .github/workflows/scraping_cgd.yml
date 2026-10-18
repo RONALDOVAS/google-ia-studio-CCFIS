@@ -154,7 +154,7 @@ jobs:
                       continue
                   missing = [key for key in ('nome', 'curso', 'data_inicio') if not str(row.get(key) or '').strip()]
                   routes = row.get('rotas_cgd_status') or {}
-                  expected_routes = ('contrato', 'disciplinas', 'horarios', 'frequencia')
+                  expected_routes = ('contrato', 'disciplinas', 'turmas', 'frequencia')
                   missing_routes = [route for route in expected_routes if routes.get(route) is not True]
                   print(f'PREFLIGHT_REGISTRO unidade={unit} contrato={cid} curso={bool(row.get("curso"))} data_inicio={bool(row.get("data_inicio"))} disciplinas={len(row.get("disciplinas") or [])} rotas={routes} frequencia_status={row.get("frequencia_status")}')
                   if missing:
