@@ -2,12 +2,6 @@ name: Sincronização Automática e Manual Scraping CGD
 
 on:
   workflow_dispatch:
-    inputs:
-      cgd_sample_test:
-        description: 'Executar preflight autenticado com exatamente 2 contratos por unidade'
-        required: false
-        default: false
-        type: boolean
   schedule:
     - cron: '5 20 * * *'
       timezone: 'America/Belem'
@@ -55,7 +49,7 @@ jobs:
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: |
           $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL')
           if ($env:CGD_SAMPLE_TEST -ne '1') {
@@ -97,9 +91,9 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_HEADLESS: 'true'
           CGD_ENABLE_BROWSER_FALLBACK: 'false'
-          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
           CGD_NULL_UNASSIGNED_FIELDS: 'false'
-          CGD_LIMIT_CONTRATOS: ${{ inputs.cgd_sample_test && '2' || '750' }}
+          CGD_LIMIT_CONTRATOS: ${{ github.event_name == 'workflow_dispatch' && '2' || '750' }}
           CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
           CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
           CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
@@ -115,7 +109,7 @@ jobs:
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python scraper_sync_incremental.py
       - name: Validar amostra real das duas unidades
-        if: inputs.cgd_sample_test == true
+        if: github.event_name == 'workflow_dispatch'
         shell: powershell
         env:
           CGD_SAMPLE_TEST: '1'
@@ -133,7 +127,7 @@ jobs:
           print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
           '@ | python
       - name: Validar campos estruturados da amostra antes do Supabase
-        if: inputs.cgd_sample_test == true
+        if: github.event_name == 'workflow_dispatch'
         shell: powershell
         run: |
           @'
@@ -173,7 +167,7 @@ jobs:
           print('PREFLIGHT_CAMPOS_ESTRUTURADOS=OK')
           '@ | python
       - name: Validar frequência da amostra
-        if: inputs.cgd_sample_test == true
+        if: github.event_name == 'workflow_dispatch'
         shell: powershell
         run: |
           @'
@@ -222,27 +216,27 @@ jobs:
           print('PREFLIGHT_FREQUENCIA_AMOSTRA=OK')
           '@ | python
       - name: Confirmar preflight sem escrita no Supabase
-        if: inputs.cgd_sample_test == true
+        if: github.event_name == 'workflow_dispatch'
         shell: powershell
         run: Write-Host 'PREFLIGHT AMOSTRA: escrita no Supabase desativada; nenhum aluno ou disciplina será gravado.'
       - name: Confirmar integração Supabase habilitada no fluxo normal
-        if: inputs.cgd_sample_test != true
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: Write-Host 'FLUXO NORMAL: integração Supabase habilitada; o ingestor será executado após a captura e validação dos dados.'
       - name: Integrar alunos e disciplinas no Supabase
-        if: inputs.cgd_sample_test != true
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CFIS_IMPORT_BATCH_SIZE: '500'
-          CGD_SAMPLE_TEST: ${{ inputs.cgd_sample_test && '1' || '0' }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: |
           Write-Host '=== CFIS: INGESTAO INTEGRADA NO MESMO FLUXO ==='
           python ingest_dados_alunos_supabase.py
 
       - name: Validar frequências reais capturadas no lote
-        if: inputs.cgd_sample_test != true
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           @'
@@ -305,7 +299,7 @@ jobs:
           print('VALIDACAO_FREQUENCIA_LOTE=OK')
           '@ | python
       - name: Validar lote persistido e avanço incremental
-        if: inputs.cgd_sample_test != true
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
@@ -351,11 +345,11 @@ jobs:
           print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
           '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
-        if: inputs.cgd_sample_test != true
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: python build_reposicoes_from_alunos.py
       - name: Validar reposições capturadas
-        if: inputs.cgd_sample_test != true
+        if: github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
@@ -378,7 +372,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Commit e Push do progresso persistido
-        if: success() && github.ref == 'refs/heads/main' && inputs.cgd_sample_test != true
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'
         shell: powershell
         run: |
           git config --global user.name 'github-actions[bot]'
