@@ -843,181 +843,155 @@ def _install_response_capture(page):
     return state["payloads"]
 
 def contract_bundle(page, cid, u, reps):
-    print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}")
+    """Coleta cirúrgica: somente contrato, cursos, turmas e frequência."""
+    print(f"[{u}] >>> PROCESSANDO CONTRATO {cid}", flush=True)
     cu = contract_url(cid)
     response_payloads = _install_response_capture(page)
-    open_page(page, cu, u, f"contrato_{cid}")
+
+    if not open_page(page, cu, u, f"contrato_{cid}", 300):
+        raise RuntimeError(f"[{u}] ROTA_CONTRATO_INACESSIVEL cid={cid}")
     ctext = body(page)
-    sl = [h for _, h in links(page) if student_id(h)]
-    sid = student_id(sl[0]) if sl else None
+    if not ctext:
+        raise RuntimeError(f"[{u}] CONTRATO_SEM_CONTEUDO cid={cid}")
+
+    sid = None
+    for _, href in links(page):
+        sid = student_id(href)
+        if sid:
+            break
     if not sid:
         try:
             match = re.search(r"/alunos/(\d+)", page.content(), re.I)
             sid = match.group(1) if match else None
         except Exception:
             sid = None
-    routes = discover_contract_routes(page, cid, sid)
-    print(f"[{u}] ROTAS_CGD_ESPECIFICAS cid={cid} aluno={sid or 'nao_identificado'} total={len(routes)}", flush=True)
-    rows, st, name = [], "", None
-    course_text = ""
-    schedule_text = ""
-    freq = {"faltas": 0, "presencas": 0, "registros": []}
-    route_snapshots = []
-    visited = set()
 
     name = extract_name(page)
-    for sel in ("h1, h2, h3, h4, .content-header, .box-title, .card-title, .breadcrumb li"):
-        if name:
-            break
-        try:
-            for t in page.locator(sel).all_inner_texts():
-                cand = extract_name_from_text(t)
-                if cand:
-                    name = cand
-                    break
-        except Exception:
-            pass
+    if not name:
+        name = extract_name_from_sources(page, ctext)
 
-    # Primeiro, as três rotas conhecidas e necessárias. Elas recebem
-    # tratamento específico porque seus campos alimentam o domínio do CFIS.
-    known = [
+    route_snapshots = [{
+        "texto": "contrato",
+        "url": page.url,
+        "rota": "contrato",
+        "origem": "rota_essencial",
+        "tabelas": [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)],
+        "campos_dom": _extract_dom_fields(page),
+        "texto_corpo": ctext[:60000],
+    }]
+
+    rows = []
+    course_text = ""
+    turmas_text = ""
+    freq = {"faltas": 0, "presencas": 0, "registros": []}
+    route_status = {"contrato": True, "disciplinas": False, "turmas": False, "frequencia": False}
+
+    known_routes = (
         ("disciplinas", child_url(cid, "cursos")),
-        ("horarios", child_url(cid, "horarios")),
+        ("turmas", child_url(cid, "turmas")),
         ("frequencia", child_url(cid, "frequencias")),
-    ]
-    for kind, url in known:
-        route = {"texto": kind, "url": url, "rota": kind, "origem": "rota_conhecida"}
-        if not open_page(page, url, u, f"{kind}_individuais_{cid}", 700):
+    )
+    for kind, url in known_routes:
+        if not open_page(page, url, u, f"{kind}_{cid}", 300):
+            print(f"[{u}] ROTA_ESSENCIAL_INACESSIVEL cid={cid} tipo={kind} url={url}", flush=True)
             continue
-        _wait_ajax_route(page, f"{kind}_{cid}")
-        # A aba Cursos é um shell JS em alguns contratos. O próprio CGD
-        # disponibiliza o modal de demonstrativo como rota renderizada; usamos
-        # essa rota somente quando a aba principal ainda está vazia.
-        if kind == "disciplinas" and "carregando..." in low(body(page)):
-            modal_url = f"{CGD_URL.rstrip('/')}/contratos/cursos/modal-demonstrativo-cursos/{cid}"
-            if open_page(page, modal_url, u, f"cursos_modal_{cid}", 500):
-                _wait_ajax_route(page, f"cursos_modal_{cid}")
-                url = modal_url
-        visited.add(url.split("#", 1)[0])
+        _wait_ajax_route(page, f"{kind}_{cid}", max_wait_s=6)
+        text = body(page)
+        tables = [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)]
         snapshot = {
             "texto": kind,
             "url": page.url,
             "rota": kind,
-            "origem": "rota_conhecida",
-            "tabelas": [{"cabecalhos": h, "linhas": r} for h, r in table_data(page)],
+            "origem": "rota_essencial",
+            "tabelas": tables,
             "campos_dom": _extract_dom_fields(page),
-            "texto_corpo": body(page)[:60000],
+            "texto_corpo": text[:60000],
         }
         route_snapshots.append(snapshot)
+        # Status indica que a rota respondeu com conteúdo; não afirma que todos
+        # os campos de negócio foram extraídos corretamente.
+        route_status[kind] = bool(text or tables)
+
         if kind == "disciplinas":
-            course_text = snapshot["texto_corpo"][:30000]
-            rows += extract_disciplines(page, url)
+            course_text = text[:30000]
+            rows.extend(extract_disciplines(page, page.url))
             name = name or extract_name(page)
-        elif kind == "horarios":
-            schedule_text = snapshot["texto_corpo"][:30000]
-            st = schedule_text[:20000]
+        elif kind == "turmas":
+            turmas_text = text[:30000]
             name = name or extract_name(page)
         elif kind == "frequencia":
             freq = extract_frequency(page, cid)
             name = name or extract_name(page)
 
-    # Depois das rotas conhecidas, visita as demais rotas que o contrato
-    # realmente apresentou. Isso permite descobrir novos botões/abas do CGD
-    # sem hard-code e sem sair do escopo do contrato.
-    for idx, route in enumerate(routes, 1):
-        normalized = route["url"].split("#", 1)[0]
-        if normalized in visited:
-            continue
-        # O certificado/impressão fica disponível como link para a aplicação,
-        # mas não deve ser aberto no scraping: pode gerar PDF/download e não
-        # agrega dados acadêmicos ao universo do aluno.
-        if route.get("rota") == "imprimir_certificado":
-            print(f"[{u}] ROTA_SOMENTE_LINK cid={cid} tipo=imprimir_certificado url={normalized}", flush=True)
-            visited.add(normalized)
-            continue
-        if not _safe_contract_route(route, cid, sid):
-            print(f"[{u}] ROTA_GLOBAL_IGNORADA cid={cid} url={normalized}", flush=True)
-            continue
-        snapshot = _capture_route_snapshot(page, u, cid, route, idx, sid)
-        if snapshot:
-            route_snapshots.append(snapshot)
-            visited.add(normalized)
-
-            # Se uma aba foi descoberta com outro URL, aproveitamos seus dados
-            # para reforçar a captura das três áreas sem duplicar registros.
-            if route["rota"] == "disciplinas":
-                before = len(rows)
-                rows += extract_disciplines(page, normalized)
-                if len(rows) != before:
-                    course_text = snapshot["texto_corpo"][:30000]
-            elif route["rota"] == "horarios":
-                if not st:
-                    st = snapshot["texto_corpo"][:20000]
-                    schedule_text = snapshot["texto_corpo"][:30000]
-            elif route["rota"] == "frequencia":
-                extra = extract_frequency(page, cid)
-                if extra["registros"]:
-                    freq = extra
-
-    # Localiza o aluno relacionado ao contrato depois que as rotas já foram
-    # visitadas, mantendo a mesma sessão autenticada.
-    if not sid:
-        html_content = page.content()
-        m = re.search(r"/alunos/(\d+)", html_content, re.I)
-        sid = m.group(1) if m else None
-
-    at = ""
-    if sid and open_page(page, f"{CGD_URL.rstrip('/')}/alunos/{sid}/edit", u, f"aluno_{sid}", 500):
-        name = extract_name(page, name)
-        at = body(page)[:25000]
-
-    if not name:
-        name = extract_name_from_sources(page, schedule_text, course_text, ctext)
-    if page_is_blocked(page) or any(flag for flag in (
-        "Sorry, you have been blocked" in ctext,
-        "You are unable to access" in ctext,
-    )):
-        raise RuntimeError(f"[{u}] DETALHE_INVALIDO_CLOUDFLARE cid={cid}")
+    # Usar somente evidências das quatro rotas essenciais. Não executar
+    # discover_contract_routes nem navegar por links/abas adicionais.
+    domain = _extrair_campos_dominio_browser(
+        page, ctext, course_text, turmas_text, "",
+        route_snapshots, response_payloads=response_payloads, cid=cid, sid=sid
+    )
+    # A rota /contratos/turmas/{cid} é a fonte definida para turma/curso/professor.
+    # Se o extractor de domínio não encontrar os campos, tenta explicitamente
+    # os snapshots dessas mesmas rotas, sem inventar valores.
+    all_text = " | ".join(
+        snap.get("texto_corpo") or "" for snap in route_snapshots
+    )
+    all_tables = []
+    for snap in route_snapshots:
+        for table in snap.get("tabelas") or []:
+            all_tables.append((table.get("cabecalhos") or [], table.get("linhas") or []))
+    for field, labels in {
+        "curso": ("Curso", "Curso do aluno", "Curso contratado"),
+        "turma": ("Turma", "Turma atual", "Turma do aluno"),
+        "professor": ("Professor", "Professor responsável", "Professor responsavel"),
+    }.items():
+        if not norm(domain.get(field)):
+            domain[field] = _campo_rotulado_texto(all_text, labels) or _campo_tabela(all_tables, (field,))
+    domain = _apply_assignment_fallback(domain, all_text)
 
     rows, done, cur, fut = classify(rows)
-    domain = _extrair_campos_dominio_browser(
-        page, ctext, course_text, schedule_text, at, route_snapshots,
-        response_payloads=response_payloads, cid=cid, sid=sid
-    )
-
-    def num(r, k):
-        m = re.search(r"\d+", str(r.get(k) or ""))
-        return int(m.group()) if m else -1
-
-    point = max(cur, key=lambda r: (num(r, "modulo"), num(r, "passo"), num(r, "progresso"))) if cur else None
-
-    # Evidência de captura: não confundimos "rota acessível" com "dados
-    # realmente extraídos". A validação posterior decide se o detalhe pode
-    # ser considerado completo.
-    rota_status = {
-        "contrato": bool(ctext),
-        "disciplinas": any(r.get("rota") == "disciplinas" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
-        "horarios": any(r.get("rota") == "horarios" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
-        "frequencia": any(r.get("rota") == "frequencia" and (r.get("tabelas") or r.get("texto_corpo")) for r in route_snapshots),
-    }
+    def num(item, key):
+        match = re.search(r"\d+", str(item.get(key) or ""))
+        return int(match.group()) if match else -1
+    point = max(cur, key=lambda item: (num(item, "modulo"), num(item, "passo"), num(item, "progresso"))) if cur else None
     frequencia_status = "COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR"
+    route_complete = bool(all(route_status.values()))
 
     aluno = {
-        "cgd_matricula_id": cid, "nome": name or f"Contrato {cid}", "contrato": cid, "email": None, "telefone": None,
-        "curso": domain.get("curso"), "turma": domain.get("turma"), "professor": domain.get("professor"),
+        "cgd_matricula_id": cid,
+        "nome": name or f"Contrato {cid}",
+        "contrato": cid,
+        "email": None,
+        "telefone": None,
+        "curso": domain.get("curso"),
+        "turma": domain.get("turma"),
+        "professor": domain.get("professor"),
         "status_matricula": domain.get("status_matricula"),
-        "data_matricula": domain.get("data_matricula"), "data_inicio": domain.get("data_inicio"), "data_fim": domain.get("data_fim"),
-        "unidade": u, "faltas": freq["faltas"], "presencas": freq["presencas"], "ultimo_acesso": None,
-        "criticidade": None, "dias_desde_ultimo_acesso": None, "status": "ATIVO", "cgd_url": cu,
-        "disciplinas": rows, "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
-        "progresso_atual": point, "horarios": st, "aluno_raw": at, "frequencia_raw": freq["registros"],
+        "data_matricula": domain.get("data_matricula"),
+        "data_inicio": domain.get("data_inicio"),
+        "data_fim": domain.get("data_fim"),
+        "unidade": u,
+        "faltas": freq["faltas"],
+        "presencas": freq["presencas"],
+        "ultimo_acesso": None,
+        "criticidade": None,
+        "dias_desde_ultimo_acesso": None,
+        "status": "ATIVO",
+        "cgd_url": cu,
+        "disciplinas": rows,
+        "disciplinas_concluidas": done,
+        "disciplinas_em_andamento": cur,
+        "disciplinas_futuras": fut,
+        "progresso_atual": point,
+        "horarios": "",
+        "aluno_raw": "",
+        "frequencia_raw": freq["registros"],
         "frequencia_status": frequencia_status,
         "rotas_cgd": route_snapshots,
-        "rotas_cgd_descobertas": routes,
-        "rotas_cgd_status": rota_status,
-        "detalhamento_completo": bool(all(rota_status.values())),
+        "rotas_cgd_descobertas": [],
+        "rotas_cgd_status": route_status,
+        "detalhamento_completo": route_complete,
         "reposicoes": [r for r in reps if belongs(r, cid, sid, name)],
-        "capturado_em": datetime.utcnow().isoformat() + "Z"
+        "capturado_em": datetime.utcnow().isoformat() + "Z",
     }
     return aluno
 
@@ -1031,7 +1005,7 @@ def validate_real_detail(aluno, cid, u):
     if status not in ("COM_FREQUENCIA_REAL", "SEM_FREQUENCIA_A_INVESTIGAR"):
         raise RuntimeError(f"[{u}] FREQUENCIA_NAO_PROCESSADA cid={cid} status={status!r}")
     routes = aluno.get("rotas_cgd_status") or {}
-    required = ("contrato", "disciplinas", "horarios", "frequencia")
+    required = ("contrato", "disciplinas", "turmas", "frequencia")
     missing = [k for k in required if not routes.get(k)]
     if missing:
         raise RuntimeError(f"[{u}] ROTAS_CGD_INCOMPLETAS cid={cid} ausentes={','.join(missing)}")
