@@ -2,9 +2,6 @@ name: Sincronização Automática e Manual Scraping CGD
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '5 20 * * *'
-      timezone: 'America/Belem'
 
 permissions:
   contents: write
