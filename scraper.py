@@ -910,7 +910,7 @@ def contract_bundle(page, cid, u, reps):
         route_snapshots.append(snapshot)
         # Status indica que a rota respondeu com conteúdo; não afirma que todos
         # os campos de negócio foram extraídos corretamente.
-        route_status[kind] = bool(text or tables)
+        route_status[kind] = bool((text or tables) and "carregando..." not in low(text))
 
         if kind == "disciplinas":
             course_text = text[:30000]
