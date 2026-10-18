@@ -58,7 +58,7 @@ SAMPLE_TEST = os.getenv("CGD_SAMPLE_TEST", "0").lower() in ("1", "true", "yes", 
 SAMPLE_LIMIT = 2 if SAMPLE_TEST else 0
 CHECKPOINT_EVERY_CONTRACTS = max(1, int(os.getenv("CGD_CHECKPOINT_EVERY_CONTRACTS", "10")))
 CHECKPOINT_INTERVAL_SECONDS = max(10, int(os.getenv("CGD_CHECKPOINT_INTERVAL_SECONDS", "60")))
-CIRCUIT_BREAKER_THRESHOLD = max(2, int(os.getenv("CGD_CIRCUIT_BREAKER_THRESHOLD", "5")))
+CIRCUIT_BREAKER_THRESHOLD = 5  # cinco falhas consecutivas de conexão/sessão interrompem o lote
 SOURCE = "https://app.cgd.com.br/alunos"
 CF_MARKERS = ("sorry, you have been blocked", "you have been blocked", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
 
@@ -280,6 +280,23 @@ def _failure_reason(exc):
     return f"{type(exc).__name__}:{message.split(' cid=')[0][:120]}"
 
 
+def _is_connection_session_error(exc):
+    """Identifica falhas transitórias de transporte/autenticação para o circuit breaker."""
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+    message = str(exc).lower()
+    markers = (
+        "connectionerror", "connection error", "connection reset",
+        "connection aborted", "connect timeout", "read timeout",
+        "timed out", "max retries exceeded", "remote end closed",
+        "name resolution", "temporary failure in name resolution",
+        "sessao redirecionada para login", "sessão redirecionada para login",
+        "sessao expirada", "sessão expirada", "unauthorized", "forbidden",
+        "http 401", "http 403",
+    )
+    return any(marker in message for marker in markers)
+
+
 def signature_changed(existing, current):
     old = existing.get("assinatura_universo_cgd")
     return not old or old != current
@@ -470,6 +487,8 @@ def main():
                     captured_ids = []
                     consecutive_reason = None
                     consecutive_failures = 0
+                    consecutive_connection_failures = 0
+                    last_connection_error = None
                     last_checkpoint_at = perf_counter()
                     last_checkpoint_captured = 0
                     http_session = cgd_http_detail.session_from_page(page)
@@ -495,6 +514,8 @@ def main():
                             captured_ids.append(cid)
                             consecutive_reason = None
                             consecutive_failures = 0
+                            consecutive_connection_failures = 0
+                            last_connection_error = None
                             print(f"[{unidade}] DETALHE_OK {idx}/{len(priority_targets)} cid={cid} modo={aluno.get('detalhamento_modo')}", flush=True)
                         except Exception as exc:
                             detail_errors.append((cid, repr(exc)))
@@ -504,9 +525,17 @@ def main():
                             else:
                                 consecutive_reason = reason
                                 consecutive_failures = 1
+                            if _is_connection_session_error(exc):
+                                consecutive_connection_failures += 1
+                                last_connection_error = repr(exc)
+                            else:
+                                consecutive_connection_failures = 0
+                                last_connection_error = None
                             print(
                                 f"[{unidade}] DETALHE_ERRO cid={cid} motivo={reason} "
-                                f"sequencia_mesmo_motivo={consecutive_failures}: {exc!r}",
+                                f"sequencia_mesmo_motivo={consecutive_failures} "
+                                f"falhas_conexao_sessao={consecutive_connection_failures}/"
+                                f"{CIRCUIT_BREAKER_THRESHOLD}: {exc!r}",
                                 flush=True,
                             )
                         print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(priority_targets)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
@@ -522,14 +551,16 @@ def main():
                             )
                             last_checkpoint_at = now_perf
                             last_checkpoint_captured = captured
-                        if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                        if consecutive_connection_failures >= CIRCUIT_BREAKER_THRESHOLD:
                             _flush_incremental_checkpoint(
                                 by_id, snapshot, pending_frequency, unidade, contracts, signatures,
                                 captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
                             )
                             raise CircuitBreakerError(
-                                f"[{unidade}] CIRCUIT_BREAKER_ABERTO motivo={consecutive_reason} "
-                                f"falhas_consecutivas={consecutive_failures}; lote interrompido com checkpoint."
+                                f"[{unidade}] CIRCUIT_BREAKER_ABERTO: "
+                                f"{consecutive_connection_failures} contratos consecutivos falharam por "
+                                f"conexão/sessão; última_falha={last_connection_error}; "
+                                "progresso acumulado salvo atomicamente."
                             )
                     dynamic_consecutive_reason = None
                     dynamic_consecutive_failures = 0
