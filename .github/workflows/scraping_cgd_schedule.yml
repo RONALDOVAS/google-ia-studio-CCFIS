@@ -1,0 +1,274 @@
+name: Sincronização Automática Scraping CGD
+
+on:
+  schedule:
+    - cron: '5 20 * * *'
+      timezone: 'America/Belem'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scraping-cgd
+  cancel-in-progress: false
+
+jobs:
+  executar-scraping:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 360
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependências Python e Playwright
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright playwright-stealth
+          python -m playwright install chromium
+      - name: Validar parser de frequência determinístico
+        shell: powershell
+        run: |
+          python -m unittest -v test_frequencia_parser_cgd.py
+          python -m py_compile scraper.py scraper_runner.py scraper_sync_incremental.py cgd_http_detail.py ingest_dados_alunos_supabase.py sitecustomize.py frequency_runtime_patch.py frequencia_parser_cgd.py
+          python -c "import sitecustomize; import frequency_runtime_patch; print('PREFLIGHT_IMPORTS_CGD=OK')"
+      - name: Validar Secrets obrigatórios
+        shell: powershell
+        env:
+          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
+          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
+          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
+          foreach ($name in $required) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "Secret obrigatório ausente: $name" }
+            Write-Host "$name = OK"
+          }
+      - name: Sincronizar lote CGD e persistir progresso
+        shell: powershell
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CGD_LOGIN_URL: ${{ secrets.CGD_LOGIN_URL }}
+          CGD_MATRIZ_URL: ${{ secrets.CGD_MATRIZ_URL }}
+          CGD_FILIAL_URL: ${{ secrets.CGD_FILIAL_URL }}
+          CGD_USER_MATRIZ: ${{ secrets.CGD_USER_MATRIZ }}
+          CGD_PASS_MATRIZ: ${{ secrets.CGD_PASS_MATRIZ }}
+          CGD_USER_FILIAL: ${{ secrets.CGD_USER_FILIAL }}
+          CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CGD_MAX_LINK_PAGES: '5000'
+          CGD_MAX_CONTRACTS: '50000'
+          CGD_DETAIL_BATCH_PER_UNIT: '750'
+          CGD_DYNAMIC_REFRESH_HOURS: '24'
+          CGD_DYNAMIC_BATCH_PER_UNIT: '100'
+          CGD_LISTING_PAGES: '831'
+          CGD_LISTING_HTTP_WORKERS: '12'
+          CGD_LISTING_TIMEOUT_S: '30'
+          CGD_DETAIL_TIMEOUT_S: '45'
+          CGD_DETAIL_RETRIES: '0'
+          CGD_DETAIL_INTERVAL_MS: '50'
+          CGD_DETAIL_WORKERS: '4'
+          CGD_PAGE_WAIT_MS: '100'
+          CGD_HEADLESS: 'false'
+          CGD_DIAGNOSTICO: '0'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          Write-Host '=== CGD: SINCRONIZACAO DIFERENCIAL ==='
+          Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
+          Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
+          Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
+          Write-Host '=== NAVEGADOR SOMENTE PARA LOGIN/FALLBACK; DETALHE PRINCIPAL VIA HTTP ==='
+          python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
+          python -c "import browser_runtime_patch; import runpy; runpy.run_path('scraper_sync_incremental.py', run_name='__main__')"
+      - name: Integrar alunos e disciplinas no Supabase
+        shell: powershell
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CFIS_IMPORT_BATCH_SIZE: '500'
+        run: |
+          Write-Host '=== CFIS: INGESTAO INTEGRADA NO MESMO FLUXO ==='
+          python ingest_dados_alunos_supabase.py
+
+      - name: Validar frequências reais capturadas no lote
+        shell: powershell
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          snap = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          total = 0
+          sem_frequencia = 0
+          falhas = []
+          for unidade, info in snap.get('unidades', {}).items():
+              ids = set(info.get('contratos_capturados_no_lote', []))
+              encontrados = set()
+              for aluno in dados:
+                  cid = str(aluno.get('contrato') or aluno.get('cgd_matricula_id') or '').strip()
+                  if str(aluno.get('unidade') or '').lower() != unidade or cid not in ids:
+                      continue
+                  encontrados.add(cid)
+                  status = str(aluno.get('frequencia_status') or '').strip()
+                  def classificar(r):
+                      if not isinstance(r, dict):
+                          return None
+                      c = str(r.get('classificacao') or '').strip().lower()
+                      if c in ('presenca','falta','reposicao','reposicao_faltou'):
+                          return c
+                      s = str(r.get('status') or '').strip().lower().replace('ç','c').replace('ã','a')
+                      if 'reposicao-faltou' in s or 'reposicao faltou' in s:
+                          return 'reposicao_faltou'
+                      if 'reposicao' in s:
+                          return 'reposicao'
+                      if 'faltou' in s or 'ausente' in s or 'nao compareceu' in s:
+                          return 'falta'
+                      if 'presente' in s or 'compareceu' in s:
+                          return 'presenca'
+                      return None
+                  registros = [r for r in (aluno.get('frequencia_raw') or []) if classificar(r) in ('presenca','falta')]
+                  presencas = sum(classificar(r) == 'presenca' for r in registros)
+                  faltas = sum(classificar(r) == 'falta' for r in registros)
+                  if status not in ('COM_FREQUENCIA_REAL', 'SEM_FREQUENCIA_A_INVESTIGAR'):
+                      falhas.append((unidade, cid, 'status_invalido', status))
+                  if len(registros) != presencas + faltas:
+                      falhas.append((unidade, cid, 'matematica', len(registros), presencas, faltas))
+                  if status == 'SEM_FREQUENCIA_A_INVESTIGAR' and registros:
+                      falhas.append((unidade, cid, 'status_sem_freq_mas_com_registros', len(registros)))
+                  if status == 'COM_FREQUENCIA_REAL' and not registros:
+                      falhas.append((unidade, cid, 'status_com_freq_mas_sem_registros'))
+                  total += 1
+                  if status == 'SEM_FREQUENCIA_A_INVESTIGAR':
+                      sem_frequencia += 1
+              faltantes = ids - encontrados
+              if faltantes:
+                  falhas.append((unidade, 'LOTE', 'capturados_nao_persistidos', sorted(faltantes)[:20]))
+          print(f'FREQUENCIAS_REAIS_VALIDANDO_LOTE={total}')
+          print(f'FREQUENCIAS_SEM_REGISTROS_VALIDAS={sem_frequencia}')
+          print(f'FREQUENCIAS_REAIS_ERROS_MATEMATICOS={len(falhas)}')
+          if falhas:
+              raise SystemExit(f'Falha na validação de frequência real: {falhas[:10]}')
+          if total == 0:
+              raise SystemExit('Falha: nenhum detalhe capturado foi persistido com status de frequência real.')
+          print('VALIDACAO_FREQUENCIA_LOTE=OK')
+          '@ | python
+      - name: Validar lote persistido e avanço incremental
+        shell: powershell
+        run: |
+          if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
+          if (-not (Test-Path 'dados_universo_cgd.json')) { throw 'Falha: dados_universo_cgd.json não foi gerado.' }
+          @'
+          import json
+          from pathlib import Path
+          dados = json.loads(Path('dados_alunos.json').read_text(encoding='utf-8'))
+          snap = json.loads(Path('dados_universo_cgd.json').read_text(encoding='utf-8'))
+          if not isinstance(dados, list):
+              raise SystemExit('Falha: dados_alunos.json invalido.')
+          unidades = snap.get('unidades', {})
+          if set(unidades) != {'matriz', 'filial'}:
+              raise SystemExit(f'Falha: snapshot sem Matriz e Filial: {sorted(unidades)}')
+          seen = set()
+          for unidade in ('matriz', 'filial'):
+              info = unidades[unidade]
+              universe = set(info.get('contratos', {}).keys())
+              total = int(info.get('total', 0))
+              lote = int(info.get('lote_planejado', 0))
+              capturados = int(info.get('capturados_no_lote', 0))
+              if total != len(universe) or total <= 0:
+                  raise SystemExit(f'Falha: universo invalido na {unidade}: total={total} ids={len(universe)}')
+              if lote > 750:
+                  raise SystemExit(f'Falha: lote acima de 750 na {unidade}: {lote}')
+              if capturados < 0 or capturados > lote:
+                  raise SystemExit(f'Falha: captura do lote invalida na {unidade}: {capturados}/{lote}')
+              base_unit = set()
+              for a in dados:
+                  u = str(a.get('unidade') or '').lower()
+                  cid = str(a.get('contrato') or a.get('cgd_matricula_id') or '').strip()
+                  if u == unidade and cid:
+                      base_unit.add(cid)
+                      token = (u, cid)
+                      if token in seen:
+                          raise SystemExit(f'Falha: contrato duplicado na base: {token}')
+                      seen.add(token)
+              fora = base_unit - universe
+              print(f'{unidade.upper()}: UNIVERSO={total} BASE={len(base_unit)} LOTE={lote} CAPTURADOS={capturados} PENDENTES={len(universe-base_unit)} FORA_UNIVERSO={len(fora)} ERROS_DETALHE={info.get("erros_detalhe",0)}')
+              if capturados and not base_unit.intersection(universe):
+                  raise SystemExit(f'Falha: lote reportou captura mas nenhum contrato do lote esta na base da {unidade}.')
+          print(f'BASE_TOTAL_PERSISTIDA={len(dados)}')
+          print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
+          '@ | python
+      - name: Gerar reposições reais a partir dos alunos capturados
+        shell: powershell
+        run: python build_reposicoes_from_alunos.py
+      - name: Validar reposições capturadas
+        shell: powershell
+        run: |
+          if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
+          $rep = Get-Content 'dados_reposicoes.json' -Raw | ConvertFrom-Json
+          Write-Host "REPOSICOES CAPTURADAS: $($rep.records.Count)"
+          if ($rep.source -ne 'CGD') { throw 'Fonte de reposições não é CGD.' }
+      - name: Salvar diagnósticos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-scraping-cgd-${{ github.run_id }}
+          path: |
+            diagnostico_scraping/
+            dados_alunos.json
+            dados_universo_cgd.json
+            dados_reposicoes.json
+            dados_dashboard_cgd.json
+            dados_pacotes_cursos.json
+            dados_frequencias_a_registrar.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Commit e Push do progresso persistido
+        if: success()
+        shell: powershell
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add dados_alunos.json dados_universo_cgd.json
+          foreach ($f in @('dados_reposicoes.json','dados_dashboard_cgd.json','dados_pacotes_cursos.json','dados_frequencias_a_registrar.json')) {
+            if (Test-Path $f) { git add $f }
+          }
+          if (git diff --cached --quiet) {
+            Write-Host 'Nenhuma alteração nos dados sincronizados.'
+          } else {
+            git commit -m 'Auto-update: progresso incremental CGD persistido'
+            $published = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Write-Host "=== PUBLICAÇÃO CGD: tentativa $attempt/3 ==="
+              git fetch origin main
+              if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar referência remota antes da publicação.' }
+              git rebase origin/main
+              if ($LASTEXITCODE -ne 0) {
+                git rebase --abort
+                throw 'Falha ao integrar alterações remotas antes da publicação; dados não foram sobrescritos.'
+              }
+              git push origin HEAD:main
+              if ($LASTEXITCODE -eq 0) {
+                $published = $true
+                Write-Host 'PUBLICAÇÃO CGD: OK'
+                break
+              }
+              if ($attempt -lt 3) {
+                Write-Warning 'Push rejeitado por avanço remoto; nova tentativa após atualização.'
+                Start-Sleep -Seconds 5
+              }
+            }
+            if (-not $published) { throw 'Falha definitiva na publicação após 3 tentativas.' }
+          }
