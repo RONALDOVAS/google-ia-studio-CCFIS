@@ -159,9 +159,14 @@ jobs:
                   if not row:
                       continue
                   missing = [key for key in ('nome', 'curso', 'data_inicio') if not str(row.get(key) or '').strip()]
-                  print(f'PREFLIGHT_REGISTRO unidade={unit} contrato={cid} curso={bool(row.get("curso"))} data_inicio={bool(row.get("data_inicio"))} disciplinas={len(row.get("disciplinas") or [])}')
+                  routes = row.get('rotas_cgd_status') or {}
+                  expected_routes = ('contrato', 'disciplinas', 'horarios', 'frequencia')
+                  missing_routes = [route for route in expected_routes if routes.get(route) is not True]
+                  print(f'PREFLIGHT_REGISTRO unidade={unit} contrato={cid} curso={bool(row.get("curso"))} data_inicio={bool(row.get("data_inicio"))} disciplinas={len(row.get("disciplinas") or [])} rotas={routes} frequencia_status={row.get("frequencia_status")}')
                   if missing:
                       errors.append((unit, cid, 'campos_estruturados_ausentes', missing))
+                  if not row.get('detalhamento_completo') or missing_routes:
+                      errors.append((unit, cid, 'rotas_detalhe_incompletas', missing_routes, routes))
           print(f'PREFLIGHT_ERROS_ESTRUTURADOS={len(errors)}')
           if errors:
               raise SystemExit(f'Preflight reprovado antes do Supabase: {errors[:10]}')
