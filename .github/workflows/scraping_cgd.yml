@@ -20,6 +20,16 @@ jobs:
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
+      - name: Confirmar branch e commit da execução manual
+        if: github.event_name == 'workflow_dispatch'
+        shell: powershell
+        run: |
+          Write-Host "GITHUB_REF=$env:GITHUB_REF"
+          Write-Host "GITHUB_SHA=$env:GITHUB_SHA"
+          if ($env:GITHUB_REF -ne 'refs/heads/fix/cgd-scraper-integrador-cirurgico') {
+            Write-Error 'EXECUÇÃO MANUAL BLOQUEADA: selecione a branch fix/cgd-scraper-integrador-cirurgico no GitHub Actions.'
+            exit 1
+          }
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
