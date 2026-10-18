@@ -206,7 +206,7 @@ jobs:
                   print(f'PREFLIGHT_FREQUENCIA unidade={unit} contrato={cid} status={status} registros={len(raw)} classificaveis={len(valid)}')
                   if status == 'COM_FREQUENCIA_REAL' and not valid:
                       errors.append((unit, cid, 'status_com_frequencia_sem_registros_classificaveis'))
-                  elif status == 'SEM_FREQUENCIA_A_INVESTIGAR' and raw:
+                  elif status == 'SEM_FREQUENCIA_A_INVESTIGAR' and valid:
                       errors.append((unit, cid, 'status_sem_frequencia_com_registros'))
                   elif status not in ('COM_FREQUENCIA_REAL', 'SEM_FREQUENCIA_A_INVESTIGAR'):
                       errors.append((unit, cid, 'status_frequencia_invalido', status))
