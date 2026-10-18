@@ -336,76 +336,78 @@ def refresh_frequency(session, cid):
     return freq, final, bool(_body(html) or _tables(html))
 
 def contract_bundle_http(session, cid, unidade, reps):
-    # Evita carregar respostas JSON de contratos anteriores na sessão persistente.
+    """Detalhamento HTTP sem descoberta/crawl de rotas por contrato."""
     session._cgd_json_payloads = []
-    cu=scraper.contract_url(cid)
-    final_contract, contract_html=_get(session,cu)
-    ctext=_body(contract_html)
-    name=_name(contract_html) or f"Contrato {cid}"
-    sid=_student_id(contract_html)
-    rows=[]; course_text=""; course_html=""; schedule_text=""; schedule_html=""; st=""
-    freq={"faltas":0,"presencas":0,"registros":[]}
-    snapshots=[]; status={"contrato":bool(ctext),"disciplinas":False,"horarios":False,"frequencia":False}
+    cu = scraper.contract_url(cid)
+    final_contract, contract_html = _get(session, cu)
+    ctext = _body(contract_html)
+    name = _name(contract_html) or f"Contrato {cid}"
+    sid = _student_id(contract_html)
 
-    known=(
-        ("disciplinas", scraper.child_url(cid,"cursos")),
-        ("horarios", scraper.child_url(cid,"horarios")),
-        ("frequencia", scraper.child_url(cid,"frequencias")),
+    rows = []
+    course_html = ""
+    turmas_html = ""
+    freq = {"faltas": 0, "presencas": 0, "registros": []}
+    snapshots = []
+    status = {"contrato": bool(ctext), "disciplinas": False, "turmas": False, "frequencia": False}
+    snapshots.append(_snapshot("contrato", final_contract, contract_html))
+
+    # Rotas permitidas: cursos, turmas e frequência. Nenhum link descoberto
+    # nem rota administrativa/global é visitado por contrato.
+    known = (
+        ("disciplinas", scraper.child_url(cid, "cursos")),
+        ("turmas", scraper.child_url(cid, "turmas")),
+        ("frequencia", scraper.child_url(cid, "frequencias")),
     )
-    for kind,url in known:
-        final,html=_get(session,url)
-        snap=_snapshot(kind,final,html)
+    for kind, url in known:
+        final, html = _get(session, url)
+        snap = _snapshot(kind, final, html)
         snapshots.append(snap)
-        # Acessar um shell JS com "Carregando..." não comprova que a rota carregou.
         body_text = low(snap["texto_corpo"])
-        valid = bool((snap["tabelas"] or snap["texto_corpo"]) and "carregando..." not in body_text)
-        status[kind]=valid
-        if kind=="disciplinas":
-            course_text=snap["texto_corpo"][:30000]
-            course_html=html
-            rows.extend(_disciplines(html,url))
-            name=name if name != f"Contrato {cid}" else (_name(html) or name)
-        elif kind=="horarios":
-            schedule_text=snap["texto_corpo"][:30000]
-            schedule_html=html
-            st=schedule_text[:20000]
-            name=name if name != f"Contrato {cid}" else (_name(html) or name)
-        else:
-            freq=_frequency(html)
-            name=name if name != f"Contrato {cid}" else (_name(html) or name)
+        status[kind] = bool((snap["tabelas"] or snap["texto_corpo"]) and "carregando..." not in body_text)
+        if kind == "disciplinas":
+            course_html = html
+            rows.extend(_disciplines(html, url))
+        elif kind == "turmas":
+            turmas_html = html
+        elif kind == "frequencia":
+            freq = _frequency(html)
+        if name == f"Contrato {cid}":
+            name = _name(html) or name
 
     if not sid:
-        sid=_student_id(" ".join(x["texto_corpo"] for x in snapshots))
-    aluno_html=""
-    if sid:
-        final,aluno_html=_get(session,f"{scraper.CGD_URL.rstrip('/')}/alunos/{sid}/edit")
-        name=_name(aluno_html) or name
+        sid = _student_id(" ".join(x["texto_corpo"] for x in snapshots))
 
-    rows,done,cur,fut=_classify(rows)
-    # Passar HTML original: ctext/course_text/schedule_text são texto achatado e
-    # impediam _structured_fields e _embedded_json de lerem DOM e JSON embutido.
+    rows, done, cur, fut = _classify(rows)
+    # /contratos/turmas/{cid} é a fonte definida para curso/turma/professor.
+    # Não abrimos /alunos/{id}/edit nem outras rotas: escopo fechado.
     domain = _domain_fields(
-        contract_html, course_html, schedule_html, aluno_html,
+        contract_html, course_html, turmas_html, "",
         cid=cid, sid=sid, payloads=getattr(session, "_cgd_json_payloads", [])
     )
-    def num(r,k):
-        m=re.search(r"\d+",str(r.get(k) or ""))
-        return int(m.group()) if m else -1
-    point=max(cur,key=lambda r:(num(r,"modulo"),num(r,"passo"),num(r,"progresso"))) if cur else None
+
+    def num(item, key):
+        match = re.search(r"\d+", str(item.get(key) or ""))
+        return int(match.group()) if match else -1
+
+    point = max(cur, key=lambda item: (num(item, "modulo"), num(item, "passo"), num(item, "progresso"))) if cur else None
+    freq_status = "COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR"
     return {
-        "cgd_matricula_id":cid,"nome":name,"contrato":cid,"email":None,"telefone":None,
-        "curso":domain["curso"],"turma":domain["turma"],"professor":domain["professor"],"status_matricula":domain.get("status_matricula"),"data_matricula":domain["data_matricula"],"data_inicio":domain["data_inicio"],
-        "data_fim":domain["data_fim"],"meses_contrato_total":domain["meses_contrato_total"],"unidade":unidade,"faltas":freq["faltas"],"presencas":freq["presencas"],
-        "ultimo_acesso":None,"criticidade":None,"dias_desde_ultimo_acesso":None,"status":"ATIVO",
-        "cgd_url":cu,"disciplinas":rows,"disciplinas_concluidas":done,
-        "disciplinas_em_andamento":cur,"disciplinas_futuras":fut,"progresso_atual":point,
-        "horarios":st,"aluno_raw":aluno_html[:25000],"frequencia_raw":freq["registros"],
-        "frequencia_status":"COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR",
-        "rotas_cgd":snapshots,"rotas_cgd_descobertas":[
-            {"texto":k,"url":u,"rota":k,"origem":"rota_conhecida"} for k,u in known
-        ],
-        "rotas_cgd_status":status,"detalhamento_completo":all(status.values()),
-        "reposicoes":[r for r in reps if scraper.belongs(r,cid,sid,name)],
-        "capturado_em":datetime.now(timezone.utc).isoformat(),
-        "detalhamento_modo":"http_autenticado",
+        "cgd_matricula_id": cid, "nome": name, "contrato": cid,
+        "email": None, "telefone": None,
+        "curso": domain["curso"], "turma": domain["turma"], "professor": domain["professor"],
+        "status_matricula": domain.get("status_matricula"),
+        "data_matricula": domain["data_matricula"], "data_inicio": domain["data_inicio"],
+        "data_fim": domain["data_fim"], "meses_contrato_total": domain["meses_contrato_total"],
+        "unidade": unidade, "faltas": freq["faltas"], "presencas": freq["presencas"],
+        "ultimo_acesso": None, "criticidade": None, "dias_desde_ultimo_acesso": None,
+        "status": "ATIVO", "cgd_url": cu, "disciplinas": rows,
+        "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
+        "progresso_atual": point, "horarios": "", "aluno_raw": "",
+        "frequencia_raw": freq["registros"], "frequencia_status": freq_status,
+        "rotas_cgd": snapshots, "rotas_cgd_descobertas": [],
+        "rotas_cgd_status": status, "detalhamento_completo": all(status.values()),
+        "reposicoes": [r for r in reps if scraper.belongs(r, cid, sid, name)],
+        "capturado_em": datetime.now(timezone.utc).isoformat(),
+        "detalhamento_modo": "http_autenticado",
     }
