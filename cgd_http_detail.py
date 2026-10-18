@@ -386,6 +386,22 @@ def contract_bundle_http(session, cid, unidade, reps):
         cid=cid, sid=sid, payloads=getattr(session, "_cgd_json_payloads", [])
     )
 
+    # Fallbacks explícitos para não confundir ausência de dado com falha de rota.
+    package_text = " ".join(
+        _body(source) for source in (contract_html, course_html, turmas_html) if source
+    )
+    package_name = _label_value(
+        package_text, ("Nome do pacote", "Pacote contratado", "Pacote")
+    )
+    domain["curso"] = domain.get("curso") or package_name or "CURSO PROFISSIONALIZANTE"
+    domain["turma"] = domain.get("turma") or "SEM TURMA"
+    domain["professor"] = domain.get("professor") or "NÃO ALOCADO"
+    domain["data_inicio"] = (
+        domain.get("data_inicio")
+        or domain.get("data_matricula")
+        or datetime.now().date().isoformat()
+    )
+
     def num(item, key):
         match = re.search(r"\d+", str(item.get(key) or ""))
         return int(match.group()) if match else -1
