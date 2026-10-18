@@ -183,7 +183,7 @@ jobs:
               if not isinstance(record, dict):
                   return None
               c = str(record.get('classificacao') or '').strip().lower()
-              if c in ('presenca', 'falta'):
+              if c in ('presenca', 'falta', 'reposicao', 'reposicao_faltou'):
                   return c
               status = str(record.get('status') or '').strip().lower().replace('ç', 'c').replace('ã', 'a')
               if 'faltou' in status or 'ausente' in status or 'nao compareceu' in status:
@@ -202,7 +202,7 @@ jobs:
                   status = str(row.get('frequencia_status') or '').strip()
                   raw = row.get('frequencia_raw') or []
                   classified = [classify(r) for r in raw]
-                  valid = [x for x in classified if x in ('presenca', 'falta')]
+                  valid = [x for x in classified if x in ('presenca', 'falta', 'reposicao', 'reposicao_faltou')]
                   print(f'PREFLIGHT_FREQUENCIA unidade={unit} contrato={cid} status={status} registros={len(raw)} classificaveis={len(valid)}')
                   if status == 'COM_FREQUENCIA_REAL' and not valid:
                       errors.append((unit, cid, 'status_com_frequencia_sem_registros_classificaveis'))
