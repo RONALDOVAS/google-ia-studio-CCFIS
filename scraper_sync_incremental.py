@@ -489,6 +489,8 @@ def main():
                     consecutive_failures = 0
                     consecutive_connection_failures = 0
                     last_connection_error = None
+                    consecutive_detail_failures = 0
+                    last_detail_error = None
                     last_checkpoint_at = perf_counter()
                     last_checkpoint_captured = 0
                     http_session = cgd_http_detail.session_from_page(page)
@@ -516,9 +518,13 @@ def main():
                             consecutive_failures = 0
                             consecutive_connection_failures = 0
                             last_connection_error = None
+                            consecutive_detail_failures = 0
+                            last_detail_error = None
                             print(f"[{unidade}] DETALHE_OK {idx}/{len(priority_targets)} cid={cid} modo={aluno.get('detalhamento_modo')}", flush=True)
                         except Exception as exc:
                             detail_errors.append((cid, repr(exc)))
+                            consecutive_detail_failures += 1
+                            last_detail_error = repr(exc)
                             reason = _failure_reason(exc)
                             if reason == consecutive_reason:
                                 consecutive_failures += 1
@@ -551,15 +557,15 @@ def main():
                             )
                             last_checkpoint_at = now_perf
                             last_checkpoint_captured = captured
-                        if consecutive_connection_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                        if consecutive_detail_failures >= CIRCUIT_BREAKER_THRESHOLD:
                             _flush_incremental_checkpoint(
                                 by_id, snapshot, pending_frequency, unidade, contracts, signatures,
                                 captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
                             )
                             raise CircuitBreakerError(
                                 f"[{unidade}] CIRCUIT_BREAKER_ABERTO: "
-                                f"{consecutive_connection_failures} contratos consecutivos falharam por "
-                                f"conexão/sessão; última_falha={last_connection_error}; "
+                                f"{consecutive_detail_failures} falhas consecutivas no detalhamento; "
+                                f"última_falha={last_detail_error}; motivo_repetido={consecutive_reason}; "
                                 "progresso acumulado salvo atomicamente."
                             )
                     dynamic_consecutive_reason = None
