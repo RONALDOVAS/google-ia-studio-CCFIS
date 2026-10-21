@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -51,7 +52,17 @@ LISTING_TIMEOUT = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
 DETAIL_INTERVAL_MS = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "50")))
 DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
 PENDING_FREQUENCY_PATH = PROJECT_ROOT / "dados_frequencias_a_registrar.json"
-HEADLESS = os.getenv("CGD_HEADLESS", "false").lower() in ("1", "true", "yes", "sim")
+HEADLESS = True
+ENABLE_BROWSER_FALLBACK = os.getenv("CGD_ENABLE_BROWSER_FALLBACK", "false").lower() in ("1", "true", "yes", "sim")
+SAMPLE_TEST = os.getenv("CGD_SAMPLE_TEST", "0").lower() in ("1", "true", "yes", "sim")
+SAMPLE_LIMIT = 0
+if SAMPLE_TEST:
+    SAMPLE_LIMIT = int(os.getenv("CGD_LIMIT_CONTRATOS", "2"))
+    if SAMPLE_LIMIT != 2:
+        raise RuntimeError(f"Preflight exige exatamente 2 contratos por unidade; CGD_LIMIT_CONTRATOS={SAMPLE_LIMIT}")
+CHECKPOINT_EVERY_CONTRACTS = max(1, int(os.getenv("CGD_CHECKPOINT_EVERY_CONTRACTS", "10")))
+CHECKPOINT_INTERVAL_SECONDS = max(10, int(os.getenv("CGD_CHECKPOINT_INTERVAL_SECONDS", "60")))
+CIRCUIT_BREAKER_THRESHOLD = 5  # cinco falhas consecutivas de conexão/sessão interrompem o lote
 SOURCE = "https://app.cgd.com.br/alunos"
 CF_MARKERS = ("sorry, you have been blocked", "you have been blocked", "just a moment", "checking your browser", "cf-chl-", "challenge-platform")
 
@@ -109,6 +120,25 @@ def discover_universe(page, unidade):
     first_ids = extract_ids(first_html)
     if not first_ids:
         raise RuntimeError(f"[{unidade}] primeira pagina sem contratos")
+
+    # Preflight restrito: não varrer centenas de páginas para testar quatro contratos.
+    # A amostra vem de contratos reais visíveis na primeira página autenticada.
+    if SAMPLE_TEST:
+        selected_ids = sorted(first_ids)[:SAMPLE_LIMIT]
+        if len(selected_ids) != SAMPLE_LIMIT:
+            raise RuntimeError(
+                f"[{unidade}] PREFLIGHT_AMOSTRA_INSUFICIENTE "
+                f"esperados={SAMPLE_LIMIT} encontrados_primeira_pagina={len(selected_ids)}"
+            )
+        selected = {cid: scraper.contract_url(cid) for cid in selected_ids}
+        signatures = {cid: listing_signature(first_html, cid) for cid in selected_ids}
+        elapsed = perf_counter() - started
+        print(
+            f"[{unidade}] PREFLIGHT_UNIVERSO_RESTRITO={len(selected)} "
+            f"ids={selected_ids} paginas=1 TEMPO_DESCOBERTA={elapsed:.2f}s",
+            flush=True,
+        )
+        return selected, signatures, 0, elapsed
 
     session = scraper_runner._session_from_page(page)
     cookies = {c.name: c.value for c in session.cookies}
@@ -174,9 +204,101 @@ def key(aluno):
 
 
 def atomic_write(path, value):
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp.replace(path)
+    """Write JSON atomically so abrupt termination cannot corrupt the target."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=str(path.parent),
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as handle:
+            temp_name = handle.name
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if temp_name and os.path.exists(temp_name):
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+
+
+class CircuitBreakerError(RuntimeError):
+    """Raised when repeated contract failures show that the batch cannot progress."""
+
+
+def _flush_incremental_checkpoint(by_id, snapshot, pending_frequency, unidade,
+                                 contracts, signatures, captured_ids, detail_errors,
+                                 planned_count):
+    merged = list(by_id.values())
+    merged.sort(key=lambda aluno: (str(aluno.get("unidade") or ""), key(aluno)))
+    unit_info = snapshot.setdefault("unidades", {}).setdefault(unidade, {})
+    confirmed = {
+        cid: by_id[(unidade, cid)].get("assinatura_universo_cgd")
+        for cid in contracts
+        if by_id.get((unidade, cid))
+        and by_id[(unidade, cid)].get("assinatura_universo_cgd")
+    }
+    unit_info.update({
+        "total": len(contracts),
+        "contratos_detectados": dict(signatures),
+        "contratos": confirmed,
+        "lote_planejado": planned_count,
+        "capturados_no_lote": len(captured_ids),
+        "contratos_capturados_no_lote": sorted(set(captured_ids)),
+        "erros_detalhe": len(detail_errors),
+        "detalhe_erros": [
+            {"contrato": cid, "erro": err} for cid, err in detail_errors[-100:]
+        ],
+        "checkpoint_em": datetime.now(timezone.utc).isoformat(),
+    })
+    if SAMPLE_TEST:
+        snapshot.setdefault("sample_test_contracts", {})[unidade] = sorted(set(captured_ids))
+    atomic_write(DATA_PATH, merged)
+    atomic_write(SNAPSHOT_PATH, snapshot)
+    atomic_write(PENDING_FREQUENCY_PATH, {
+        "source": "CGD", "unidades": pending_frequency,
+        "capturado_em": datetime.now(timezone.utc).isoformat(),
+    })
+    print(
+        f"[{unidade}] CHECKPOINT_INCREMENTAL=OK base={len(merged)} "
+        f"contratos_confirmados={len(confirmed)} capturados_lote={len(captured_ids)} "
+        f"erros={len(detail_errors)}",
+        flush=True,
+    )
+
+
+def _failure_reason(exc):
+    message = str(exc)
+    match = re.search(
+        r"(CAMPOS_DOMINIO_NAO_CAPTURADOS|HTTP_CLOUDFLARE_OU_BLOQUEIO|"
+        r"DETALHE_INVALIDO_CLOUDFLARE|ROTAS_CGD_INCOMPLETAS|"
+        r"DETALHAMENTO_NAO_COMPLETO|NOME_REAL_NAO_IDENTIFICADO|"
+        r"FREQUENCIA_NAO_PROCESSADA)",
+        message,
+    )
+    if match:
+        return match.group(1)
+    return f"{type(exc).__name__}:{message.split(' cid=')[0][:120]}"
+
+
+def _is_connection_session_error(exc):
+    """Identifica falhas transitórias de transporte/autenticação para o circuit breaker."""
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+    message = str(exc).lower()
+    markers = (
+        "connectionerror", "connection error", "connection reset",
+        "connection aborted", "connect timeout", "read timeout",
+        "timed out", "max retries exceeded", "remote end closed",
+        "name resolution", "temporary failure in name resolution",
+        "sessao redirecionada para login", "sessão redirecionada para login",
+        "sessao expirada", "sessão expirada", "unauthorized", "forbidden",
+        "http 401", "http 403",
+    )
+    return any(marker in message for marker in markers)
 
 
 def signature_changed(existing, current):
@@ -207,6 +329,13 @@ def detail(page, unidade, cid, reps, signature, http_session):
         aluno = scraper.validate_real_detail(aluno, cid, unidade)
         print(f"[{unidade}] DETALHE_HTTP_OK cid={cid}", flush=True)
     except Exception as http_exc:
+        if not ENABLE_BROWSER_FALLBACK:
+            print(
+                f"[{unidade}] DETALHE_HTTP_FALHOU_FALLBACK_DESATIVADO "
+                f"cid={cid}: {http_exc!r}",
+                flush=True,
+            )
+            raise
         print(f"[{unidade}] DETALHE_HTTP_FALLBACK_NAVEGADOR cid={cid}: {http_exc!r}", flush=True)
         aluno = scraper.contract_bundle(page, cid, unidade, reps)
         aluno = scraper.validate_real_detail(aluno, cid, unidade)
@@ -217,6 +346,15 @@ def detail(page, unidade, cid, reps, signature, http_session):
     aluno["sincronizado_em"] = now
     aluno["sincronizado_dinamico_em"] = now
     aluno["ultima_verificacao_cgd"] = now
+    print(
+        f"[{unidade}] CAMPOS_EXTRAIDOS cid={cid} "
+        f"curso={aluno.get('curso')!r} turma={aluno.get('turma')!r} "
+        f"professor={aluno.get('professor')!r} data_inicio={aluno.get('data_inicio')!r} "
+        f"data_matricula={aluno.get('data_matricula')!r} "
+        f"disciplinas={len(aluno.get('disciplinas') or [])} "
+        f"frequencia={aluno.get('frequencia_status')!r}",
+        flush=True,
+    )
     return aluno
 
 def refresh_dynamic(page, unidade, cid, aluno, http_session):
@@ -235,8 +373,18 @@ def refresh_dynamic(page, unidade, cid, aluno, http_session):
         aluno["ultima_verificacao_cgd"] = now
         return aluno
     except Exception as http_exc:
+        if not ENABLE_BROWSER_FALLBACK:
+            print(
+                f"[{unidade}] DINAMICO_HTTP_FALHOU_FALLBACK_DESATIVADO "
+                f"cid={cid}: {http_exc!r}",
+                flush=True,
+            )
+            raise
         print(f"[{unidade}] DINAMICO_HTTP_FALLBACK_NAVEGADOR cid={cid}: {http_exc!r}", flush=True)
         aluno2 = scraper.contract_bundle(page, cid, unidade, aluno.get("reposicoes") or [])
+        aluno2 = scraper.validate_real_detail(aluno2, cid, unidade)
+        # A assinatura antiga só é preservada depois que o novo detalhe passou
+        # pela validação; uma falha mantém o registro anterior intacto e retryable.
         aluno2["assinatura_universo_cgd"] = aluno.get("assinatura_universo_cgd")
         now = datetime.now(timezone.utc).isoformat()
         aluno2["sincronizado_dinamico_em"] = now
@@ -253,7 +401,11 @@ def main():
     print("750 e apenas teto de seguranca por unidade; nao e meta de processamento.", flush=True)
     print(f"Fila dinamica rotativa: {DYNAMIC_BATCH_PER_UNIT}/unidade a cada {DYNAMIC_REFRESH_HOURS:g}h.", flush=True)
     print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
-    print("OTIMIZACAO: detalhe HTTP autenticado; navegador apenas login/fallback.", flush=True)
+    print(
+        f"OTIMIZACAO: HTTP autenticado; fallback navegador={ENABLE_BROWSER_FALLBACK}; "
+        f"headless=True; modo_amostra={SAMPLE_TEST}.",
+        flush=True,
+    )
     print("=" * 96, flush=True)
 
     existing = load_json(DATA_PATH, [])
@@ -272,7 +424,7 @@ def main():
     pending_frequency = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
+        browser = pw.chromium.launch(headless=True)
         try:
             for unidade in ("matriz", "filial"):
                 unit_started = perf_counter()
@@ -281,12 +433,13 @@ def main():
                 page = context.new_page()
                 try:
                     scraper.login(page, cfg["usuario"], cfg["senha"], unidade)
-                    pending_frequency.append(capture_pending_frequency_route(page, unidade))
+                    if not SAMPLE_TEST:
+                        pending_frequency.append(capture_pending_frequency_route(page, unidade))
                     contracts, signatures, listing_errors, discovery_elapsed = discover_universe(page, unidade)
                     performance["discovery"][unidade] = discovery_elapsed
 
                     comparison_started = perf_counter()
-                    reps = scraper.get_replacements(page, unidade)
+                    reps = scraper.get_replacements(page, unidade) if not SAMPLE_TEST else []
                     current = {cid: by_id.get((unidade, cid)) for cid in contracts}
                     new_ids = [cid for cid in contracts if current[cid] is None]
                     changed_ids = [cid for cid in contracts if current[cid] is not None and signature_changed(current[cid], signatures[cid])]
@@ -337,29 +490,132 @@ def main():
                     captured = 0
                     detail_errors = []
                     captured_ids = []
+                    consecutive_reason = None
+                    consecutive_failures = 0
+                    consecutive_connection_failures = 0
+                    last_connection_error = None
+                    consecutive_detail_failures = 0
+                    last_detail_error = None
+                    last_checkpoint_at = perf_counter()
+                    last_checkpoint_captured = 0
                     http_session = cgd_http_detail.session_from_page(page)
-                    priority_targets = priority[:BATCH_PER_UNIT]
-                    dynamic_targets = [cid for cid in dynamic_candidates if cid not in set(priority_targets)][:max(0, min(DYNAMIC_BATCH_PER_UNIT, BATCH_PER_UNIT - len(priority_targets)))]
+                    if SAMPLE_TEST:
+                        priority_targets = list(contracts)[:SAMPLE_LIMIT]
+                        dynamic_targets = []
+                        print(f"[{unidade}] MODO_AMOSTRA=ATIVO limite={SAMPLE_LIMIT} contratos={priority_targets}", flush=True)
+                    else:
+                        priority_targets = priority[:BATCH_PER_UNIT]
+                        dynamic_targets = [
+                            cid for cid in dynamic_candidates if cid not in set(priority_targets)
+                        ][:max(0, min(DYNAMIC_BATCH_PER_UNIT, BATCH_PER_UNIT - len(priority_targets)))]
                     print(f"[{unidade}] INICIO DETALHAMENTO: HTTP={len(priority_targets)} DINAMICOS_FREQUENCIA={len(dynamic_targets)}", flush=True)
+                    _flush_incremental_checkpoint(
+                        by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                        captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                    )
                     for idx, cid in enumerate(priority_targets, 1):
                         try:
                             aluno = detail(page, unidade, cid, reps, signatures[cid], http_session)
                             by_id[(unidade, cid)] = aluno
                             captured += 1
                             captured_ids.append(cid)
+                            consecutive_reason = None
+                            consecutive_failures = 0
+                            consecutive_connection_failures = 0
+                            last_connection_error = None
+                            consecutive_detail_failures = 0
+                            last_detail_error = None
                             print(f"[{unidade}] DETALHE_OK {idx}/{len(priority_targets)} cid={cid} modo={aluno.get('detalhamento_modo')}", flush=True)
                         except Exception as exc:
                             detail_errors.append((cid, repr(exc)))
-                            print(f"[{unidade}] DETALHE_ERRO cid={cid}: {exc!r}", flush=True)
+                            consecutive_detail_failures += 1
+                            last_detail_error = repr(exc)
+                            reason = _failure_reason(exc)
+                            if reason == consecutive_reason:
+                                consecutive_failures += 1
+                            else:
+                                consecutive_reason = reason
+                                consecutive_failures = 1
+                            if _is_connection_session_error(exc):
+                                consecutive_connection_failures += 1
+                                last_connection_error = repr(exc)
+                            else:
+                                consecutive_connection_failures = 0
+                                last_connection_error = None
+                            print(
+                                f"[{unidade}] DETALHE_ERRO cid={cid} motivo={reason} "
+                                f"sequencia_mesmo_motivo={consecutive_failures} "
+                                f"falhas_conexao_sessao={consecutive_connection_failures}/"
+                                f"{CIRCUIT_BREAKER_THRESHOLD}: {exc!r}",
+                                flush=True,
+                            )
                         print(f"[{unidade}] PROGRESSO DETALHAMENTO: {idx}/{len(priority_targets)} sucesso={captured} falhas={len(detail_errors)}", flush=True)
+                        now_perf = perf_counter()
+                        if (
+                            (captured - last_checkpoint_captured >= CHECKPOINT_EVERY_CONTRACTS)
+                            or now_perf - last_checkpoint_at >= CHECKPOINT_INTERVAL_SECONDS
+                            or idx == len(priority_targets)
+                        ):
+                            _flush_incremental_checkpoint(
+                                by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                                captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                            )
+                            last_checkpoint_at = now_perf
+                            last_checkpoint_captured = captured
+                        if consecutive_detail_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                            _flush_incremental_checkpoint(
+                                by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                                captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                            )
+                            raise CircuitBreakerError(
+                                f"[{unidade}] CIRCUIT_BREAKER_ABERTO: "
+                                f"{consecutive_detail_failures} falhas consecutivas no detalhamento; "
+                                f"última_falha={last_detail_error}; motivo_repetido={consecutive_reason}; "
+                                "progresso acumulado salvo atomicamente."
+                            )
+                    dynamic_consecutive_reason = None
+                    dynamic_consecutive_failures = 0
                     for idx, cid in enumerate(dynamic_targets, 1):
                         try:
                             aluno = by_id[(unidade, cid)]
                             by_id[(unidade, cid)] = refresh_dynamic(page, unidade, cid, aluno, http_session)
+                            dynamic_consecutive_reason = None
+                            dynamic_consecutive_failures = 0
                             print(f"[{unidade}] DINAMICO_OK {idx}/{len(dynamic_targets)} cid={cid}", flush=True)
                         except Exception as exc:
                             detail_errors.append((cid, repr(exc)))
-                            print(f"[{unidade}] DINAMICO_ERRO cid={cid}: {exc!r}", flush=True)
+                            reason = _failure_reason(exc)
+                            if reason == dynamic_consecutive_reason:
+                                dynamic_consecutive_failures += 1
+                            else:
+                                dynamic_consecutive_reason = reason
+                                dynamic_consecutive_failures = 1
+                            print(
+                                f"[{unidade}] DINAMICO_ERRO cid={cid} motivo={reason} "
+                                f"sequencia_mesmo_motivo={dynamic_consecutive_failures}: {exc!r}",
+                                flush=True,
+                            )
+                        now_perf = perf_counter()
+                        if (
+                            idx % CHECKPOINT_EVERY_CONTRACTS == 0
+                            or now_perf - last_checkpoint_at >= CHECKPOINT_INTERVAL_SECONDS
+                            or idx == len(dynamic_targets)
+                        ):
+                            _flush_incremental_checkpoint(
+                                by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                                captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                            )
+                            last_checkpoint_at = now_perf
+                        if dynamic_consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                            _flush_incremental_checkpoint(
+                                by_id, snapshot, pending_frequency, unidade, contracts, signatures,
+                                captured_ids, detail_errors, len(priority_targets) + len(dynamic_targets),
+                            )
+                            raise CircuitBreakerError(
+                                f"[{unidade}] CIRCUIT_BREAKER_ABERTO_DINAMICO "
+                                f"motivo={dynamic_consecutive_reason} "
+                                f"falhas_consecutivas={dynamic_consecutive_failures}; checkpoint salvo."
+                            )
                     detail_elapsed = perf_counter() - detail_started
                     performance["detail"][unidade] = detail_elapsed
                     print(
@@ -374,9 +630,19 @@ def main():
                         aluno["assinatura_universo_cgd"] = signatures[cid]
                         aluno["visto_no_cgd_em"] = now
 
+                    # O snapshot guarda apenas assinaturas já confirmadas na base.
+                    # Contratos novos/alterados que falharam na extração não avançam
+                    # o hash e serão redescobertos na próxima execução.
+                    confirmed_signatures = {
+                        cid: by_id[(unidade, cid)].get("assinatura_universo_cgd")
+                        for cid in contracts
+                        if by_id.get((unidade, cid))
+                        and by_id[(unidade, cid)].get("assinatura_universo_cgd")
+                    }
                     snapshot["unidades"][unidade] = {
                         "total": len(contracts),
-                        "contratos": {cid: signatures[cid] for cid in contracts},
+                        "contratos_detectados": dict(signatures),
+                        "contratos": confirmed_signatures,
                         "novos_detectados": len(new_ids),
                         "alterados_detectados": len(changed_ids),
                         "incompletos_para_retry": len(retry_ids),
@@ -389,7 +655,12 @@ def main():
                         "contratos_capturados_no_lote": sorted(captured_ids),
                         "erros_detalhe": len(detail_errors),
                         "paginas_com_erro": listing_errors,
-                        "pendentes_apos_lote": max(0, len(contracts) - sum(1 for cid in contracts if current[cid] is not None) - captured),
+                        "pendentes_apos_lote": sum(
+                            1 for cid in contracts
+                            if not by_id.get((unidade, cid))
+                            or by_id[(unidade, cid)].get("assinatura_universo_cgd") != signatures[cid]
+                            or not bool(by_id[(unidade, cid)].get("detalhamento_completo"))
+                        ),
                         "detalhe_erros": [{"contrato": cid, "erro": err} for cid, err in detail_errors[:100]],
                         "performance_s": {
                             "descoberta": round(discovery_elapsed, 2),
@@ -423,7 +694,7 @@ def main():
     base_counts = {}
     for unidade, info in snapshot["unidades"].items():
         base_unit = {key(a) for a in merged if str(a.get("unidade") or "").lower() == unidade and key(a)}
-        universe = set(info["contratos"])
+        universe = set((info.get("contratos_detectados") or info["contratos"]))
         pending += len(universe - base_unit)
         base_counts[unidade] = len(base_unit)
         print(f"[{unidade}] BASE_PRESERVADA={len(base_unit)} UNIVERSO={len(universe)} PENDENTES={len(universe - base_unit)}", flush=True)
