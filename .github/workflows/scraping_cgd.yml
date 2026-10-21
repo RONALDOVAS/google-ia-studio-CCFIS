@@ -94,7 +94,7 @@ jobs:
           CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
           CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
           CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
-          CGD_DIAGNOSTICO: '0'
+          CGD_DIAGNOSTICO: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
           PYTHONUNBUFFERED: '1'
         run: |
           Write-Host '=== CGD: SINCRONIZACAO DIFERENCIAL ==='
