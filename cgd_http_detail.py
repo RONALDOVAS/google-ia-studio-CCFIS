@@ -4,8 +4,11 @@ O navegador autentica a sessão. Depois, os detalhes acadêmicos obrigatórios
 são obtidos por HTTP e processados como HTML, sem renderizar cada rota.
 """
 import re
+import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+
+DETAIL_TIMEOUT_SECONDS = max(5, int(os.getenv("CGD_DETAIL_TIMEOUT_S", "20")))
 import requests
 from bs4 import BeautifulSoup
 
@@ -38,8 +41,9 @@ def session_from_page(page):
         s.headers["User-Agent"] = ua
     return s
 
-def _get(session, url, timeout=45):
-    r = session.get(url, timeout=timeout, allow_redirects=True)
+def _get(session, url, timeout=None):
+    effective_timeout = max(5, int(timeout or DETAIL_TIMEOUT_SECONDS))
+    r = session.get(url, timeout=effective_timeout, allow_redirects=True)
     path = urlparse(r.url).path.rstrip("/").lower()
     if "/login" == path or path.startswith("/login/"):
         raise RuntimeError(f"sessao redirecionada para login: {url}")
@@ -47,6 +51,16 @@ def _get(session, url, timeout=45):
     html = r.text
     if any(marker in html.lower() for marker in CF_MARKERS):
         raise RuntimeError(f"HTTP_CLOUDFLARE_OU_BLOQUEIO rota={url}")
+    content_type = (r.headers.get("content-type") or "").lower()
+    if "json" in content_type:
+        try:
+            payload = r.json()
+            if isinstance(payload, (dict, list)):
+                if not hasattr(session, "_cgd_json_payloads"):
+                    session._cgd_json_payloads = []
+                session._cgd_json_payloads.append({"url": r.url, "data": payload})
+        except Exception:
+            pass
     return r.url, html
 
 def _tables(html):
@@ -95,13 +109,29 @@ def _student_id(html):
     return m.group(1) if m else None
 
 def _label_value(text, labels):
+    """Extract a labeled value without swallowing the next field in flattened body text."""
     text = norm(text)
-    for label in labels:
-        m = re.search(rf"\b{re.escape(label)}\s*[:\-]\s*([^|;\n]{2,120})", text, re.I)
-        if m:
-            value = norm(m.group(1))
+    if not text:
+        return None
+    known_labels = (
+        "Curso contratado", "Curso do aluno", "Nome do curso", "Curso",
+        "Turma atual", "Turma do aluno", "Enturmacao", "Turma",
+        "Professor responsável", "Professor responsavel", "Professor titular", "Professor",
+        "Data de início do período letivo", "Data de inicio do periodo letivo", "Início do período letivo", "Inicio do periodo letivo",
+        "Data de início das aulas", "Data de inicio das aulas", "Início das aulas", "Inicio das aulas",
+        "Data de início do módulo", "Data de inicio do modulo", "Início do módulo", "Inicio do modulo", "Data de início", "Data de inicio", "Data inicio",
+        "Data de matrícula", "Data de matricula", "Matrícula em", "Matricula em", "Data de término", "Data de termino", "Término do contrato", "Termino do contrato",
+        "Data fim", "Data final", "Status da matrícula", "Status da matricula", "Situação da matrícula", "Situacao da matricula",
+        "Situação", "Situacao", "Status",
+    )
+    boundary = "|".join(re.escape(x) for x in sorted(set(known_labels), key=len, reverse=True))
+    for label in sorted(labels, key=len, reverse=True):
+        pattern = rf"(?<!\w){re.escape(label)}\s*[:\-]\s*(.*?)(?=\s+(?:{boundary})\s*[:\-]|[|;\n]|$)"
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = norm(match.group(1)).strip(" :-|;")
             if value:
-                return value
+                return value[:120]
     return None
 
 def _first_date(text, labels):
@@ -116,8 +146,90 @@ def _months_from_text(text):
     m = re.search(r"\b(\d{1,2})\s*mes(?:es)?\b", norm(text), re.I)
     return int(m.group(1)) if m else None
 
-def _domain_fields(contract_text, course_text, schedule_text, aluno_text):
+def _structured_fields(html):
+    """Extract domain fields from actual form controls and key/value table cells."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    aliases = {
+        "curso": ("curso", "curso do aluno", "curso contratado", "nome do curso"),
+        "turma": ("turma", "turma atual", "turma do aluno", "enturmacao"),
+        "professor": ("professor", "professor responsavel", "professor titular"),
+        "data_inicio": ("data de inicio", "inicio do periodo letivo", "inicio das aulas", "inicio do modulo", "data inicio"),
+        "data_matricula": ("data de matricula", "matricula em"),
+        "data_fim": ("data de termino", "termino do contrato", "data fim", "data final"),
+        "status_matricula": ("status", "situacao", "situacao da matricula", "status da matricula"),
+    }
+    out = {}
+    def field_for(label):
+        label = scraper._key_norm(label).replace("_", " ")
+        for field, names in aliases.items():
+            if any(label == name or label.startswith(name + " ") for name in names):
+                return field
+        return None
+    def save(label, value):
+        field = field_for(label)
+        value = norm(value)
+        if field and value and not out.get(field):
+            out[field] = value
+    def control_value(el):
+        if not el:
+            return ""
+        if el.name == "select":
+            option = el.select_one("option:checked") or el.select_one("option[selected]")
+            value = norm(option.get_text(" ", strip=True) if option else el.get("value"))
+        else:
+            value = norm(el.get("value") or el.get_text(" ", strip=True))
+        # Não trate placeholders de formulário como valores reais do CGD.
+        if scraper._key_norm(value).replace("_", " ") in {
+            "", "-", "--", "selecione", "selecione uma opcao", "escolha",
+            "escolha uma opcao", "selecione...", "nao informado", "nao definida",
+        }:
+            return ""
+        return value
+    for label in soup.select("label"):
+        text = label.get_text(" ", strip=True)
+        if not field_for(text):
+            continue
+        control = None
+        target_id = label.get("for")
+        if target_id:
+            control = soup.find(id=target_id)
+        if not control:
+            control = label.find_next(["input", "select", "textarea"])
+        save(text, control_value(control))
+    for el in soup.select("input,select,textarea"):
+        label = " ".join(str(el.get(k) or "") for k in ("aria-label", "placeholder", "name", "id"))
+        save(label, control_value(el))
+    for row in soup.select("tr"):
+        cells = row.find_all(["th", "td"], recursive=False)
+        if len(cells) >= 2:
+            save(cells[0].get_text(" ", strip=True), cells[1].get_text(" ", strip=True))
+    return out
+
+
+def _embedded_json(html):
+    payloads = []
+    soup = BeautifulSoup(html or "", "html.parser")
+    import json
+    for script in soup.select('script[type="application/json"],script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or script.get_text())
+            if isinstance(data, (dict, list)):
+                payloads.append({"url": "embedded-json", "data": data})
+        except Exception:
+            pass
+    return payloads
+
+
+def _domain_fields(contract_text, course_text, schedule_text, aluno_text, cid=None, sid=None, payloads=None):
     sources = [contract_text, course_text, schedule_text, aluno_text]
+    structured = {}
+    json_payloads = list(payloads or [])
+    for source in sources:
+        for field, value in _structured_fields(source).items():
+            if value and not structured.get(field):
+                structured[field] = value
+        json_payloads.extend(_embedded_json(source))
+    network = scraper._extract_json_domain_fields(json_payloads, cid, sid) if cid else {}
     def first(labels):
         for source in sources:
             value = _label_value(source, labels)
@@ -130,21 +242,29 @@ def _domain_fields(contract_text, course_text, schedule_text, aluno_text):
             if value:
                 return value
         return None
-    def first_months():
-        for source in sources:
-            value = _months_from_text(source)
-            if value:
-                return value
-        return None
-    return {
-        "curso": first(("Curso", "Curso do aluno", "Curso contratado")),
-        "turma": first(("Turma", "Turma atual", "Turma do aluno")),
-        "professor": first(("Professor", "Professor responsável", "Professor responsavel")),
-        "data_matricula": first_date(("Data de matrícula", "Data de matricula")),
-        "data_inicio": first_date(("Data de início", "Data de inicio", "Início", "Inicio")),
-        "data_fim": first_date(("Data de término", "Data de termino", "Término", "Termino", "Data fim")),
-        "meses_contrato_total": first_months(),
-    }
+    domain = {}
+    for field, labels in {
+        "curso": ("Curso", "Curso do aluno", "Curso contratado"),
+        "turma": ("Turma", "Turma atual", "Turma do aluno"),
+        "professor": ("Professor", "Professor responsável", "Professor responsavel"),
+        "data_inicio": ("Data de início", "Data de inicio", "Data de início do período letivo", "Data de inicio do periodo letivo", "Início do período letivo", "Inicio do periodo letivo", "Data de início das aulas", "Data de inicio das aulas", "Início das aulas", "Inicio das aulas", "Data de início do módulo", "Data de inicio do modulo", "Início do módulo", "Inicio do modulo"),
+        "data_matricula": ("Data de matrícula", "Data de matricula"),
+        "data_fim": ("Data de término", "Data de termino", "Término", "Termino", "Data fim", "Data final"),
+        "status_matricula": ("Status", "Situação", "Situacao da matrícula", "Status da matrícula"),
+    }.items():
+        value = network.get(field) or structured.get(field)
+        if not value:
+            value = first(labels)
+        if field.startswith("data_"):
+            value = scraper._parse_date_value(value or first_date(labels))
+        domain[field] = value
+    # Preserve the contract duration field consumed by contract_bundle_http.
+    domain["meses_contrato_total"] = next(
+        (months for source in sources if (months := _months_from_text(source)) is not None),
+        None,
+    )
+    evidence = " ".join([_body(x) for x in sources if x] + [str(domain.get("status_matricula") or "")])
+    return scraper._apply_assignment_fallback(domain, evidence)
 
 def _frequency(html):
     rec, faltas, pres = [], 0, 0
@@ -216,65 +336,94 @@ def refresh_frequency(session, cid):
     return freq, final, bool(_body(html) or _tables(html))
 
 def contract_bundle_http(session, cid, unidade, reps):
-    cu=scraper.contract_url(cid)
-    final_contract, contract_html=_get(session,cu)
-    ctext=_body(contract_html)
-    name=_name(contract_html) or f"Contrato {cid}"
-    sid=_student_id(contract_html)
-    rows=[]; course_text=""; schedule_text=""; st=""
-    freq={"faltas":0,"presencas":0,"registros":[]}
-    snapshots=[]; status={"contrato":bool(ctext),"disciplinas":False,"horarios":False,"frequencia":False}
+    """Detalhamento HTTP sem descoberta/crawl de rotas por contrato."""
+    session._cgd_json_payloads = []
+    cu = scraper.contract_url(cid)
+    final_contract, contract_html = _get(session, cu)
+    ctext = _body(contract_html)
+    name = _name(contract_html) or f"Contrato {cid}"
+    sid = _student_id(contract_html)
 
-    known=(
-        ("disciplinas", scraper.child_url(cid,"cursos")),
-        ("horarios", scraper.child_url(cid,"horarios")),
-        ("frequencia", scraper.child_url(cid,"frequencias")),
+    rows = []
+    course_html = ""
+    turmas_html = ""
+    freq = {"faltas": 0, "presencas": 0, "registros": []}
+    snapshots = []
+    status = {"contrato": bool(ctext), "disciplinas": False, "turmas": False, "frequencia": False}
+    snapshots.append(_snapshot("contrato", final_contract, contract_html))
+
+    # Rotas permitidas: cursos, turmas e frequência. Nenhum link descoberto
+    # nem rota administrativa/global é visitado por contrato.
+    known = (
+        ("disciplinas", scraper.child_url(cid, "cursos")),
+        ("turmas", scraper.child_url(cid, "turmas")),
+        ("frequencia", scraper.child_url(cid, "frequencias")),
     )
-    for kind,url in known:
-        final,html=_get(session,url)
-        snap=_snapshot(kind,final,html)
+    for kind, url in known:
+        final, html = _get(session, url)
+        snap = _snapshot(kind, final, html)
         snapshots.append(snap)
-        valid=bool(snap["tabelas"] or snap["texto_corpo"])
-        status[kind]=valid
-        if kind=="disciplinas":
-            course_text=snap["texto_corpo"][:30000]
-            rows.extend(_disciplines(html,url))
-            name=name if name != f"Contrato {cid}" else (_name(html) or name)
-        elif kind=="horarios":
-            schedule_text=snap["texto_corpo"][:30000]
-            st=schedule_text[:20000]
-            name=name if name != f"Contrato {cid}" else (_name(html) or name)
-        else:
-            freq=_frequency(html)
-            name=name if name != f"Contrato {cid}" else (_name(html) or name)
+        body_text = low(snap["texto_corpo"])
+        status[kind] = bool((snap["tabelas"] or snap["texto_corpo"]) and "carregando..." not in body_text)
+        if kind == "disciplinas":
+            course_html = html
+            rows.extend(_disciplines(html, url))
+        elif kind == "turmas":
+            turmas_html = html
+        elif kind == "frequencia":
+            freq = _frequency(html)
+        if name == f"Contrato {cid}":
+            name = _name(html) or name
 
     if not sid:
-        sid=_student_id(" ".join(x["texto_corpo"] for x in snapshots))
-    aluno_html=""
-    if sid:
-        final,aluno_html=_get(session,f"{scraper.CGD_URL.rstrip('/')}/alunos/{sid}/edit")
-        name=_name(aluno_html) or name
+        sid = _student_id(" ".join(x["texto_corpo"] for x in snapshots))
 
-    rows,done,cur,fut=_classify(rows)
-    domain = _domain_fields(ctext, course_text, schedule_text, aluno_html)
-    def num(r,k):
-        m=re.search(r"\d+",str(r.get(k) or ""))
-        return int(m.group()) if m else -1
-    point=max(cur,key=lambda r:(num(r,"modulo"),num(r,"passo"),num(r,"progresso"))) if cur else None
+    rows, done, cur, fut = _classify(rows)
+    # /contratos/turmas/{cid} é a fonte definida para curso/turma/professor.
+    # Não abrimos /alunos/{id}/edit nem outras rotas: escopo fechado.
+    domain = _domain_fields(
+        contract_html, course_html, turmas_html, "",
+        cid=cid, sid=sid, payloads=getattr(session, "_cgd_json_payloads", [])
+    )
+
+    # Fallbacks explícitos para não confundir ausência de dado com falha de rota.
+    package_text = " ".join(
+        _body(source) for source in (contract_html, course_html, turmas_html) if source
+    )
+    package_name = _label_value(
+        package_text, ("Nome do pacote", "Pacote contratado", "Pacote")
+    )
+    domain["curso"] = domain.get("curso") or package_name or "CURSO PROFISSIONALIZANTE"
+    domain["turma"] = domain.get("turma") or "SEM TURMA"
+    domain["professor"] = domain.get("professor") or "NÃO ALOCADO"
+    domain["data_inicio"] = (
+        domain.get("data_inicio")
+        or domain.get("data_matricula")
+        or datetime.now().date().isoformat()
+    )
+
+    def num(item, key):
+        match = re.search(r"\d+", str(item.get(key) or ""))
+        return int(match.group()) if match else -1
+
+    point = max(cur, key=lambda item: (num(item, "modulo"), num(item, "passo"), num(item, "progresso"))) if cur else None
+    freq_status = "COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR"
     return {
-        "cgd_matricula_id":cid,"nome":name,"contrato":cid,"email":None,"telefone":None,
-        "curso":domain["curso"],"turma":domain["turma"],"professor":domain["professor"],"data_matricula":domain["data_matricula"],"data_inicio":domain["data_inicio"],
-        "data_fim":domain["data_fim"],"meses_contrato_total":domain["meses_contrato_total"],"unidade":unidade,"faltas":freq["faltas"],"presencas":freq["presencas"],
-        "ultimo_acesso":None,"criticidade":None,"dias_desde_ultimo_acesso":None,"status":"ATIVO",
-        "cgd_url":cu,"disciplinas":rows,"disciplinas_concluidas":done,
-        "disciplinas_em_andamento":cur,"disciplinas_futuras":fut,"progresso_atual":point,
-        "horarios":st,"aluno_raw":aluno_html[:25000],"frequencia_raw":freq["registros"],
-        "frequencia_status":"COM_FREQUENCIA_REAL" if freq["registros"] else "SEM_FREQUENCIA_A_INVESTIGAR",
-        "rotas_cgd":snapshots,"rotas_cgd_descobertas":[
-            {"texto":k,"url":u,"rota":k,"origem":"rota_conhecida"} for k,u in known
-        ],
-        "rotas_cgd_status":status,"detalhamento_completo":all(status.values()),
-        "reposicoes":[r for r in reps if scraper.belongs(r,cid,sid,name)],
-        "capturado_em":datetime.now(timezone.utc).isoformat(),
-        "detalhamento_modo":"http_autenticado",
+        "cgd_matricula_id": cid, "nome": name, "contrato": cid,
+        "email": None, "telefone": None,
+        "curso": domain["curso"], "turma": domain["turma"], "professor": domain["professor"],
+        "status_matricula": domain.get("status_matricula"),
+        "data_matricula": domain["data_matricula"], "data_inicio": domain["data_inicio"],
+        "data_fim": domain["data_fim"], "meses_contrato_total": domain["meses_contrato_total"],
+        "unidade": unidade, "faltas": freq["faltas"], "presencas": freq["presencas"],
+        "ultimo_acesso": None, "criticidade": None, "dias_desde_ultimo_acesso": None,
+        "status": "ATIVO", "cgd_url": cu, "disciplinas": rows,
+        "disciplinas_concluidas": done, "disciplinas_em_andamento": cur, "disciplinas_futuras": fut,
+        "progresso_atual": point, "horarios": "", "aluno_raw": "",
+        "frequencia_raw": freq["registros"], "frequencia_status": freq_status,
+        "rotas_cgd": snapshots, "rotas_cgd_descobertas": [],
+        "rotas_cgd_status": status, "detalhamento_completo": all(status.values()),
+        "reposicoes": [r for r in reps if scraper.belongs(r, cid, sid, name)],
+        "capturado_em": datetime.now(timezone.utc).isoformat(),
+        "detalhamento_modo": "http_autenticado",
     }
