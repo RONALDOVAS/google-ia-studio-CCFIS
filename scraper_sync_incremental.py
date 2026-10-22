@@ -52,7 +52,7 @@ LISTING_TIMEOUT = max(5, int(os.getenv("CGD_LISTING_TIMEOUT_S", "30")))
 DETAIL_INTERVAL_MS = max(0, int(os.getenv("CGD_DETAIL_INTERVAL_MS", "50")))
 DETAIL_WORKERS = max(1, int(os.getenv("CGD_DETAIL_WORKERS", "4")))
 PENDING_FREQUENCY_PATH = PROJECT_ROOT / "dados_frequencias_a_registrar.json"
-HEADLESS = True
+HEADLESS = os.getenv("CGD_HEADLESS", "0").lower() in ("1", "true", "yes", "sim")
 ENABLE_BROWSER_FALLBACK = os.getenv("CGD_ENABLE_BROWSER_FALLBACK", "false").lower() in ("1", "true", "yes", "sim")
 SAMPLE_TEST = os.getenv("CGD_SAMPLE_TEST", "0").lower() in ("1", "true", "yes", "sim")
 SAMPLE_LIMIT = 0
@@ -403,7 +403,7 @@ def main():
     print("MEDICAO DE PERFORMANCE ATIVA — sem alterar o limite de 750.", flush=True)
     print(
         f"OTIMIZACAO: HTTP autenticado; fallback navegador={ENABLE_BROWSER_FALLBACK}; "
-        f"headless=True; modo_amostra={SAMPLE_TEST}.",
+        f"browser=msedge; headless={HEADLESS}; modo_amostra={SAMPLE_TEST}.",
         flush=True,
     )
     print("=" * 96, flush=True)
@@ -424,7 +424,7 @@ def main():
     pending_frequency = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+        browser = pw.chromium.launch(channel="msedge", headless=HEADLESS)
         try:
             for unidade in ("matriz", "filial"):
                 unit_started = perf_counter()
