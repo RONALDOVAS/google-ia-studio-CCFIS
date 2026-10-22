@@ -2,6 +2,15 @@ name: Sincronização Automática e Manual Scraping CGD
 
 on:
   workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Preflight seguro (4 contratos) ou sincronização incremental real'
+        required: true
+        type: choice
+        default: preflight
+        options:
+          - preflight
+          - incremental
 
 permissions:
   contents: write
@@ -15,10 +24,10 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 360
     env:
-      CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
-      CGD_LIMIT_CONTRATOS: ${{ github.event_name == 'workflow_dispatch' && '2' || '750' }}
+      CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '1' || '0' }}
+      CGD_LIMIT_CONTRATOS: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '2' || '750' }}
       CGD_ENABLE_BROWSER_FALLBACK: 'false'
-      CFIS_IMPORT_BATCH_SIZE: ${{ github.event_name == 'workflow_dispatch' && '10' || '500' }}
+      CFIS_IMPORT_BATCH_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '10' || '500' }}
     steps:
       - name: Baixar código do repositório
         uses: actions/checkout@v4
@@ -51,7 +60,7 @@ jobs:
           CGD_PASS_FILIAL: ${{ secrets.CGD_PASS_FILIAL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '1' || '0' }}
         run: |
           $required = @('CGD_LOGIN_URL','CGD_MATRIZ_URL','CGD_FILIAL_URL','CGD_USER_MATRIZ','CGD_PASS_MATRIZ','CGD_USER_FILIAL','CGD_PASS_FILIAL','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')
           foreach ($name in $required) {
@@ -88,13 +97,13 @@ jobs:
           CGD_PAGE_WAIT_MS: '100'
           CGD_HEADLESS: 'true'
           CGD_ENABLE_BROWSER_FALLBACK: 'false'
-          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '1' || '0' }}
           CGD_NULL_UNASSIGNED_FIELDS: 'false'
-          CGD_LIMIT_CONTRATOS: ${{ github.event_name == 'workflow_dispatch' && '2' || '750' }}
+          CGD_LIMIT_CONTRATOS: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '2' || '750' }}
           CGD_CHECKPOINT_EVERY_CONTRACTS: '10'
           CGD_CHECKPOINT_INTERVAL_SECONDS: '60'
           CGD_CIRCUIT_BREAKER_THRESHOLD: '5'
-          CGD_DIAGNOSTICO: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          CGD_DIAGNOSTICO: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '1' || '0' }}
           PYTHONUNBUFFERED: '1'
         run: |
           Write-Host '=== CGD: SINCRONIZACAO DIFERENCIAL ==='
@@ -106,7 +115,7 @@ jobs:
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python scraper_sync_incremental.py
       - name: Validar amostra real das duas unidades
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental'
         shell: powershell
         env:
           CGD_SAMPLE_TEST: '1'
@@ -124,7 +133,7 @@ jobs:
           print('PREFLIGHT_AMOSTRA_DUAS_UNIDADES=OK')
           '@ | python
       - name: Validar campos estruturados da amostra antes do Supabase
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental'
         shell: powershell
         run: |
           @'
@@ -164,7 +173,7 @@ jobs:
           print('PREFLIGHT_CAMPOS_ESTRUTURADOS=OK')
           '@ | python
       - name: Validar frequência da amostra
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental'
         shell: powershell
         run: |
           @'
@@ -217,14 +226,14 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          CFIS_IMPORT_BATCH_SIZE: ${{ github.event_name == 'workflow_dispatch' && '10' || '500' }}
-          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          CFIS_IMPORT_BATCH_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '10' || '500' }}
+          CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '1' || '0' }}
         run: |
           Write-Host '=== CFIS: INGESTAO INTEGRADA NO MESMO FLUXO ==='
           python ingest_dados_alunos_supabase.py
 
       - name: Validar frequências reais capturadas no lote
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || inputs.modo == 'incremental'
         shell: powershell
         run: |
           @'
@@ -287,7 +296,7 @@ jobs:
           print('VALIDACAO_FREQUENCIA_LOTE=OK')
           '@ | python
       - name: Validar lote persistido e avanço incremental
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || inputs.modo == 'incremental'
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_alunos.json')) { throw 'Falha: dados_alunos.json não foi gerado.' }
@@ -333,11 +342,11 @@ jobs:
           print('VALIDAÇÃO DO LOTE INCREMENTAL: OK')
           '@ | python
       - name: Gerar reposições reais a partir dos alunos capturados
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || inputs.modo == 'incremental'
         shell: powershell
         run: python build_reposicoes_from_alunos.py
       - name: Validar reposições capturadas
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || inputs.modo == 'incremental'
         shell: powershell
         run: |
           if (-not (Test-Path 'dados_reposicoes.json')) { Write-Warning 'dados_reposicoes.json não foi gerado nesta rodada.'; exit 0 }
