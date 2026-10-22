@@ -95,7 +95,7 @@ jobs:
           CGD_DETAIL_INTERVAL_MS: '50'
           CGD_DETAIL_WORKERS: '4'
           CGD_PAGE_WAIT_MS: '100'
-          CGD_HEADLESS: 'true'
+          CGD_HEADLESS: 'false'
           CGD_ENABLE_BROWSER_FALLBACK: 'false'
           CGD_SAMPLE_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.modo != 'incremental' && '1' || '0' }}
           CGD_NULL_UNASSIGNED_FIELDS: 'false'
