@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 # Portanto estas variaveis eliminam o limite artificial de 10.000 sem depender
 # de alteracao no workflow.
 os.environ["CGD_MAX_CONTRACTS"] = "50000"
-os.environ["CGD_HEADLESS"] = "true"
+# Respeita CGD_HEADLESS definido pelo workflow; não força modo headless.
 os.environ.setdefault("CGD_DETAIL_BATCH_PER_UNIT", "500")
 
 import requests
