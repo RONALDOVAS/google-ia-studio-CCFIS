@@ -418,7 +418,16 @@ def main():
         if cid:
             by_id[(str(aluno.get("unidade") or "").lower(), cid)] = aluno
 
-    snapshot = {"gerado_em": datetime.now(timezone.utc).isoformat(), "regra": "UNIVERSO_COMPLETO_LOTES_750_INCREMENTAL", "unidades": {}}
+    # Preserva o último snapshot válido da outra unidade caso a execução seja
+    # interrompida antes de chegar nela. Cada unidade é atualizada somente após
+    # descoberta/checkpoint, evitando apagar assinaturas históricas da Matriz/Filial.
+    snapshot = load_json(SNAPSHOT_PATH, {})
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("dados_universo_cgd.json precisa ser um objeto")
+    snapshot["gerado_em"] = datetime.now(timezone.utc).isoformat()
+    snapshot["regra"] = "UNIVERSO_COMPLETO_LOTES_750_INCREMENTAL"
+    if not isinstance(snapshot.get("unidades"), dict):
+        snapshot["unidades"] = {}
     totals = {"universo": 0, "novos": 0, "alterados": 0, "capturados": 0, "sem_mudanca": 0, "erros_detalhe": 0}
     performance = {"discovery": {}, "comparison": {}, "detail": {}, "persistence": 0.0, "total": 0.0}
     pending_frequency = []
