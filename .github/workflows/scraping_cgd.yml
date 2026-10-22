@@ -110,7 +110,7 @@ jobs:
           Write-Host '=== UNIVERSO COMPLETO + DETALHES SOMENTE QUANDO NECESSARIO ==='
           Write-Host '=== 750 E TETO DE SEGURANCA; NAO E META ==='
           Write-Host '=== NOVOS/ALTERADOS/INCOMPLETOS + FILA DINAMICA ROTATIVA ==='
-          Write-Host '=== CHROMIUM HEADLESS; FALLBACK DE NAVEGADOR DESATIVADO POR PADRAO ==='
+          Write-Host '=== EDGE INTERATIVO; FALLBACK DE NAVEGADOR DESATIVADO POR PADRAO ==='
           Write-Host "=== MODO AMOSTRA: $env:CGD_SAMPLE_TEST ==="
           python -c "import sitecustomize; print('PATCH_LOGIN_CGD_CARREGADO=OK')"
           python scraper_sync_incremental.py
@@ -368,8 +368,8 @@ jobs:
             dados_frequencias_a_registrar.json
           if-no-files-found: warn
           retention-days: 7
-      - name: Commit e Push do progresso persistido
-        if: success() && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || inputs.modo == 'incremental')
+      - name: Publicar checkpoints incrementais mesmo se a rodada for interrompida
+        if: always() && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || inputs.modo == 'incremental')
         shell: powershell
         run: |
           git config --global user.name 'github-actions[bot]'
