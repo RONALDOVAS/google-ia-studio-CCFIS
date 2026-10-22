@@ -6,6 +6,9 @@ on:
       - sitecustomize.py
       - scraper.py
       - .github/workflows/test_cgd_login.yml
+      - scraper_sync_incremental.py
+      - scraper_runner.py
+      - .github/workflows/scraping_cgd.yml
 jobs:
   login:
     runs-on: [self-hosted, Windows, X64]
