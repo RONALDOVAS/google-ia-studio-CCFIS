@@ -143,11 +143,11 @@ def normalize(raw):
 
     turma = text(raw.get("turma_nome"), raw.get("turma")) or _label_from_snapshots(raw, ("Turma", "Turma atual", "Turma do aluno"))
     if not turma:
-        turma = "SEM TURMA"
+        turma = ""
 
     professor = text(raw.get("professor_nome"), raw.get("professor")) or _label_from_snapshots(raw, ("Professor", "Professor responsável", "Professor responsavel"))
     if not professor:
-        professor = "NÃO ALOCADO"
+        professor = ""
 
     mes = text(raw.get("mes_referencia_faltas"), raw.get("mes_referencia"))
     if not mes:
